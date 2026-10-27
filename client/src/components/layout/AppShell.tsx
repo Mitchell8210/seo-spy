@@ -14,7 +14,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-dvh bg-slate-50" onKeyDown={(event) => {
+    <div className="min-h-dvh bg-canvas" onKeyDown={(event) => {
       if (event.key === 'Escape' && mobileOpen) {
         setMobileOpen(false)
         document.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation"]')?.focus()

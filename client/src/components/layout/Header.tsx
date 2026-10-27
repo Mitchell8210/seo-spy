@@ -1,4 +1,5 @@
 import { Menu, X } from 'lucide-react'
+import { SpyLogo } from '../common/SpyLogo'
 
 type HeaderProps = {
   mobileOpen: boolean
@@ -7,18 +8,18 @@ type HeaderProps = {
 
 export function Header({ mobileOpen, onToggleNavigation }: HeaderProps) {
   return (
-    <header className="flex h-20 items-center justify-between border-b border-slate-200 bg-white px-5 sm:px-8 lg:ml-64 lg:px-10">
-      <span className="text-xl font-bold tracking-tight text-slate-950 lg:hidden">
-        SEO <span className="text-blue-700">Spy</span>
+    <header className="flex h-20 items-center justify-between border-b border-line bg-shell px-5 sm:px-8 lg:ml-64 lg:px-10">
+      <span className="flex items-center gap-3 text-xl font-bold tracking-tight text-ink lg:hidden">
+        <SpyLogo /><span>SEO <span className="text-blue-400">Spy</span></span>
       </span>
-      <span className="hidden text-sm font-medium text-slate-600 lg:block">Business intelligence</span>
+      <span className="hidden text-sm font-medium text-secondary lg:block">Business intelligence</span>
       <button
         type="button"
         aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
         aria-expanded={mobileOpen}
         aria-controls="primary-navigation"
         onClick={onToggleNavigation}
-        className="flex size-11 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 lg:hidden"
+        className="flex size-11 items-center justify-center rounded-lg border border-line text-secondary hover:bg-canvas lg:hidden"
       >
         {mobileOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
       </button>
