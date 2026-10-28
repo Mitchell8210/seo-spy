@@ -68,7 +68,41 @@ web_modules/
 # dotenv environment variable files
 .env
 .env.*
+*.env
+*.env.*
+.envrc
+.envrc.*
 !.env.example
+
+# Local credential stores and authentication configuration
+.aws/
+.ssh/
+.azure/
+.gcloud/
+.secrets/
+.credentials/
+.npmrc
+.netrc
+_netrc
+.pypirc
+credentials.json
+service-account*.json
+service_account*.json
+
+# Private keys, certificates with private material, and keystores
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+
+# Generated audit snapshots may contain collected third-party data
+/server/reports/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
