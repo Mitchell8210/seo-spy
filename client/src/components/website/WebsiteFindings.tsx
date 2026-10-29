@@ -1,0 +1,134 @@
+import { useId, useRef, useState } from 'react'
+import { ArrowDown, ChevronDown, CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react'
+import type { AffectedPage, PassedCheck, WebsiteFinding, WebsiteRecommendation } from '../../types/website'
+import type { Severity } from '../../types/dashboard'
+import { findingStatuses } from '../../utils/findingStatus'
+import { StatusBadge } from '../common/StatusBadge'
+
+type BoardItem =
+  | { kind: 'issue'; finding: WebsiteFinding; pages: AffectedPage[]; recommendations: WebsiteRecommendation[] }
+  | { kind: 'check'; check: PassedCheck }
+
+const columns = [
+  { id: 'urgent', label: 'Urgent', description: 'Issues to address first.', severity: 'Critical', icon: TriangleAlert, accepts: ['Critical'] },
+  { id: 'medium', label: 'Medium', description: 'Improvements to plan next.', severity: 'Medium', icon: CircleAlert, accepts: ['Medium'] },
+  { id: 'low', label: 'Low', description: 'Smaller opportunities to refine.', severity: 'Low', icon: ArrowDown, accepts: ['Low'] },
+  { id: 'great', label: 'Great Condition', description: 'Healthy checks with supporting evidence.', severity: 'Passed', icon: CircleCheck, accepts: ['Passed', 'Verified'] },
+] satisfies { id: string; label: string; description: string; severity: Severity; icon: typeof CircleAlert; accepts: Severity[] }[]
+
+function BoardCard({ item }: { item: BoardItem }) {
+  const [expanded, setExpanded] = useState(false)
+  const [actionMessage, setActionMessage] = useState('')
+  const detailsId = useId()
+  const fixRef = useRef<HTMLHeadingElement>(null)
+  const isIssue = item.kind === 'issue'
+  const title = isIssue ? item.finding.title : item.check.title
+  const severity = isIssue ? item.finding.severity : item.check.status
+  const urls = isIssue ? item.pages.map((page) => page.url) : [item.check.url]
+  const disclosureLabel = expanded ? 'Hide Details' : isIssue ? 'Fix Now' : 'View Details'
+
+  return (
+    <li id={isIssue ? item.finding.id : `board-${item.check.id}`} className="min-w-0 scroll-mt-6 rounded-lg border border-line bg-surface p-4 shadow-sm">
+      <StatusBadge label={severity} tone={findingStatuses[severity].tone} />
+      <h4 className="mt-3 break-words text-sm font-semibold leading-6 text-ink">{title}</h4>
+      {isIssue && <>
+        <p className="mt-2 text-xs font-medium text-secondary">{item.finding.category}</p>
+        {urls.length > 0 && <p className="mt-2 break-all text-xs leading-5 text-muted"><span className="font-medium text-secondary">Page: </span>{urls[0]}{urls.length > 1 && <span className="block">+ {urls.length - 1} more affected {urls.length === 2 ? 'page' : 'pages'}</span>}</p>}
+      </>}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        aria-label={`${disclosureLabel}: ${title}${!expanded && isIssue ? ' — review remediation details' : ''}`}
+        onClick={() => setExpanded((open) => !open)}
+        className="mt-3 flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-line px-3 text-xs font-medium text-blue-300 hover:bg-elevated"
+      >
+        {disclosureLabel}
+        <ChevronDown size={15} aria-hidden="true" className={`shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      <div id={detailsId} hidden={!expanded} className="mt-4 space-y-4 border-t border-line pt-4 text-xs leading-6 text-secondary">
+        <div><h5 className="font-semibold text-ink">{isIssue ? 'What we found' : 'What was checked'}</h5><p className="mt-1">{title}</p></div>
+        <div><h5 className="font-semibold text-ink">Evidence</h5><p className="mt-1">{isIssue ? item.finding.evidence : item.check.evidence}</p><p className="mt-1 text-muted">Mock evidence · Not a live scan</p></div>
+        {isIssue && <div><h5 className="font-semibold text-ink">Why it matters</h5><p className="mt-1">{item.finding.explanation}</p></div>}
+        <div>
+          <h5 className="font-semibold text-ink">{isIssue ? 'Affected page(s)' : 'Relevant URL'}</h5>
+          <ul className="mt-1 space-y-2">{urls.map((url) => <li key={url} className="break-all text-blue-300">{url}</li>)}</ul>
+        </div>
+        {isIssue ? <>
+          <div>
+            <h5 ref={fixRef} tabIndex={-1} className="scroll-mt-6 rounded-sm font-semibold text-ink">Recommended fix</h5>
+            {item.recommendations.length > 0 ? <ul className="mt-1 space-y-3">{item.recommendations.map((recommendation) => <li key={recommendation.id} data-recommendation-id={recommendation.id}>{recommendation.action}</li>)}</ul> : <p className="mt-1 text-muted">No recommended fix is linked to this finding yet.</p>}
+            <p className="mt-2 text-muted">Priority: {item.finding.severity} · Suggested change · Not applied</p>
+          </div>
+          <div className="border-t border-line pt-4">
+            <h5 className="font-semibold text-ink">Available actions</h5>
+            <p className="mt-1 text-muted">Demo controls only. AI fixing is unavailable; no website changes will be made.</p>
+            <div className="mt-3 flex flex-col gap-2">
+              <button type="button" disabled className="min-h-11 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">Fix with AI</button>
+              <button type="button" disabled={item.recommendations.length === 0} onClick={() => {
+                fixRef.current?.focus()
+                fixRef.current?.scrollIntoView({ block: 'nearest' })
+                setActionMessage('The existing suggested fix is shown above. This demo does not apply changes.')
+              }} className="min-h-11 rounded-md border border-line px-3 py-2 font-medium text-blue-300 hover:bg-elevated disabled:cursor-not-allowed disabled:opacity-60">View Fix Steps</button>
+              <button type="button" onClick={() => setActionMessage('Selected for manual review in this view only. No website changes have been made.')} className="min-h-11 rounded-md border border-line px-3 py-2 font-medium text-secondary hover:bg-elevated">Review Manually</button>
+            </div>
+            <p role="status" className="mt-2 text-blue-300">{actionMessage}</p>
+          </div>
+        </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{item.check.status} in this mock analysis. No live verification was performed.</p></div>}
+        <dl className="space-y-1 border-t border-line pt-3 text-muted">
+          <div><dt className="inline font-medium text-secondary">Source: </dt><dd className="inline">{isIssue ? item.finding.source : 'Website'}</dd></div>
+          <div><dt className="inline font-medium text-secondary">Status: </dt><dd className="inline">{isIssue ? item.finding.status : item.check.status}</dd></div>
+        </dl>
+      </div>
+    </li>
+  )
+}
+
+type WebsiteFindingsProps = {
+  findings: WebsiteFinding[]
+  pages: AffectedPage[]
+  passedChecks: PassedCheck[]
+  passedTotal: number
+  recommendations: WebsiteRecommendation[]
+}
+
+export function WebsiteFindings({ findings, pages, passedChecks, recommendations }: WebsiteFindingsProps) {
+  const items: BoardItem[] = [
+    ...findings.map((finding): BoardItem => ({
+      kind: 'issue',
+      finding,
+      pages: pages.filter((page) => page.id === finding.pageId || page.findingIds.includes(finding.id)),
+      recommendations: recommendations.filter((recommendation) => recommendation.findingId === finding.id),
+    })),
+    ...passedChecks.map((check): BoardItem => ({ kind: 'check', check })),
+  ]
+  const unmapped = recommendations.filter((recommendation) => !findings.some((finding) => finding.id === recommendation.findingId))
+
+  return (
+    <section aria-labelledby="website-findings-title" className="min-w-0 rounded-xl border border-line bg-surface shadow-sm">
+      <div className="border-b border-line p-5 sm:px-6">
+        <h2 id="website-findings-title" className="text-lg font-semibold text-ink">SEO Spy Website Report</h2>
+        <p className="mt-1 text-xs leading-6 text-muted">Your website issues, verified checks, and recommended fixes organized by priority.</p>
+      </div>
+      <div className="grid grid-cols-1 items-start gap-4 p-4 md:grid-cols-2 xl:grid-cols-4 sm:p-5">
+        {columns.map((column) => {
+          const grouped = items.filter((item) => column.accepts.some((severity) => severity === (item.kind === 'issue' ? item.finding.severity : item.check.status)))
+          const Icon = column.icon
+          const color = findingStatuses[column.severity].icon
+          return (
+            <section key={column.id} aria-labelledby={`findings-${column.id}-title`} className="min-w-0 rounded-lg border border-line bg-elevated p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 id={`findings-${column.id}-title`} className={`flex min-w-0 items-center gap-2 text-sm font-semibold ${color}`}><Icon size={16} className="shrink-0" aria-hidden="true" />{column.label}</h3>
+                <span className={`shrink-0 text-sm font-semibold ${color}`} aria-label={`${grouped.length} items`}>{grouped.length}</span>
+              </div>
+              <p className="mb-4 text-xs leading-5 text-muted">{column.description}</p>
+              <ul className="space-y-3">{grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} />)}</ul>
+              {grouped.length === 0 && <p className="py-3 text-xs leading-6 text-muted">No items in this group.</p>}
+            </section>
+          )
+        })}
+      </div>
+      {unmapped.length > 0 && <div className="border-t border-line p-5 text-sm text-secondary"><h3 className="font-semibold text-ink">Recommendations awaiting a finding match</h3><p className="mt-1">These suggestions have not been attached to a finding.</p><ul className="mt-3 space-y-2">{unmapped.map((recommendation) => <li key={recommendation.id}>{recommendation.action}</li>)}</ul></div>}
+    </section>
+  )
+}
