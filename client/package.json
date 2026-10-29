@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:backend-lab": "vite --config vite.backend-lab.config.ts --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:backend-lab": "vite preview --config vite.backend-lab.config.ts --host 127.0.0.1",
+    "test:backend-lab": "node scripts/backend-lab-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.62.0",

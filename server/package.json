@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "check": "npm run typecheck && npm run lint && npm test && npm run build",
-    "audit:homepage": "npm run build && node scripts/audit-homepage.mjs"
+    "audit:homepage": "npm run build && node scripts/audit-homepage.mjs",
+    "audit:lighthouse": "npm run build && node scripts/audit-homepage.mjs --lighthouse"
   },
   "dependencies": {
     "@nestjs/common": "^12.3.2",

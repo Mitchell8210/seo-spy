@@ -11,6 +11,10 @@ import { AUDIT_REPOSITORY, type AuditRepository } from '../src/persistence/repos
 import type { Audit, Finding, Evidence, Recommendation } from '../src/contracts/domain.js';
 import { CollectionError, WebsiteCollector } from '../src/integrations/website/collector.js';
 import { buildHomepageReport } from '../src/reporting/homepage-report.js';
+import { PageSpeedService } from '../src/integrations/lighthouse/pagespeed.service.js';
+import { normalizeLighthouse } from '../src/integrations/lighthouse/normalize.js';
+import { PageSpeedError } from '../src/integrations/lighthouse/types.js';
+import { pageSpeedFixture } from './fixtures/pagespeed.js';
 
 describe('demo API', () => {
   let app: INestApplication;
@@ -35,13 +39,18 @@ describe('demo API', () => {
     expect(Object.keys(spec.body.paths).sort()).toEqual([
       '/api/health', '/api/businesses/{businessId}/dashboard', '/api/businesses/{businessId}/audits',
       '/api/audits/{auditId}', '/api/audits/{auditId}/findings', '/api/audits/{auditId}/recommendations',
+      '/api/audits/{auditId}/lighthouse',
     ].sort());
     const create = spec.body.paths['/api/businesses/{businessId}/audits'].post;
     expect(create.responses['202'].content['application/json'].schema.$ref).toBe('#/components/schemas/CreatedAuditDto');
     expect(create.responses['409'].content['application/json'].schema.$ref).toBe('#/components/schemas/ApiErrorDto');
     expect(create.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/CreateAuditDto');
     const schemas = spec.body.components.schemas;
-    expect(schemas.CreateAuditDto.properties.scope.enum).toEqual(['demo', 'homepage']);
+    expect(schemas.CreateAuditDto.properties.scope.enum).toEqual(['demo', 'homepage', 'lighthouse']);
+    expect(schemas.CreateAuditDto.properties.strategy.enum).toEqual(['mobile', 'desktop']);
+    expect(schemas.LighthouseResponseDto.properties.report.nullable).toBe(true);
+    expect(schemas.LighthouseReportDto.properties.provider.enum).toEqual(['google-pagespeed-insights']);
+    expect(schemas.DashboardDto.properties.lighthouse.nullable).toBe(true);
     expect(schemas.CreateAuditDto.required).toContain('scope');
     expect(schemas.DashboardDto.properties.business.$ref).toContain('BusinessDto');
     expect(schemas.FindingsResponseDto.properties.evidence.items.$ref).toContain('EvidenceDto');
@@ -187,6 +196,98 @@ describe('demo API', () => {
     const repository = app.get<AuditRepository>(AUDIT_REPOSITORY);
     await app.close();
     expect(await repository.findById(created.body.id as string)).toMatchObject({ status: 'failed', failure: { code: 'SERVER_STOPPING' } });
+  });
+
+  function mockHomepage() {
+    const body = Buffer.from('<meta charset="utf-8"><title>Taxes</title><h1>Taxes</h1>');
+    jest.spyOn(app.get(WebsiteCollector), 'collect').mockResolvedValue({
+      requestedUrl: 'https://guzmantaxaccounting.com/', finalUrl: 'https://www.guzmantaxaccounting.com/', status: 200,
+      contentType: 'text/html; charset=UTF-8', collectedAt: new Date().toISOString(), bytes: body.length,
+      redirects: ['https://www.guzmantaxaccounting.com/'], robots: '', body,
+    });
+  }
+
+  it.each(['mobile', 'desktop'] as const)('runs a %s Lighthouse audit with measured results, provenance, and linked evidence', async (strategy) => {
+    mockHomepage();
+    const fixture = pageSpeedFixture(); fixture.lighthouseResult.configSettings.formFactor = strategy;
+    const report = normalizeLighthouse(fixture, 'https://www.guzmantaxaccounting.com/', strategy);
+    let finish!: (value: typeof report) => void;
+    const run = jest.spyOn(app.get(PageSpeedService), 'run').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const created = await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'lighthouse', strategy }).expect(202);
+    expect(created.body).toMatchObject({ scope: 'lighthouse', strategy, mode: 'live', scoringVersion: 'lighthouse-v1' });
+    const pending = await request(app.getHttpServer()).get(created.body.statusUrl as string).expect(200);
+    expect(pending.body).toMatchObject({ stage: 'running_lighthouse', status: 'running' });
+    await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'homepage' }).expect(409);
+    expect(run.mock.calls[0]?.slice(0, 2)).toEqual(['https://www.guzmantaxaccounting.com/', strategy]);
+    const unavailable = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/lighthouse`).expect(200);
+    expect(unavailable.body.report).toBeNull();
+    finish(report);
+    const measured = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/lighthouse`).expect(200);
+    expect(measured.body).toMatchObject({ status: 'completed', failure: null, report: { provider: 'google-pagespeed-insights', strategy } });
+    const findings = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/findings`).expect(200);
+    const evidenceIds = new Set(findings.body.evidence.map((e: Evidence) => e.id));
+    findings.body.findings.forEach((finding: Finding) => finding.evidenceIds.forEach((id) => expect(evidenceIds.has(id)).toBe(true)));
+    expect(findings.body.findings.some((finding: Finding) => finding.checkId === 'lighthouse:image-alt')).toBe(true);
+    const dashboard = await request(app.getHttpServer()).get('/api/businesses/demo-guzman/dashboard').expect(200);
+    expect(dashboard.body.lighthouse.categories.map((category: { score: number }) => category.score)).toEqual([72, 91, 100, 0]);
+    expect(dashboard.body.scores.every((score: { value: number | null }) => score.value === null)).toBe(true);
+    expect(dashboard.body.notice).toContain('Lighthouse lab');
+    const status = await request(app.getHttpServer()).get(created.body.statusUrl as string).expect(200);
+    const recommendations = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/recommendations`).expect(200);
+    const snapshot = buildHomepageReport(status.body, findings.body, recommendations.body, dashboard.body, measured.body);
+    expect(snapshot.lighthouse).toEqual(measured.body.report);
+    expect(buildHomepageReport(status.body, findings.body, recommendations.body, dashboard.body, { ...measured.body, auditId: 'different-audit' })).not.toHaveProperty('lighthouse');
+  });
+
+  it('preserves HTML findings as partial results when PageSpeed quota is exhausted', async () => {
+    mockHomepage();
+    const run = jest.spyOn(app.get(PageSpeedService), 'run').mockRejectedValue(new PageSpeedError('PAGESPEED_QUOTA_EXCEEDED', 'PageSpeed quota exhausted.'));
+    const created = await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'lighthouse' }).expect(202);
+    expect(created.body.strategy).toBe('mobile');
+    expect(run.mock.calls[0]?.[1]).toBe('mobile');
+    const measured = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/lighthouse`).expect(200);
+    expect(measured.body).toMatchObject({ status: 'partial', report: null, failure: { code: 'PAGESPEED_QUOTA_EXCEEDED' } });
+    const findings = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/findings`).expect(200);
+    expect(findings.body.findings.length).toBeGreaterThan(0);
+    const dashboard = await request(app.getHttpServer()).get('/api/businesses/demo-guzman/dashboard').expect(200);
+    expect(dashboard.body.latestAudit.id).toBe(created.body.id);
+    expect(dashboard.body.lighthouse).toBeNull();
+    expect(dashboard.body.scores.every((score: { value: number | null }) => score.value === null)).toBe(true);
+  });
+
+  it('marks missing category scores as partial without discarding measured categories', async () => {
+    mockHomepage();
+    const fixture = pageSpeedFixture();
+    const report = normalizeLighthouse({ lighthouseResult: { ...fixture.lighthouseResult, categories: { performance: fixture.lighthouseResult.categories.performance } } }, 'https://www.guzmantaxaccounting.com/', 'mobile');
+    jest.spyOn(app.get(PageSpeedService), 'run').mockResolvedValue(report);
+    const created = await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'lighthouse' }).expect(202);
+    const measured = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/lighthouse`).expect(200);
+    expect(measured.body).toMatchObject({ status: 'partial', failure: { code: 'LIGHTHOUSE_INCOMPLETE' } });
+    expect(measured.body.report.categories[0].score).toBe(72);
+    expect(measured.body.report.categories[1].score).toBeNull();
+  });
+
+  it('stops before PageSpeed when protected HTML collection rejects the target', async () => {
+    jest.spyOn(app.get(WebsiteCollector), 'collect').mockRejectedValue(new CollectionError('BLOCKED_DESTINATION', 'Blocked destination.'));
+    const run = jest.spyOn(app.get(PageSpeedService), 'run');
+    const created = await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'lighthouse' }).expect(202);
+    const measured = await request(app.getHttpServer()).get(`/api/audits/${created.body.id}/lighthouse`).expect(200);
+    expect(measured.body).toMatchObject({ status: 'failed', failure: { code: 'BLOCKED_DESTINATION' } });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([{ scope: 'lighthouse', strategy: 'tablet' }, { scope: 'lighthouse', strategy: null }, { scope: 'homepage', strategy: 'mobile' }, { scope: 'demo', strategy: 'desktop' }])('rejects unsupported strategy requests %j', async (body) => {
+    await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send(body).expect(400);
+  });
+
+  it('aborts Lighthouse during shutdown', async () => {
+    mockHomepage();
+    jest.spyOn(app.get(PageSpeedService), 'run').mockImplementation((_target, _strategy, signal) => new Promise((_resolve, reject) => {
+      signal!.addEventListener('abort', () => reject(new PageSpeedError('SERVER_STOPPING', 'Interrupted.')), { once: true });
+    }));
+    const created = await request(app.getHttpServer()).post('/api/businesses/demo-guzman/audits').send({ scope: 'lighthouse' }).expect(202);
+    await app.close();
+    expect(await app.get<AuditRepository>(AUDIT_REPOSITORY).findById(created.body.id as string)).toMatchObject({ status: 'failed', failure: { code: 'SERVER_STOPPING' } });
   });
 
   it('marks runner failures explicitly instead of leaving audits running', async () => {

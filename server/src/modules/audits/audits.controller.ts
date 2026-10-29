@@ -3,6 +3,7 @@ import { AuditsService, auditSummary } from './audits.service.js';
 import { CreateAuditDto } from './dto/create-audit.dto.js';
 import { ApiAcceptedResponse, ApiBadRequestResponse, ApiConflictResponse, ApiInternalServerErrorResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto, AuditSummaryDto, CreatedAuditDto, FindingsResponseDto, RecommendationsResponseDto } from '../../contracts/responses.dto.js';
+import { LighthouseResponseDto } from '../../contracts/lighthouse.dto.js';
 
 @Controller()
 @ApiTags('Audits')
@@ -14,13 +15,13 @@ export class AuditsController {
 
   @Post('businesses/:businessId/audits')
   @HttpCode(202)
-  @ApiOperation({ summary: 'Start a demo or real homepage investigation', description: 'Homepage scope fetches the registered business website. Only one audit may be queued/running per business.' })
+  @ApiOperation({ summary: 'Start a demo, homepage, or Lighthouse investigation', description: 'Homepage collects HTML. Lighthouse adds Google PageSpeed Insights lab measurements, defaulting to mobile. Both target the registered business website. Only one audit may be queued/running per business.' })
   @ApiParam({ name: 'businessId', example: 'demo-guzman' })
   @ApiAcceptedResponse({ type: CreatedAuditDto })
   @ApiConflictResponse({ description: 'An audit is already active.', type: ApiErrorDto })
   @ApiServiceUnavailableResponse({ description: 'The server is stopping.', type: ApiErrorDto })
   create(@Param('businessId') businessId: string, @Body() body: CreateAuditDto): Promise<CreatedAuditDto> {
-    return this.audits.create(businessId, body.scope);
+    return this.audits.create(businessId, body.scope, body.strategy);
   }
 
   @Get('audits/:auditId')
@@ -32,7 +33,7 @@ export class AuditsController {
   }
 
   @Get('audits/:auditId/findings')
-  @ApiOperation({ summary: 'List findings and their evidence', description: 'Result arrays remain empty until the investigation completes.' })
+  @ApiOperation({ summary: 'List findings and their evidence', description: 'HTML findings may be available while Lighthouse is running. Poll audit status; partial completion preserves usable results.' })
   @ApiParam({ name: 'auditId', format: 'uuid' })
   @ApiOkResponse({ type: FindingsResponseDto })
   findings(@Param('auditId', new ParseUUIDPipe({ version: '4' })) id: string): Promise<FindingsResponseDto> {
@@ -45,5 +46,13 @@ export class AuditsController {
   @ApiOkResponse({ type: RecommendationsResponseDto })
   recommendations(@Param('auditId', new ParseUUIDPipe({ version: '4' })) id: string): Promise<RecommendationsResponseDto> {
     return this.audits.recommendations(id);
+  }
+
+  @Get('audits/:auditId/lighthouse')
+  @ApiOperation({ summary: 'Get Lighthouse lab scores, metrics, and checks', description: 'The report is null for demo/homepage scopes, pending measurements, or provider failures. Check audit status, failure, and warnings. Partial audits retain HTML findings.' })
+  @ApiParam({ name: 'auditId', format: 'uuid' })
+  @ApiOkResponse({ type: LighthouseResponseDto })
+  lighthouse(@Param('auditId', new ParseUUIDPipe({ version: '4' })) id: string): Promise<LighthouseResponseDto> {
+    return this.audits.lighthouse(id);
   }
 }

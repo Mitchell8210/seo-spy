@@ -3,6 +3,7 @@ import { HOMEPAGE_NOTICE } from '../../integrations/website/analyze.js';
 import { DEMO_NOTICE } from '../../fixtures/demo.js';
 import { AUDIT_REPOSITORY, BUSINESS_REPOSITORY, type AuditRepository, type BusinessRepository } from '../../persistence/repositories.js';
 import { auditSummary } from '../audits/audits.service.js';
+import { LIGHTHOUSE_NOTICE } from '../../integrations/lighthouse/types.js';
 
 @Injectable()
 export class BusinessesService {
@@ -18,7 +19,7 @@ export class BusinessesService {
       this.businesses.connections(id), this.audits.latestCompleted(id), this.audits.active(id),
     ]);
     return {
-      mode: completed?.mode ?? 'demo', notice: completed?.mode === 'live' ? HOMEPAGE_NOTICE : DEMO_NOTICE, business, connections: completed?.mode === 'live' ? connections.map((connection) => ({
+      mode: completed?.mode ?? 'demo', notice: completed?.scope === 'lighthouse' ? LIGHTHOUSE_NOTICE : completed?.mode === 'live' ? HOMEPAGE_NOTICE : DEMO_NOTICE, business, connections: completed?.mode === 'live' ? connections.map((connection) => ({
         ...connection, mode: 'live' as const,
         status: connection.platform === 'website' ? 'connected' as const : 'authorization_required' as const,
         identity: connection.platform === 'website' ? completed.results?.evidence.find((e) => e.checkId === 'collection')?.sourceUrl ?? business.website : connection.identity,
@@ -26,6 +27,7 @@ export class BusinessesService {
       latestAudit: completed ? auditSummary(completed) : null,
       activeAudit: active ? auditSummary(active) : null,
       scores: completed?.results?.scores ?? [],
+      lighthouse: completed?.results?.lighthouse ?? null,
       findings: completed?.results?.findings ?? [],
       recommendations: completed?.results?.recommendations ?? [],
       priorityOpportunities: completed?.results?.recommendations.length ?? 0,

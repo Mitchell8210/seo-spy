@@ -7,6 +7,8 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DEMO_STAGE_DELAY_MS: z.coerce.number().int().min(10).max(60000).default(1000),
+  PAGESPEED_API_KEY: z.string().trim().max(512).default(''),
+  PAGESPEED_TIMEOUT_MS: z.coerce.number().int().min(1000).max(180000).default(120000),
 });
 
 export function validateEnvironment(input: Record<string, unknown>) {

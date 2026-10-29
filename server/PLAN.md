@@ -1,10 +1,29 @@
 # SEO Spy backend plan
 
-Status: foundation and real homepage backend implemented and verified; client integration is next.
+Status: foundation, homepage checks, Lighthouse integration, and isolated backend-lab workflow implemented and verified. Integration into the main frontend pages remains a separate task.
 Created: October 27, 2026.
 Last updated: October 28, 2026.
 
 ## Progress record
+
+### October 28, 2026 - validated Lighthouse and backend-lab checkpoint
+
+- Added the isolated `/backend-lab` route with its own API types/service, polling hook, score/metric displays, evidence, recommendations, and explicit simulated/unavailable states. Existing Dashboard and Website pages remain mock-driven and unchanged by this integration work.
+- Added same-origin API proxy support to normal Vite development/preview startup so the test route works without a special startup requirement. Dedicated lab commands remain compatible aliases.
+- Verified the full backend check (105 tests, type-check, lint, build), client lint/build, and ten controlled browser scenarios including partial results, reload/unmount, duplicate prevention, and lost-submission-response recovery.
+- Revalidated both real workflows through the browser: homepage-only completed in 10.9 seconds with one finding/seven evidence records and unavailable Lighthouse scores; mobile Lighthouse completed in 54.9 seconds with twenty findings/twenty-seven evidence records and category scores 38/85/96/92. These measurements describe individual runs only. Screenshots and summaries stay in ignored test artifacts.
+- Added `../client/WEBSITE_API_MAPPING.md` to document supported fields, evidence references, category/null-score handling, and gaps in aggregate scores, pass counts, and page coverage. No main-page integration was performed.
+- For the hackathon/demo, retain in-memory jobs and results. Database and durable-queue work is deferred beyond the demo scope; process restarts still clear history.
+
+### October 28, 2026 - Google PageSpeed Insights Lighthouse capability
+
+- User selected Google PageSpeed Insights rather than local Chrome. Added a fixed-endpoint provider adapter using native fetch, a server-only API-key header, no redirects, a bounded 20 MiB JSON response, a configurable 120-second default deadline, and one provider call at a time. No new npm dependencies or browser installation are needed.
+- Added `scope: lighthouse` with mobile (default) or desktop strategy. Protected HTML collection still runs first. Provider failures preserve HTML findings as terminal `partial` results; shutdown aborts measurement. Existing demo/homepage behavior remains available.
+- Added normalized performance, accessibility, best-practices, and SEO scores; actual engine version, device strategy, URLs, timestamp, lab metrics with units, check modes, and warnings. Unavailable values remain null. Failed measured checks generate namespaced evidence-linked review findings and recommendations. No field Core Web Vitals, accessibility compliance, or combined SEO Spy score is claimed.
+- Added `GET /api/audits/:auditId/lighthouse`, nullable dashboard `lighthouse`, `running_lighthouse` stage, and `lighthouse-v1` audit marker. Updated Swagger request/response models. Original SEO Spy score arrays remain unavailable on real audits; clients should display the separate Lighthouse report and stop polling on partial completion.
+- Added `npm run audit:lighthouse` with optional `-- --desktop`. Reports are stored in ignored `reports/` and keep Lighthouse data associated with the tested audit. API keys stay in ignored local environment configuration and are not included in reports.
+- Verified `npm run check`: type-check, lint, 105 tests across four suites, and production build. Tests cover response validation, units/zero/null scores, request construction, bounded responses, provider failures/quotas, deadlines, concurrency, evidence references, mobile/desktop HTTP workflows, partial results, shutdown, and a blank API key in the tracked environment template without external calls.
+- Live anonymous attempt reached Google but hit quota and correctly returned partial HTML results. A subsequent keyed mobile audit completed successfully: performance 35, accessibility 85, best practices 96, SEO 92; 20 findings/recommendations including the HTML image-alternative review. Saved local `reports/guzman-lighthouse-mobile.json`. These are one run's lab results, not stable score guarantees.
 
 ### October 28, 2026 - backend review fixes
 
@@ -189,7 +208,7 @@ Foundation tools are now installed in `server/package.json` with resolved versio
 | Meta-compatible model API | Structured AI analysis and recommendations | Later; confirm actual provider, model, hosting, pricing, and data handling before integration |
 | Baseten | Possible model hosting/provider integration | Candidate only; do not assume it is required |
 | Playwright or another browser collector | Render JavaScript-dependent pages | Optional later; not needed for the initial HTML-only collector |
-| Lighthouse or another measurement service | Measured performance and broader quality signals | Optional later; HTML parsing alone cannot produce these scores |
+| Google PageSpeed Insights v5 | Remote Lighthouse lab measurements, categories, metrics, and checks | Implemented through a fixed provider adapter; Google API key/quota applies |
 | WordPress API/integration | Apply explicitly approved website changes | Deferred; requires a defined authorization and verification design |
 
 No paid service is needed for the initial API or deterministic website audit. Do not spend Meta credits during foundation work.
@@ -443,4 +462,4 @@ Resolve these at their relevant milestone rather than blocking the first API on 
 
 ## Immediate next task
 
-Implement milestone 2: connect the React dashboard to the existing demo API through a frontend service and dashboard hook. Map backend statuses and records into the existing card view models, handle pending/error/unavailable states, and wire Run Investigation to creation and polling. Use the existing `homepage` backend scope for real investigations and display unavailable scores explicitly. Keep multi-page crawling, PostgreSQL, credentials, and paid providers for their planned milestones.
+Coordinate the first main-page integration with the frontend engineer using `../client/WEBSITE_API_MAPPING.md`. Agree on nullable and overall score presentation, passed-check semantics, and homepage-only coverage before adapting the Website page. Reuse the proven backend-lab service/polling behavior in a separately scoped change. Keep the existing main pages unchanged until that integration is authorized; retain in-memory execution for the hackathon demo.

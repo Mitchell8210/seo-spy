@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebsiteCollector, CollectionError } from '../../integrations/website/collector.js';
 import { analyzeHomepage } from '../../integrations/website/analyze.js';
+import { PageSpeedService } from '../../integrations/lighthouse/pagespeed.service.js';
+import { PageSpeedError } from '../../integrations/lighthouse/types.js';
+import { attachLighthouse } from '../../integrations/lighthouse/evidence.js';
 import type { AuditStage } from '../../contracts/domain.js';
 import { createDemoResults } from '../../fixtures/demo.js';
 import { AUDIT_REPOSITORY, BUSINESS_REPOSITORY, type BusinessRepository, type AuditRepository } from '../../persistence/repositories.js';
@@ -18,6 +21,7 @@ export class AuditRunner implements OnModuleDestroy {
     @Inject(AUDIT_REPOSITORY) private readonly audits: AuditRepository,
     private readonly config: ConfigService,
     private readonly collector: WebsiteCollector,
+    private readonly pagespeed: PageSpeedService,
     @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository,
   ) {}
 
@@ -37,7 +41,7 @@ export class AuditRunner implements OnModuleDestroy {
   private async run(id: string) {
     try {
       const initial = await this.audits.findById(id);
-      if (initial?.scope === 'homepage') {
+      if (initial && initial.scope !== 'demo') {
         initial.startedAt = new Date().toISOString();
         initial.status = 'running'; initial.stage = 'collecting_evidence';
         await this.audits.save(initial);
@@ -46,9 +50,25 @@ export class AuditRunner implements OnModuleDestroy {
         const page = await this.collector.collect(business.website, this.abort.signal);
         initial.stage = 'evaluating_checks'; await this.audits.save(initial);
         initial.results = analyzeHomepage(page, id);
+        if (initial.scope === 'lighthouse') {
+          initial.stage = 'running_lighthouse'; await this.audits.save(initial);
+          try {
+            const report = await this.pagespeed.run(page.finalUrl, initial.strategy ?? 'mobile', this.abort.signal);
+            attachLighthouse(initial.results, report, id);
+            initial.warnings.push(...report.warnings);
+            if (report.categories.some((category) => category.availability === 'unavailable')) {
+              initial.failure = { code: 'LIGHTHOUSE_INCOMPLETE', message: 'Some Lighthouse category scores are unavailable.' };
+            }
+          } catch (error) {
+            if (this.abort.signal.aborted) throw error;
+            initial.failure = error instanceof PageSpeedError ? { code: error.code, message: error.message }
+              : { code: 'PAGESPEED_UNAVAILABLE', message: 'Lighthouse measurements could not be collected.' };
+            initial.warnings.push(`HTML findings are available; Lighthouse measurements failed (${initial.failure.code}).`);
+          }
+        }
         initial.stage = 'preparing_recommendations'; await this.audits.save(initial);
         this.abort.signal.throwIfAborted();
-        initial.status = 'completed'; initial.stage = 'complete'; initial.completedAt = new Date().toISOString();
+        initial.status = initial.failure ? 'partial' : 'completed'; initial.stage = 'complete'; initial.completedAt = new Date().toISOString();
         await this.audits.save(initial);
         return;
       }
@@ -74,7 +94,7 @@ export class AuditRunner implements OnModuleDestroy {
         audit.completedAt = new Date().toISOString();
         audit.failure = this.abort.signal.aborted
           ? { code: 'SERVER_STOPPING', message: 'The audit was interrupted by server shutdown.' }
-          : error instanceof CollectionError ? { code: error.code, message: error.message }
+          : error instanceof CollectionError || error instanceof PageSpeedError ? { code: error.code, message: error.message }
             : { code: 'AUDIT_FAILED', message: 'The audit could not be completed.' };
         await this.audits.save(audit);
       }

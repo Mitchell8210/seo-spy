@@ -1,6 +1,6 @@
 # SEO Spy server
 
-Local NestJS API using TypeScript and the Express adapter. Supports simulated demo audits and **real, single-homepage HTML audits**. It does not execute JavaScript, crawl additional pages, connect to Facebook, call AI providers, or apply changes.
+Local NestJS API using TypeScript and the Express adapter. Supports simulated demo audits, **real single-homepage HTML audits**, and **Lighthouse lab measurements through Google PageSpeed Insights**. No local browser is required. Facebook, AI providers, and external changes remain deferred.
 
 ## Setup
 
@@ -20,7 +20,7 @@ The server and client run independently. The client still uses its original fixt
 
 Open **http://127.0.0.1:3001/api/docs** after starting the server. Swagger UI lists every implemented endpoint and the request/response models, including nested evidence, findings, scores, and errors. Expand an endpoint and select **Try it out** to send a request to the local API.
 
-Use `demo-guzman` as the business ID. To create an investigation, submit `{ "scope": "demo" }` for simulated results or `{ "scope": "homepage" }` for a real homepage audit; then copy its returned ID into the audit endpoints to inspect progress and results. Both modes store their audit history in memory.
+Use `demo-guzman` as the business ID. To create an investigation, submit `{ "scope": "demo" }` for simulated results or `{ "scope": "homepage" }` for a real homepage audit; then copy its returned ID into the audit endpoints to inspect progress and results. Use `{ "scope": "lighthouse", "strategy": "mobile" }` to add Google Lighthouse measurements (or choose `desktop`). All modes store their audit history in memory.
 
 The downloadable OpenAPI JSON is at **http://127.0.0.1:3001/api/docs-json**. Documentation uses the same local API and needs no separate service or credentials. Keep response DTOs and Swagger annotations updated when adding or changing endpoints.
 
@@ -57,13 +57,13 @@ Invoke-RestMethod "http://127.0.0.1:3001/api/audits/$($audit.id)/findings"
 Invoke-RestMethod "http://127.0.0.1:3001/api/audits/$($audit.id)/recommendations"
 ```
 
-Audit creation returns `202 Accepted`. Poll its status URL until `completed` or `failed`. At the default stage delay, a simulated audit completes in roughly four seconds:
+Audit creation returns `202 Accepted`. Poll its status URL until `completed`, `partial`, or `failed`. At the default stage delay, a simulated audit completes in roughly four seconds:
 
 ```text
 queued → collecting_evidence → evaluating_checks → preparing_recommendations → complete
 ```
 
-The middle stages have `status: running`. Demo mode collects no real evidence. Homepage mode fetches the registered business website, with a 30-second collection deadline. Creation requires a scope of `demo` or `homepage`; missing/unknown scope and extra fields are rejected. A second active audit for the business returns `409 AUDIT_ALREADY_ACTIVE`.
+The middle stages have `status: running`. Demo mode collects no real evidence. Homepage mode fetches the registered business website, with a 30-second collection deadline. Creation requires a scope of `demo`, `homepage`, or `lighthouse`; missing/unknown scope and extra fields are rejected. A second active audit for the business returns `409 AUDIT_ALREADY_ACTIVE`.
 
 The dashboard exposes the last completed audit and an optional active audit separately, retaining previous results during an investigation. Findings reference evidence returned by the findings endpoint. Recommendations reference findings. Demo scores are explicitly illustrative (`availability: demo`). Real homepage scores have `value: null` and `availability: unavailable`; no scoring model is claimed. Pending/failed audit result lists may be empty; check the returned status.
 
@@ -100,10 +100,41 @@ This builds the server, starts a temporary loopback API on an available port, su
 
 Report scores are included only when the dashboard's latest completed audit ID matches the tested audit ID. Otherwise `scores` is empty, so a failed or unfinished live audit cannot inherit a previous audit's demo scores.
 
-## Storage and shutdown behavior
+## Lighthouse through Google PageSpeed Insights
+
+The `lighthouse` scope runs the protected HTML collector first, then sends the final public URL to Google's PageSpeed Insights v5 API. Google runs the browser remotely; this does not launch Chrome on the backend or relax the local collector's restrictions. The browser-rendered page and its resources are processed by Google, so its measurements may differ from the separately collected HTML and between runs.
+
+Configure the server:
+
+1. Select/create your Google Cloud project, enable the [PageSpeed Insights API](https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com), and create a key using [Google's setup guide](https://developers.google.com/speed/docs/insights/v5/get-started).
+2. Restrict the key to the PageSpeed Insights API and use suitable server IP restrictions where available. Put it only in the ignored `server/.env` as `PAGESPEED_API_KEY=your-key`; never use a `VITE_` variable or send the key from the browser. Existing process environment values take precedence over `.env`.
+3. Keep `PAGESPEED_TIMEOUT_MS=120000` unless needed (allowed range: 1000-180000 milliseconds). Restart the API after configuration changes.
+
+Blank keys use anonymous access, which may have no available quota. Google can return quota/access errors even when the HTML page is reachable. The provider sends the key in the `x-goog-api-key` header, not a URL, and does not expose provider error bodies. See [Google's key-handling guidance](https://cloud.google.com/docs/authentication/api-keys-best-practices).
+
+```http
+POST /api/businesses/demo-guzman/audits
+Content-Type: application/json
+
+{"scope":"lighthouse","strategy":"mobile"}
+```
+
+Choose `mobile` (default) or `desktop`; strategy is rejected for other scopes. Poll `statusUrl`, then read `/api/audits/{id}/lighthouse`. Its response contains `report`, `status`, `failure`, and `warnings`. The report is null for pending/failed measurements and non-Lighthouse scopes. The dashboard adds a nullable `lighthouse` field for the latest completed/partial audit; the per-audit endpoint also preserves access to historical measurements.
+
+Reports contain four category scores scaled to 0-100: performance, accessibility, best-practices, and SEO. Zero is a measured score; unavailable scores are null. Each report retains provider, device strategy, requested/final URL, fetch timestamp, and actual Lighthouse engine version. Lab metrics include FCP, LCP, TBT, Speed Index (milliseconds), and CLS (unitless). Checks preserve their score display modes, including manual, error, and not-applicable outcomes. Raw screenshots, network details, and unrelated provider fields are not retained.
+
+Failed measured numeric/binary checks referenced by a category generate review findings with `lighthouse:` check IDs, evidence references, and recommendations. Manual, informational, not-applicable, and error outcomes do not become passing or failed findings. The original website/social/consistency/overall `scores` array remains unavailable for real audits; Lighthouse is a separate measurement source. Its lab results do not establish field Core Web Vitals, full accessibility compliance, social performance, or a combined SEO Spy score.
+
+During measurement, the audit has `status: running` and `stage: running_lighthouse`; HTML evidence may already be available. PageSpeed failure or missing category scores produces `status: partial` with usable HTML results, safe failure information, and warnings. If protected HTML collection fails, PageSpeed is not called and the audit fails. Shutdown aborts pending provider work. Partial audits count as terminal and become the latest usable dashboard results; frontend polling must stop on `completed`, `partial`, or `failed`.
+
+Provider calls are limited to one at a time, a configurable total deadline, and 20 MiB of decoded JSON. The endpoint is fixed, redirects are disabled, responses are validated, and quotas/access errors are not automatically retried. Normal automated checks use controlled responses without contacting Google.
+
+From `server/`, run `npm run audit:lighthouse` (mobile) or `npm run audit:lighthouse -- --desktop`. This starts a temporary local API, exercises the HTTP workflow, writes an ignored `reports/guzman-lighthouse-mobile.json` or `reports/guzman-lighthouse-desktop.json`, and shuts down. A partial/failed audit exits nonzero while still saving its usable evidence. Keep repeated live calls deliberate because they consume provider quota.
+
+## Storage and shutdown details
 
 Businesses and audits use singleton in-memory repositories registered with explicit dependency-injection tokens. Each process seeds one demo business and a completed demo audit. A completed homepage audit replaces the latest dashboard results with `mode: live`; seeded results remain available by audit ID. All history disappears on restart; memory history is suitable only for a short local demo, not sustained production use.
 
-The in-process runner catches failures and marks failed audits. Graceful shutdown stops queued work, aborts pending stage timers, and waits for jobs to settle. There is no durable queue or recovery across restarts yet. No database, Redis instance, external credentials, or paid services are required.
+The in-process runner catches failures and marks failed audits. Graceful shutdown stops queued work, aborts pending stage timers, and waits for jobs to settle. There is no durable queue or recovery across restarts yet. No database or Redis instance is required. Demo and homepage modes need no provider credentials; Lighthouse uses optional server-side PageSpeed credentials and is subject to Google quotas.
 
 See [PLAN.md](PLAN.md) for the data model, future integrations, PostgreSQL migration strategy, milestones, and progress.

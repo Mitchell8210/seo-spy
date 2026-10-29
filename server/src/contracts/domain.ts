@@ -1,5 +1,7 @@
+import type { LighthouseReport, LighthouseStrategy } from '../integrations/lighthouse/types.js';
+
 export type AuditStatus = 'queued' | 'running' | 'completed' | 'partial' | 'failed';
-export type AuditStage = 'queued' | 'collecting_evidence' | 'evaluating_checks' | 'preparing_recommendations' | 'complete' | 'failed';
+export type AuditStage = 'queued' | 'collecting_evidence' | 'evaluating_checks' | 'running_lighthouse' | 'preparing_recommendations' | 'complete' | 'failed';
 export type Severity = 'critical' | 'medium' | 'low';
 export type FindingSource = 'website' | 'website_and_facebook';
 
@@ -65,12 +67,14 @@ export interface AuditResults {
   findings: Finding[];
   recommendations: Recommendation[];
   scores: Score[];
+  lighthouse?: LighthouseReport;
 }
 
 export interface Audit {
   id: string;
   businessId: string;
-  scope: 'demo' | 'homepage';
+  scope: 'demo' | 'homepage' | 'lighthouse';
+  strategy?: LighthouseStrategy;
   mode: 'demo' | 'live';
   status: AuditStatus;
   stage: AuditStage;
@@ -79,6 +83,6 @@ export interface Audit {
   completedAt: string | null;
   warnings: string[];
   failure: { code: string; message: string } | null;
-  scoringVersion: 'demo-v1' | 'homepage-v1';
+  scoringVersion: 'demo-v1' | 'homepage-v1' | 'lighthouse-v1';
   results: AuditResults | null;
 }

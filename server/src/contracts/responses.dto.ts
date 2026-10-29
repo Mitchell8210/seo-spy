@@ -1,4 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LighthouseReportDto } from './lighthouse.dto.js';
 import type { Audit, Business, Connection, Evidence, Finding, Recommendation, Score } from './domain.js';
 
 export class BusinessDto implements Business {
@@ -71,16 +72,17 @@ export class AuditCountsDto {
 export class AuditSummaryDto implements Omit<Audit, 'results'> {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ example: 'demo-guzman' }) businessId!: string;
-  @ApiProperty({ enum: ['demo', 'homepage'] }) scope!: 'demo' | 'homepage';
+  @ApiProperty({ enum: ['demo', 'homepage', 'lighthouse'] }) scope!: Audit['scope'];
+  @ApiPropertyOptional({ enum: ['mobile', 'desktop'], description: 'Present for Lighthouse audits.' }) strategy?: Audit['strategy'];
   @ApiProperty({ enum: ['demo', 'live'] }) mode!: 'demo' | 'live';
   @ApiProperty({ enum: ['queued', 'running', 'completed', 'partial', 'failed'] }) status!: Audit['status'];
-  @ApiProperty({ enum: ['queued', 'collecting_evidence', 'evaluating_checks', 'preparing_recommendations', 'complete', 'failed'] }) stage!: Audit['stage'];
+  @ApiProperty({ enum: ['queued', 'collecting_evidence', 'evaluating_checks', 'running_lighthouse', 'preparing_recommendations', 'complete', 'failed'] }) stage!: Audit['stage'];
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true }) startedAt!: string | null;
   @ApiProperty({ type: String, format: 'date-time', nullable: true }) completedAt!: string | null;
   @ApiProperty({ type: [String] }) warnings!: string[];
   @ApiProperty({ type: () => AuditFailureDto, nullable: true }) failure!: AuditFailureDto | null;
-  @ApiProperty({ enum: ['demo-v1', 'homepage-v1'] }) scoringVersion!: 'demo-v1' | 'homepage-v1';
+  @ApiProperty({ enum: ['demo-v1', 'homepage-v1', 'lighthouse-v1'] }) scoringVersion!: Audit['scoringVersion'];
   @ApiProperty({ type: () => AuditCountsDto }) counts!: AuditCountsDto;
 }
 
@@ -104,6 +106,7 @@ export class RecommendationsResponseDto {
 }
 
 export class DashboardDto {
+  @ApiProperty({ type: () => LighthouseReportDto, nullable: true, description: 'Latest completed/partial audit Lighthouse measurements. Null when unavailable.' }) lighthouse!: LighthouseReportDto | null;
   @ApiProperty({ enum: ['demo', 'live'] }) mode!: 'demo' | 'live';
   @ApiProperty({ description: 'Coverage disclaimer for the latest completed audit.' }) notice!: string;
   @ApiProperty({ type: () => BusinessDto }) business!: BusinessDto;

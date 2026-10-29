@@ -1,8 +1,11 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 import { AppShell } from './components/layout/AppShell'
 import { navigation } from './components/layout/navigation'
 import { Dashboard } from './pages/Dashboard/Dashboard'
 import { Website } from './pages/Website/Website'
+
+const BackendLab = lazy(() => import('./pages/BackendLab/BackendLab'))
 
 function App() {
   return (
@@ -10,6 +13,7 @@ function App() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/overview" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/backend-lab/:businessId?" element={<Suspense fallback={<p role="status" className="text-sm text-secondary">Loading the backend test dashboard…</p>}><BackendLab /></Suspense>} />
         {navigation.map(({ path, label }) => (
           <Route
             key={path}
