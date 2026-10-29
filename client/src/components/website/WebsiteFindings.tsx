@@ -1,8 +1,11 @@
-import { useId, useRef, useState } from 'react'
-import { ArrowDown, ChevronDown, CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react'
+import { useRef } from 'react'
+import { ArrowDown, CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react'
 import type { AffectedPage, PassedCheck, WebsiteFinding, WebsiteRecommendation } from '../../types/website'
 import type { Severity } from '../../types/dashboard'
 import { findingStatuses } from '../../utils/findingStatus'
+import { ReportDisclosure } from '../reports/ReportDisclosure'
+import { FindingActions } from '../reports/FindingActions'
+import { PriorityColumn } from '../reports/PriorityColumn'
 import { StatusBadge } from '../common/StatusBadge'
 
 type BoardItem =
@@ -17,15 +20,11 @@ const columns = [
 ] satisfies { id: string; label: string; description: string; severity: Severity; icon: typeof CircleAlert; accepts: Severity[] }[]
 
 function BoardCard({ item }: { item: BoardItem }) {
-  const [expanded, setExpanded] = useState(false)
-  const [actionMessage, setActionMessage] = useState('')
-  const detailsId = useId()
   const fixRef = useRef<HTMLHeadingElement>(null)
   const isIssue = item.kind === 'issue'
   const title = isIssue ? item.finding.title : item.check.title
   const severity = isIssue ? item.finding.severity : item.check.status
   const urls = isIssue ? item.pages.map((page) => page.url) : [item.check.url]
-  const disclosureLabel = expanded ? 'Hide Details' : isIssue ? 'Fix Now' : 'View Details'
 
   return (
     <li id={isIssue ? item.finding.id : `board-${item.check.id}`} className="min-w-0 scroll-mt-6 rounded-lg border border-line bg-surface p-4 shadow-sm">
@@ -35,18 +34,7 @@ function BoardCard({ item }: { item: BoardItem }) {
         <p className="mt-2 text-xs font-medium text-secondary">{item.finding.category}</p>
         {urls.length > 0 && <p className="mt-2 break-all text-xs leading-5 text-muted"><span className="font-medium text-secondary">Page: </span>{urls[0]}{urls.length > 1 && <span className="block">+ {urls.length - 1} more affected {urls.length === 2 ? 'page' : 'pages'}</span>}</p>}
       </>}
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={detailsId}
-        aria-label={`${disclosureLabel}: ${title}${!expanded && isIssue ? ' — review remediation details' : ''}`}
-        onClick={() => setExpanded((open) => !open)}
-        className="mt-3 flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-line px-3 text-xs font-medium text-blue-300 hover:bg-elevated"
-      >
-        {disclosureLabel}
-        <ChevronDown size={15} aria-hidden="true" className={`shrink-0 ${expanded ? 'rotate-180' : ''}`} />
-      </button>
-      <div id={detailsId} hidden={!expanded} className="mt-4 space-y-4 border-t border-line pt-4 text-xs leading-6 text-secondary">
+      <ReportDisclosure title={title} isIssue={isIssue}>
         <div><h5 className="font-semibold text-ink">{isIssue ? 'What we found' : 'What was checked'}</h5><p className="mt-1">{title}</p></div>
         <div><h5 className="font-semibold text-ink">Evidence</h5><p className="mt-1">{isIssue ? item.finding.evidence : item.check.evidence}</p><p className="mt-1 text-muted">Mock evidence · Not a live scan</p></div>
         {isIssue && <div><h5 className="font-semibold text-ink">Why it matters</h5><p className="mt-1">{item.finding.explanation}</p></div>}
@@ -60,26 +48,13 @@ function BoardCard({ item }: { item: BoardItem }) {
             {item.recommendations.length > 0 ? <ul className="mt-1 space-y-3">{item.recommendations.map((recommendation) => <li key={recommendation.id} data-recommendation-id={recommendation.id}>{recommendation.action}</li>)}</ul> : <p className="mt-1 text-muted">No recommended fix is linked to this finding yet.</p>}
             <p className="mt-2 text-muted">Priority: {item.finding.severity} · Suggested change · Not applied</p>
           </div>
-          <div className="border-t border-line pt-4">
-            <h5 className="font-semibold text-ink">Available actions</h5>
-            <p className="mt-1 text-muted">Demo controls only. AI fixing is unavailable; no website changes will be made.</p>
-            <div className="mt-3 flex flex-col gap-2">
-              <button type="button" disabled className="min-h-11 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">Fix with AI</button>
-              <button type="button" disabled={item.recommendations.length === 0} onClick={() => {
-                fixRef.current?.focus()
-                fixRef.current?.scrollIntoView({ block: 'nearest' })
-                setActionMessage('The existing suggested fix is shown above. This demo does not apply changes.')
-              }} className="min-h-11 rounded-md border border-line px-3 py-2 font-medium text-blue-300 hover:bg-elevated disabled:cursor-not-allowed disabled:opacity-60">View Fix Steps</button>
-              <button type="button" onClick={() => setActionMessage('Selected for manual review in this view only. No website changes have been made.')} className="min-h-11 rounded-md border border-line px-3 py-2 font-medium text-secondary hover:bg-elevated">Review Manually</button>
-            </div>
-            <p role="status" className="mt-2 text-blue-300">{actionMessage}</p>
-          </div>
+          <FindingActions fixRef={fixRef} hasRecommendation={item.recommendations.length > 0} />
         </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{item.check.status} in this mock analysis. No live verification was performed.</p></div>}
         <dl className="space-y-1 border-t border-line pt-3 text-muted">
           <div><dt className="inline font-medium text-secondary">Source: </dt><dd className="inline">{isIssue ? item.finding.source : 'Website'}</dd></div>
           <div><dt className="inline font-medium text-secondary">Status: </dt><dd className="inline">{isIssue ? item.finding.status : item.check.status}</dd></div>
         </dl>
-      </div>
+      </ReportDisclosure>
     </li>
   )
 }
@@ -113,18 +88,10 @@ export function WebsiteFindings({ findings, pages, passedChecks, recommendations
       <div className="grid grid-cols-1 items-start gap-4 p-4 md:grid-cols-2 xl:grid-cols-4 sm:p-5">
         {columns.map((column) => {
           const grouped = items.filter((item) => column.accepts.some((severity) => severity === (item.kind === 'issue' ? item.finding.severity : item.check.status)))
-          const Icon = column.icon
-          const color = findingStatuses[column.severity].icon
           return (
-            <section key={column.id} aria-labelledby={`findings-${column.id}-title`} className="min-w-0 rounded-lg border border-line bg-elevated p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 id={`findings-${column.id}-title`} className={`flex min-w-0 items-center gap-2 text-sm font-semibold ${color}`}><Icon size={16} className="shrink-0" aria-hidden="true" />{column.label}</h3>
-                <span className={`shrink-0 text-sm font-semibold ${color}`} aria-label={`${grouped.length} items`}>{grouped.length}</span>
-              </div>
-              <p className="mb-4 text-xs leading-5 text-muted">{column.description}</p>
-              <ul className="space-y-3">{grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} />)}</ul>
-              {grouped.length === 0 && <p className="py-3 text-xs leading-6 text-muted">No items in this group.</p>}
-            </section>
+            <PriorityColumn key={column.id} headingId={`findings-${column.id}-title`} label={column.label} description={column.description} severity={column.severity} count={grouped.length}>
+              {grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} />)}
+            </PriorityColumn>
           )
         })}
       </div>
