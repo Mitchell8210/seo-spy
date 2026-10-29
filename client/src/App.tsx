@@ -4,6 +4,7 @@ import { navigation } from './components/layout/navigation'
 import { Dashboard } from './pages/Dashboard/Dashboard'
 import { Website } from './pages/Website/Website'
 import { SocialMedia } from './pages/SocialMedia/SocialMedia'
+import { Settings } from './pages/Settings/Settings'
 
 function App() {
   return (
@@ -15,7 +16,7 @@ function App() {
           <Route
             key={path}
             path={path}
-            element={path === '/dashboard' ? <Dashboard /> : path === '/website' ? <Website /> : path === '/social-media' ? <SocialMedia /> : <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{label}</h1>}
+            element={path === '/dashboard' ? <Dashboard /> : path === '/website' ? <Website /> : path === '/social-media' ? <SocialMedia /> : path === '/settings' ? <Settings /> : <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{label}</h1>}
           />
         ))}
         <Route path="*" element={<h1 className="text-2xl font-semibold text-ink">Page not found</h1>} />
