@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router'
 import { SpyLogo } from '../common/SpyLogo'
+import { ProPlanCard } from './ProPlanCard'
 import { navigation } from './navigation'
 
 type SidebarProps = {
@@ -36,6 +37,7 @@ export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
           ))}
         </ul>
       </nav>
+      <div className={`${mobileOpen ? 'block' : 'hidden'} px-4 pb-5 lg:mt-auto lg:block lg:pb-6`}><ProPlanCard /></div>
     </aside>
   )
 }
