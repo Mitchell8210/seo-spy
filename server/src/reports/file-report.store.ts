@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Audit, AuditResults, Business } from "../contracts/domain.js";
 import { facebookReportSchema } from "../integrations/facebook/types.js";
+import { summarizeEvidence } from "../reporting/evidence-summary.js";
+import { analyzeWebsite } from "../integrations/lighthouse/prioritize.js";
 import {
   ReportStorageError,
   type AuditReportRecord,
@@ -141,6 +143,9 @@ function normalizeResults(results: AuditResults | null): AuditResults | null {
         explanation: c.explanation,
       })),
     };
+  if (results.websiteAnalysis) {
+    normalized.websiteAnalysis = analyzeWebsite(results.websiteAnalysis.auditId, normalized);
+  }
   return normalized;
 }
 
@@ -403,6 +408,13 @@ export class FileReportStore {
         },
         results: normalizeResults(audit.results),
       };
+      if (record.results && (audit.scope === "homepage" || audit.scope === "lighthouse")) {
+        const analysis = analyzeWebsite(audit.id, record.results);
+        record.results.findings = analysis.findings;
+        record.results.recommendations = analysis.recommendations;
+        record.results.websiteAnalysis = analysis;
+        record.results.evidenceSummaries = summarizeEvidence(audit.id, record.results);
+      }
       if (!validRecord(record)) throw corrupt();
       const json = JSON.stringify(record, null, 2) + "\n";
       if (Buffer.byteLength(json) > MAX_BYTES)

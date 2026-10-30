@@ -30,6 +30,10 @@ import {
   SavedFacebookReportDto,
 } from "./report.dto.js";
 import { analyzeFacebook } from "../integrations/facebook/analyze.js";
+import { summarizeEvidence } from "../reporting/evidence-summary.js";
+import { EvidenceSummariesDto } from "../reporting/evidence-summary.dto.js";
+import { analyzeWebsite } from "../integrations/lighthouse/prioritize.js";
+import { WebsiteAnalysisDto } from "../contracts/website-analysis.dto.js";
 
 @Controller()
 @ApiTags("Saved reports")
@@ -117,6 +121,50 @@ export class ReportsController {
         throw new ServiceUnavailableException(
           "The saved report archive could not be read.",
         );
+      throw error;
+    }
+  }
+
+  @Get("audits/:auditId/website-analysis")
+  @ApiOperation({ summary: "Read current versioned Website priorities and recommendations from saved evidence",
+    description: "Applies documented performance rules to immutable measurements. Does not rescan, modify source archives, calculate category scores or execute changes." })
+  @ApiParam({ name: "auditId", format: "uuid" })
+  @ApiOkResponse({ type: WebsiteAnalysisDto })
+  async websiteAnalysis(
+    @Param("auditId", new ParseUUIDPipe({ version: "4" })) auditId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<WebsiteAnalysisDto> {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const report = await this.reports.read(auditId);
+      if (!report || report.audit.mode !== "live" || !["homepage", "lighthouse"].includes(report.audit.scope)) {
+        throw new NotFoundException({ code: "REPORT_NOT_FOUND", message: "No saved live Website report is available for this investigation." });
+      }
+      return analyzeWebsite(auditId, report.results);
+    } catch (error) {
+      if (error instanceof ReportStorageError) throw new ServiceUnavailableException("The saved report could not be read.");
+      throw error;
+    }
+  }
+
+  @Get("audits/:auditId/evidence-summary")
+  @ApiOperation({
+    summary: "Read concise programmatic evidence summaries for a saved Website report",
+    description: "Derives versioned summaries from saved observations, including older archives. Does not modify archived facts, collect websites, call AI, or calculate scores.",
+  })
+  @ApiParam({ name: "auditId", format: "uuid" })
+  @ApiOkResponse({ type: EvidenceSummariesDto })
+  async evidenceSummary(
+    @Param("auditId", new ParseUUIDPipe({ version: "4" })) auditId: string,
+  ): Promise<EvidenceSummariesDto> {
+    try {
+      const report = await this.reports.read(auditId);
+      if (!report || !["homepage", "lighthouse"].includes(report.audit.scope)) {
+        throw new NotFoundException({ code: "REPORT_NOT_FOUND", message: "No saved Website report is available for this investigation." });
+      }
+      return summarizeEvidence(auditId, report.results);
+    } catch (error) {
+      if (error instanceof ReportStorageError) throw new ServiceUnavailableException("The saved report could not be read.");
       throw error;
     }
   }

@@ -104,6 +104,8 @@ describe("demo API", () => {
         "/api/audits/{auditId}/lighthouse",
         "/api/businesses/{businessId}/reports",
         "/api/audits/{auditId}/report",
+        "/api/audits/{auditId}/evidence-summary",
+        "/api/audits/{auditId}/website-analysis",
         "/api/facebook",
         "/api/facebook/status",
         "/api/facebook/connect",
@@ -126,6 +128,11 @@ describe("demo API", () => {
       "#/components/schemas/CreateAuditDto",
     );
     const schemas = spec.body.components.schemas;
+    expect(spec.body.paths["/api/audits/{auditId}/website-analysis"].get.responses["200"].content["application/json"].schema.$ref).toBe("#/components/schemas/WebsiteAnalysisDto");
+    expect(schemas.WebsiteAnalysisDto.properties.version.enum).toEqual(["website-priority-v1"]);
+    expect(spec.body.paths["/api/audits/{auditId}/evidence-summary"].get.responses["200"].content["application/json"].schema.$ref).toBe("#/components/schemas/EvidenceSummariesDto");
+    expect(schemas.EvidenceSummariesDto.properties.version.enum).toEqual(["programmatic-evidence-v1"]);
+    expect(schemas.EvidenceSummaryItemDto.properties.text.maxLength).toBe(280);
     expect(schemas.CreateAuditDto.properties.scope.enum).toEqual([
       "demo",
       "homepage",

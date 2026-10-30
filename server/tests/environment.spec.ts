@@ -9,6 +9,7 @@ describe("environment configuration", () => {
       FACEBOOK_CONFIG_ID: "",
       FACEBOOK_ACCESS_TOKEN: "",
       FACEBOOK_REDIRECT_URI: "http://localhost:3001/api/facebook/callback",
+      FACEBOOK_FRONTEND_ORIGIN: "http://localhost:5173",
     });
     for (const FACEBOOK_REDIRECT_URI of [
       "https://example.com/api/facebook/callback",
@@ -45,6 +46,12 @@ describe("environment configuration", () => {
         .split(/\r?\n/)
         .find((line) => line.startsWith("PAGESPEED_API_KEY=")),
     ).toBe("PAGESPEED_API_KEY=");
+  });
+  it("limits the Facebook frontend to an exact local HTTP origin", () => {
+    expect(validateEnvironment({ FACEBOOK_FRONTEND_ORIGIN: "http://localhost:5174" }).FACEBOOK_FRONTEND_ORIGIN).toBe("http://localhost:5174");
+    for (const FACEBOOK_FRONTEND_ORIGIN of ["invalid", "https://example.com", "http://localhost:5173/path", "http://localhost:5173/", "http://user@localhost:5173", "http://localhost:5173?x=1"]) {
+      expect(() => validateEnvironment({ FACEBOOK_FRONTEND_ORIGIN })).toThrow("FACEBOOK_FRONTEND_ORIGIN");
+    }
   });
   it("defaults to localhost and parses numeric values", () => {
     expect(validateEnvironment({ PORT: "3100" })).toMatchObject({

@@ -5,6 +5,7 @@ import type {
   Recommendation,
 } from "../../contracts/domain.js";
 import type { FacebookMetric, FacebookReport } from "./types.js";
+import type { EvidenceSummaries } from "../../reporting/evidence-summary.js";
 
 export interface FacebookAnalysis {
   version: "facebook-analysis-v1";
@@ -12,6 +13,7 @@ export interface FacebookAnalysis {
   summaries: string[];
   findings: Finding[];
   recommendations: Recommendation[];
+  evidenceSummaries: EvidenceSummaries;
 }
 
 const DAY = 86400000;
@@ -69,6 +71,7 @@ export function analyzeFacebook(
     summaries: [],
     findings: [],
     recommendations: [],
+    evidenceSummaries: { version: "programmatic-evidence-v1", auditId, findings: [], checks: [] },
   };
   const sources = (checkIds: string[]) => [
     ...new Set(
@@ -90,10 +93,17 @@ export function analyzeFacebook(
     recommendedChange: string,
     purpose: string,
     severity: Finding["severity"] = "low",
+    evidenceText: string = explanation,
   ) => {
     const evidenceIds = sources(evidenceChecks);
     if (!evidenceIds.length) return;
     const findingId = stableId(auditId, checkId, "finding");
+    analysis.evidenceSummaries.findings.push({
+      id: findingId,
+      evidenceIds: [...evidenceIds],
+      text: evidenceText,
+      sourceLabel: `Saved Facebook evidence · Collected ${report.collectedAt}`,
+    });
     analysis.findings.push({
       id: findingId,
       auditId,
@@ -160,6 +170,8 @@ export function analyzeFacebook(
         `${description} This describes the collected posts; API visibility and collection limits may differ from the public Page.`,
         "Review your visible Page activity and plan useful updates for customers if appropriate. Older content may still be relevant.",
         "Keep customers informed about current services and availability.",
+        "low",
+        `The newest of ${posts.length} collected posts was published on ${latest.createdTime.slice(0, 10)}, ${days} days before collection. This is a limited sample; the public Page may show other posts.`,
       );
     }
   } else if (report.posts.status === "available" && !posts.length) {
@@ -207,7 +219,7 @@ export function analyzeFacebook(
       .slice(0, 6)
       .map(
         (item) =>
-          `${formatPhone(item.number)} in post ${item.id} (${item.date})`,
+          `${formatPhone(item.number)} in a post dated ${item.date}`,
       )
       .join("; ");
     review(
@@ -218,6 +230,7 @@ export function analyzeFacebook(
       "Confirm the current contact number, review the identified posts, and correct outdated numbers where appropriate. Different service lines may be intentional.",
       "Help customers contact the intended business number.",
       "medium",
+      `${distinct.length} different phone numbers appear in the collected Page/post information, including ${distinct.slice(0, 2).map(formatPhone).join(" and ")}. Older posts or different service lines may explain the difference; confirm which numbers are current.`,
     );
   }
 

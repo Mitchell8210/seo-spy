@@ -18,6 +18,7 @@ import {
 } from "@nestjs/swagger";
 import type { Request, Response } from "express";
 import helmet from "helmet";
+import { ConfigService } from "@nestjs/config";
 import { FacebookService } from "./facebook.service.js";
 import { FacebookReportsService } from "./facebook-reports.service.js";
 import { ApiProperty } from "@nestjs/swagger";
@@ -68,11 +69,18 @@ export class FacebookController {
   constructor(
     private readonly facebook: FacebookService,
     private readonly reports: FacebookReportsService,
+    private readonly config: ConfigService,
   ) {}
-  private guard(req: Request, res: Response, mutation = false) {
+  private guard(req: Request, res: Response, mutation = false, frontendReport = false) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     const expected = new URL(this.facebook.settings().redirectUri).origin;
+    // Only report generation accepts the explicitly configured local frontend.
+    // The proxy preserves Host and Origin; OAuth/diagnostic routes stay backend-only.
+    const frontend = this.config.get<string>("FACEBOOK_FRONTEND_ORIGIN") ?? "http://localhost:5173";
+    if (frontendReport && req.is("application/json") &&
+        new URL(frontend).hostname === new URL(expected).hostname &&
+        `http://${req.get("host")}` === frontend && req.get("origin") === frontend) return;
     if (`http://${req.get("host")}` !== expected)
       throw new BadRequestException(
         `Open ${expected}/api/facebook directly, using the configured hostname and port.`,
@@ -274,7 +282,7 @@ export class FacebookController {
     summary:
       "Collect and archive a Facebook report using the browser OAuth connection",
     description:
-      "Local operator workflow; explicitly select a registered business and an authorized Page. No Facebook changes. Returns after bounded collection and durable archive write.",
+      "Local operator workflow; explicitly select a registered business and an authorized Page. JSON report requests also accept the configured exact local frontend Host/Origin through its proxy, using the browser connection cookie. No Facebook changes. Returns after bounded collection and durable archive write.",
   })
   @ApiConsumes("application/json", "application/x-www-form-urlencoded")
   @ApiCreatedResponse({
@@ -287,7 +295,7 @@ export class FacebookController {
     @Res() res: Response,
     @Body() body: CreateFacebookReportDto,
   ) {
-    this.guard(req, res, true);
+    this.guard(req, res, true, true);
     const result = await this.reports.create(
       this.session(req),
       body.businessId,

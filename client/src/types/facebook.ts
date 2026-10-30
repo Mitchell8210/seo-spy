@@ -1,4 +1,5 @@
 import type { AuditFailure, AuditStatus, Business, Evidence, Finding, Recommendation, ReportFileReference, Score } from './backend'
+import type { EvidenceSummaries } from './websiteApi'
 
 export type FacebookFinding = Omit<Finding, 'source'> & { source: 'facebook' | Finding['source'] }
 export interface FacebookField {
@@ -32,6 +33,7 @@ export interface FacebookReport {
   limitations: string[]
 }
 export interface FacebookAnalysis {
+  evidenceSummaries?: EvidenceSummaries
   version: 'facebook-analysis-v1'
   auditId: string
   summaries: string[]
@@ -52,4 +54,9 @@ export interface FacebookReportResponse {
   report: FacebookReportRecord | null
   analysis: FacebookAnalysis | null
   latestAttempt: (ReportFileReference & { businessId: string; status: AuditStatus; scope: 'facebook'; mode: 'live'; counts: { findings: number; recommendations: number } }) | null
+}
+
+export interface CreatedFacebookReport extends ReportFileReference {
+  status: 'completed' | 'partial' | 'failed'
+  failure: AuditFailure | null
 }

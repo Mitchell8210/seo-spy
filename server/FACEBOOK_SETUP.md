@@ -74,7 +74,9 @@ The App ID and App Secret come from the Meta app's basic settings. The configura
 
 Open the local test page using **localhost**, matching the callback hostname. `127.0.0.1` and `localhost` are different browser cookie hosts. If changing the server port, update the redirect variable and Meta allowlist together.
 
-The test page uses `Referrer-Policy: same-origin` to preserve the browser Origin header on form submissions. Callback and diagnostic responses retain `no-referrer`. If the origin guard rejects a request, open the backend test page directly and reload it after restarting the backend; avoid the frontend proxy, Swagger submissions, and cached copies of the old page.
+The test page uses `Referrer-Policy: same-origin` to preserve the browser Origin header on form submissions. Callback and diagnostic responses retain `no-referrer`. OAuth and diagnostics must use the backend page directly; avoid proxying these routes or using cached copies after a restart.
+
+The main Social Media page now offers Run Report for its selected saved Page. For this JSON report request only, the backend also accepts the exact local frontend Host and Origin configured by `FACEBOOK_FRONTEND_ORIGIN` (default `http://localhost:5173`). Use the same hostname as the callback and the same browser used to connect Facebook; the HttpOnly connection cookie is shared across ports and remains restricted to `/api/facebook`. The Vite proxy preserves Host, Origin and cookies. Different ports require configuring the exact frontend origin and restarting the backend. Unknown origins, mismatched hosts and frontend form submissions are rejected. No wildcard CORS or fallback to a server-configured token is used. Other connection routes keep their backend-origin guards.
 
 The test page and connect response allow `https://www.facebook.com` in CSP `form-action` because browsers may apply that directive to the OAuth redirect following the local POST. Other routes retain Helmet's default `form-action 'self'`. Reload the test page after a backend restart to receive its current CSP.
 

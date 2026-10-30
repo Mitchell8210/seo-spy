@@ -16,6 +16,12 @@ The response contract is:
     summaries: string[]
     findings: Finding[]
     recommendations: Recommendation[]
+    evidenceSummaries: {
+      version: 'programmatic-evidence-v1'
+      auditId: string
+      findings: { id: string; evidenceIds: string[]; text: string; sourceLabel: string }[]
+      checks: []
+    }
   } | null
   latestAttempt: StoredReportSummary | null
 }
@@ -23,7 +29,13 @@ The response contract is:
 
 The backend chooses the latest usable saved Facebook report and retains an older usable result when a newer attempt failed. The page maps saved data into its existing selected-account block, score hero, four health cards, and priority report. It does not add separate summary, coverage, profile, or post sections. Loading, API errors, no report, and partial coverage are handled in the page's existing visual style. Findings/recommendations come from the backend; the frontend does not calculate scores, infer social advice, or provide unsupported approval/apply controls. Saved evidence does not establish current connection status.
 
-To connect Facebook and generate a report, use the local backend tool at `http://localhost:3001/api/facebook`, then reload the Social Media page. This preserves the backend's same-origin cookie/Origin checks. Loading the saved report is read-only. Do not open the OAuth tool through the frontend proxy.
+To connect Facebook, use the local backend tool at `http://localhost:3001/api/facebook`, then open the frontend at `http://localhost:5173` in the same browser. Do not open the OAuth tool through the frontend proxy. The frontend hostname must match the callback hostname so the browser sends the HttpOnly `/api/facebook` connection cookie.
+
+The approved Run Report button beside the selected-account dropdown submits `{businessId, pageId}` to `POST /api/facebook/reports` through the same-origin Vite proxy. The backend permits only JSON requests with Host and Origin matching `FACEBOOK_FRONTEND_ORIGIN` (default `http://localhost:5173`) and the callback hostname. Configure that exact local origin for another frontend port. OAuth, connection diagnostics and disconnect remain backend-only; no broad CORS or credentials in browser code were added.
+
+Report creation returns after bounded collection and durable archiving. The client allows 180 seconds for this request, prevents duplicate clicks, shows a running state, and reloads the saved report on completion. Existing results stay visible during collection and failures, including reconnect-required and failed-report responses. Viewing alone remains read-only; clicking Run Report performs fresh Meta reads using the existing authorized browser connection. The button stacks beneath the dropdown on small screens. No other components or presentation were changed.
+
+Issue details use backend-generated evidence summaries (at most 280 characters) instead of raw observation keys, JSON, or post IDs. These describe missing profile fields, collected posting activity and differing contact numbers, retaining API/sample limitations. The existing explanation, impact, affected area and recommendation slots continue to use backend values. Summary audit/finding/evidence references are checked before publishing a response. Older APIs without summaries use the existing unavailable text; raw observations are never a fallback. The backend derives current summaries from old archives without rewriting them. No component structure, labels, styles or actions changed for this integration; suggestions remain programmatic and fixes require manual review.
 
 Verification:
 

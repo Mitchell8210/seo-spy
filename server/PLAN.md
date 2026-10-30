@@ -6,6 +6,29 @@ Last updated: October 28, 2026.
 
 ## Progress record
 
+### October 30, 2026 - Social Media report rerun control
+
+- Connected an approved Run Report button beside the social account selector to existing browser-authorized Facebook report generation, preserving saved results during collection and failures.
+- Added an exact local frontend origin setting for JSON report requests through the existing proxy. Retained cookie-bound credentials, permission checks, authorized Page selection, duplicate protection, immutable archives and backend-only OAuth/diagnostic routes.
+
+### October 30, 2026 - readable Social Media report evidence
+
+- Added evidence-linked programmatic summaries to the saved Facebook analysis response. Existing detail fields show clear observations, implications and recommendations without raw key/value dumps or post identifiers.
+- Preserved collection caveats, immutable archives, metric meanings, UI structure and review-only actions. Older archives gain summaries on read; older APIs without summaries use the existing unavailable treatment. AI generation remains deferred.
+
+### October 30, 2026 - evidence-based Website performance priorities
+
+- Replaced blanket low severity for known Lighthouse performance findings with `website-priority-v1`: strategy-aware metric boundaries, evidence-linked decisions and conditional diagnostic escalation. Preserved measured category scores and unavailable combined scores.
+- Generated targeted investigation/fix steps and same-device verification guidance. Unknown checks and unrelated findings retain their existing classifications; poor category scores alone never escalate findings.
+- Added saved-report analysis reads and frontend data overlays so legacy reports reflect current priorities without rewriting archives, scans, provider calls, or presentation changes. See WEBSITE_PRIORITY_RULES.md for policy boundaries and sources.
+
+### October 29, 2026 - backend-owned Website evidence summaries
+
+- Added a backend reporting step that persists versioned, concise evidence summaries in newly generated homepage/Lighthouse reports. Uses actual check observations and measured values, with no frontend finding-specific copy catalog. Raw evidence and scores are preserved.
+- Added the read-only `GET /api/audits/:auditId/evidence-summary` contract. Older archives gain derived summaries without overwrites, scans, or provider calls. Source references and summary method version remain explicit.
+- Connected the existing Website evidence slots to backend summary text and compact source captions, preserving components, headings, controls, styling and layout. Shared Lighthouse payloads, base64 image data, and internal IDs no longer fill each disclosure.
+- AI-generated reports, interpretation and weighted scoring remain future backend analysis stages. The programmatic summary version is distinct from scoring versions; no API keys or model calls are introduced here.
+
 ### October 29, 2026 - integrate the remote Social Media components
 
 - Fast-forwarded local main to origin/main `9229270`, preserving uncommitted backend and client work. The overlapping local page/router were backed up under ignored `reports/integration-backups/main-9229270/` before the pull.

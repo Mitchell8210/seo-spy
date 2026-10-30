@@ -1,5 +1,4 @@
 import type { FacebookFinding, FacebookReportResponse } from '../types/facebook'
-import type { Evidence } from '../types/backend'
 import type { SocialCategory, SocialFinding, SocialHealthMetric } from '../types/socialMedia'
 
 const formatNumber = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('en-US').format(value) : 'Not available'
@@ -11,12 +10,6 @@ function category(finding: FacebookFinding): SocialCategory {
   if (/engagement|interactions/.test(finding.checkId)) return 'Engagement'
   if (/follow|growth/.test(finding.checkId)) return 'Growth'
   return 'Profile'
-}
-
-function evidenceText(items: Evidence[]) {
-  if (!items.length) return 'Supporting evidence was not included in this saved report.'
-  const text = items.map(item => `${item.checkId} · Collected ${item.collectedAt}\n${Object.entries(item.observed).map(([key, value]) => `${key}: ${value}`).join('\n')}`).join('\n\n')
-  return text.length > 6000 ? `${text.slice(0, 6000)}\n… Full collected evidence is available in the report download.` : text
 }
 
 export function mapSocialMediaReport(data: FacebookReportResponse) {
@@ -55,7 +48,7 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
   const findings: SocialFinding[] = sources.map(finding => {
     const recommendation = recommendations.find(item => item.findingId === finding.id)
     return { id: finding.id, title: finding.title, category: category(finding), severity: severity[finding.severity], status: 'Needs review', explanation: finding.explanation,
-      evidence: evidenceText(report.results.evidence.filter(item => finding.evidenceIds.includes(item.id))), impact: recommendation?.purpose ?? 'Review the collected evidence before deciding whether a change is appropriate.', affectedArea: facebook.pageName,
+      evidence: analysis?.evidenceSummaries?.findings.find(item => item.id === finding.id)?.text ?? 'Supporting evidence was not included in this saved report.', impact: recommendation?.purpose ?? 'Review the collected evidence before deciding whether a change is appropriate.', affectedArea: facebook.pageName,
       recommendation: { id: recommendation?.id ?? `${finding.id}-review`, action: recommendation?.recommendedChange ?? 'Review this finding and the saved evidence before making changes.' } }
   })
   return { facebook, healthMetrics, findings, scoreSummary, summaries: analysis?.summaries ?? [], periodLabel: `Last ${facebook.window.requestedDays} days`, evidenceLabel: `Saved Facebook evidence · Collected ${facebook.collectedAt}` }

@@ -14,6 +14,8 @@ import type { AuditReportRecord, StoredReportSummary } from "./report.types.js";
 import { ReportFileReferenceDto } from "./report-reference.dto.js";
 import type { FacebookReport } from "../integrations/facebook/types.js";
 import type { FacebookAnalysis } from "../integrations/facebook/analyze.js";
+import { EvidenceSummariesDto } from "../reporting/evidence-summary.dto.js";
+import { WebsiteAnalysisDto } from "../contracts/website-analysis.dto.js";
 
 class ArchivedAuditDto extends OmitType(AuditSummaryDto, [
   "counts",
@@ -21,6 +23,10 @@ class ArchivedAuditDto extends OmitType(AuditSummaryDto, [
 ] as const) {}
 
 class ArchivedResultsDto implements AuditResults {
+  @ApiPropertyOptional({ type: () => WebsiteAnalysisDto })
+  websiteAnalysis?: WebsiteAnalysisDto;
+  @ApiPropertyOptional({ type: () => EvidenceSummariesDto })
+  evidenceSummaries?: EvidenceSummariesDto;
   @ApiProperty({ type: [EvidenceDto] }) evidence!: EvidenceDto[];
   @ApiProperty({ type: [FindingDto] }) findings!: FindingDto[];
   @ApiProperty({ type: [RecommendationDto] })
@@ -73,6 +79,8 @@ export class ReportListDto {
 }
 
 export class FacebookAnalysisDto implements FacebookAnalysis {
+  @ApiProperty({ type: () => EvidenceSummariesDto, description: "Programmatic, evidence-linked descriptions for the existing report details; raw archived facts remain unchanged." })
+  evidenceSummaries!: EvidenceSummariesDto;
   @ApiProperty({ enum: ["facebook-analysis-v1"] })
   version!: "facebook-analysis-v1";
   @ApiProperty({

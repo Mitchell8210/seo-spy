@@ -1,105 +1,49 @@
 # Website page and backend API mapping
 
-This is a handoff for a later integration task. The `/website` page and its components remain unchanged and still consume `mockWebsiteAudits`. The separate `/backend-lab` page is the working API reference. This document describes the current contract first, then proposes decisions to agree with the frontend engineer.
+The /website page now reads saved live Website reports. Its existing sections, controls, metric labels, styles and layout are preserved. The approved mock/sample captions describe the actual saved audit and unavailable states. Other mock pages retain their original captions.
 
-## Current sources
+## Implemented integration
 
-- Page and view models: `src/pages/Website/Website.tsx`, `src/types/website.ts`, and `src/types/dashboard.ts`.
-- Current presentation: `WebsiteSelector`, `WebsiteHealth`, `ScoreCard`, and the `WebsiteFindings` priority board. `PageIssues` and `PassedChecks` exist but are not currently rendered by `Website.tsx`.
-- Mock data: `src/data/mockWebsiteAudits.ts` and `src/data/mockResults.ts`. The selector currently has one mock website, while the mock audit includes fictional homepage, services, and contact-page findings. The array-based model can represent more sites; this is not evidence that multiple sites/pages have been audited.
-- Implemented API definitions: `../server/src/contracts/domain.ts`, `../server/src/contracts/responses.dto.ts`, and `../server/src/contracts/lighthouse.dto.ts`. Swagger is available at `/api/docs` and `/api/docs-json` on the backend.
-- Working browser client: `src/pages/BackendLab/types.ts`, `api.ts`, and `useBackendLab.ts`. Browser code must not import backend implementation modules.
+- Public API client: src/services/backendApi.ts; archive response types: src/types/websiteApi.ts.
+- Read lifecycle: src/hooks/useWebsiteReport.ts. It reads the dashboard for registered identity/active progress, lists saved reports, and downloads the newest completed or partial live homepage/Lighthouse report plus its backend evidence summaries. Demo and Facebook archives are excluded. Reads use the audit ID and fixed local API routes, never archive-supplied URLs.
+- View adapter: src/services/websiteMapping.ts. Browser modules do not import backend implementation code.
+- Business selection uses the businessId query parameter, defaulting to the existing demo business ID. Identity and website URL come from the API, not mock website content. There is one registered site per business; the API has no multi-site registration/list endpoint.
+- The reader checks business/audit identity and evidence ownership/references before publishing a report. Status and report replace the previous view together. A newer failed attempt or a refresh failure keeps prior usable results visible.
+- The page reads archives after backend restarts; it does not rely on the dashboard retaining an in-memory completed audit. A saved report badge describes saved data, not current website connectivity.
+- Reads refresh every 2.5 seconds while the dashboard has an active audit, otherwise every 15 seconds, when the window regains focus, and when the Website investigation changes status. In-flight requests abort on business change/unmount. Page viewing only issues GET requests.
+- The approved Run Report button sits to the right of the website selector on wider screens and stacks beneath it on small screens. It reuses the Dashboard investigation hook to start a mobile Lighthouse audit for the selected business (`POST /api/businesses/:businessId/audits`, `{scope: 'lighthouse', strategy: 'mobile'}`). This includes homepage HTML collection. Submission and active-audit states prevent duplicate runs; the existing notice area displays progress and errors. Previous usable results remain visible until a new saved report is loaded. After a status/submission error, the same button recovers status before starting another run, avoiding duplicates after ambiguous responses. No other presentation changes were introduced.
 
-## API reads and job lifecycle
+## Existing data slots
 
-| Operation | Implemented route | Consumer purpose |
-| --- | --- | --- |
-| Load business/latest usable result/active job | `GET /api/businesses/:businessId/dashboard` | Initial page data and refresh recovery |
-| Start HTML investigation | `POST /api/businesses/:businessId/audits` with `{"scope":"homepage"}` | Evidence-backed HTML findings; no Lighthouse report |
-| Start HTML plus Lighthouse | Same POST with `{"scope":"lighthouse","strategy":"mobile"}` | Mobile lab measurement; `desktop` is also supported |
-| Poll job | `GET /api/audits/:auditId` | `status`, `stage`, dates, warnings, failure, counts |
-| Load findings and all evidence | `GET /api/audits/:auditId/findings` | Findings plus observations, including observations without findings |
-| Load recommendations | `GET /api/audits/:auditId/recommendations` | Suggestions linked by `findingId` |
-| Load normalized Lighthouse report | `GET /api/audits/:auditId/lighthouse` | Nullable report, status, failure, warnings |
+| Slot | Real source and semantics |
+| --- | --- |
+| Selected website | Registered business ID, URL and hostname; saved-report status when archive data is shown |
+| Analyzed time | audit.completedAt, with generatedAt fallback; original timestamp formatted in the existing Pacific timezone |
+| Four category cards | Lighthouse performance, accessibility, best-practices and seo category scores; existing label capitalization preserved |
+| SEO Spy Website Score | Unavailable; no frontend averaging or substitution of Lighthouse SEO |
+| Issues requiring attention | Number of website-source findings actually displayed |
+| Checks passed / Great Condition | Distinct category-referenced binary Lighthouse checks with score 1; numeric, manual, skipped, informative and error checks are excluded |
+| Finding severity/title/explanation | Backend values, mapped to the existing severity labels |
+| Finding category | Explicit HTML check-ID mapping or Lighthouse category membership; unknown IDs preserved instead of guessing from titles |
+| Evidence | Concise backend-generated summary text plus a compact source/time caption; raw observations and IDs remain in the saved report, and collected HTML is never injected |
+| Affected pages | All distinct evidence source URLs associated with a finding; no fictional services/contact pages |
+| Recommended fix | recommendedChange joined by findingId |
 
-Creation returns `202 Accepted`, an audit ID, and a relative `statusUrl` immediately. The target website comes from the registered business record, not a user-provided URL. One queued/running audit per business is allowed; `409 AUDIT_ALREADY_ACTIVE` means resume the existing job rather than submit another.
+Measured zero remains zero. Null and missing category scores use the existing unavailable gauge treatment. HTML-only results have unavailable category scores and passed-check totals, because observations alone do not prove passed checks. The archive retains complete evidence and Lighthouse provenance. Existing evidence slots identify HTML collection versus Lighthouse device/version/time. Coverage, partial status, warnings, active progress, failed newer attempts and read errors use the existing captions/status area.
 
-The lab polls sequentially every 2.5 seconds. Stop on all three terminal statuses: `completed`, `partial`, and `failed`. Retain the prior usable report while a new job runs. Publish a terminal report and its status together after its endpoints load, so a new partial-result label does not briefly accompany old scores. After a lost creation response, reconcile the dashboard: the job may be active or may already have completed.
+Fix Now still opens a disclosure. View Fix Steps shows suggestions; Review Manually only acknowledges selection in this view. Fix with AI remains disabled. There are no approval/execution/verification API writes. A passing Lighthouse check is not a verified remediation.
 
-PageSpeed failure preserves HTML findings as a terminal `partial` audit with `failure` and warnings. Some unavailable Lighthouse category scores can also produce partial completion while the other measured scores remain usable. A collection failure produces a failed audit; the dashboard retains the previous usable result. Keep the failed attempt's status distinct from the report being displayed. Backend restarts clear in-memory jobs and history; browser reload can resume work only while that backend process still has it.
+Evidence summaries come from `GET /api/audits/:auditId/evidence-summary` as `{version,auditId,findings,checks}`. Items contain `{id,evidenceIds,text,sourceLabel}`. The backend persists `programmatic-evidence-v1` summaries on new Website reports and derives the same display data from older archives without rewriting them. The hook validates summary version, audit identity and references before replacing the view. The adapter displays returned text directly; it has no finding-specific summary templates and does not fall back to raw JSON. Missing summaries use the existing unavailable treatment. AI summaries and weighted scoring remain future backend work.
 
-## Field-by-field mapping
+Priority and recommendation data come from `GET /api/audits/:auditId/website-analysis`, versioned `website-priority-v1`. The hook validates the audit, finding/recommendation IDs and evidence associations before overlaying analysis onto the saved report. Existing columns and controls render these updated data values; no priority rules run in the browser. New reports persist this analysis, while legacy archives remain unchanged. See ../server/WEBSITE_PRIORITY_RULES.md for numeric boundaries, diagnostic rules and limitations. Analysis read failures retain previous usable results.
 
-| Website view-model field | Current API support | Integration treatment |
-| --- | --- | --- |
-| `ConnectedWebsite.id` / audit `websiteId` | Business ID and website connection IDs are returned, but audit ownership is `businessId`; no independent website-audit CRUD API exists. | Choose one stable business/asset mapping in the adapter. Do not send the mock connection ID as `businessId`. |
-| `ConnectedWebsite.url` / `domain` | `dashboard.business.website`; website connection `identity` may contain the fetched final URL. | Derive a display hostname from the registered URL. Preserve requested/final URLs separately in evidence. |
-| `ConnectedWebsite.status: 'Connected'` | Connection status is `connected`, `disconnected`, `authorization_required`, `checking`, or `error`, with separate demo/live mode. | Current frontend type is too narrow. Support the returned states without calling every asset connected. |
-| `WebsiteAudit.id` | `latestAudit.id` or the selected per-audit ID. | Use generated audit IDs, not fixture IDs. |
-| `analyzedAt` | Audit `completedAt`; Lighthouse `fetchedAt`; each evidence record `collectedAt`. | Use completion time for the audit label and retain collection/measurement times for provenance. Do not replace dates with the browser's current time. |
-| `results.categories` | Four normalized Lighthouse categories: `performance`, `accessibility`, `best-practices`, `seo`. Each has `title`, `score`, `availability`, and `auditIds`. | Map title to label and measured score to value. Preserve unavailable/null state and provider/device/version metadata. |
-| `results.overall` | Original backend score array has website/social/consistency/overall entries, but real values remain null and unavailable. | Current required numeric `Score.value` cannot represent this. Show unavailable or hide the aggregate card until a backend scoring rule exists. |
-| `results.issues` | `findings.length` and audit `counts.findings`. | Derive the displayed count from that audit's records and the chosen filter. If counting website-only findings, label the filter and use the same set in the board. |
-| `results.checksPassed` | No backend aggregate pass count is supplied. Lighthouse check outcomes are available; HTML evidence does not expose explicit per-check pass status. | Do not carry over mock `34`, subtract findings from an assumed total, or count evidence records as checks. Agree on the pass-count semantics first. |
-| Finding `id`, `title`, `explanation` | Direct fields on each backend finding. | Preserve IDs and text. Render provider/site strings as text; descriptions may contain Markdown. |
-| Finding `severity` | `critical`, `medium`, `low`. Current real HTML/Lighthouse review rules emit `low`. | Capitalize to the existing UI labels. Do not invent urgency or populate empty columns with mock issues. |
-| Finding `source` / `status` | `website` or `website_and_facebook`; status is currently `needs_review`. | Map to readable labels. The Website view type forces `Website`; either extend it for cross-channel records or explicitly filter them with coverage explained. |
-| Finding `category` | No `WebsiteCategory` field is returned. HTML findings have `checkId`; Lighthouse findings have namespaced IDs such as `lighthouse:image-alt`. Lighthouse category `auditIds` reference its checks. | An explicit adapter taxonomy is needed. It must retain the original check ID and allow unknown/multiple categories; do not guess from a title. |
-| Finding `evidence: string` | `evidenceIds` references separate evidence records containing `sourceUrl`, `collectedAt`, `mode`, `checkId`, and `observed`. | A text summary can serve the existing card, but retain all references and expose details. `observed` values are strings; list observations are JSON-encoded strings. |
-| Finding `pageId` | No page entity or `pageId` is returned. | Derive a report-local page association from referenced evidence URLs if required. Avoid manufacturing services/contact-page findings. |
-| `AffectedPage.url` / `findingIds` | Can be derived from finding-to-evidence links and distinct `sourceUrl` values. | Group observations by actual evidence URL. A single finding may reference more than one URL; use the existing `findingIds` association or expand the view type rather than discard links. |
-| `PassedCheck` | Normalized Lighthouse checks contain ID/title/description/score/display mode; they have no independent verification status. | Introduce a clear measured-check mapping, as described below. Do not call a successful lab check a verified applied fix. |
-| `WebsiteRecommendation.action` | Backend `recommendedChange`, linked through the same `findingId`. | Map the action text; retain backend `title`, `explanation`, `purpose`, and review status where the UI can show them. |
+## Verification
 
-## Scores, metrics, and coverage
+From client/:
 
-The mock card category IDs already match the four Lighthouse category IDs, but their numeric values are fixtures. Real Lighthouse category scores are normalized to 0-100 by the backend. A real zero is a measured value; null means unavailable. The separate backend `scores` array is not a substitute for the Lighthouse report. Do not average categories in the browser, relabel Lighthouse SEO as the combined SEO Spy Website Score, or treat Lighthouse best-practices as a consistency/social score.
+- npm run lint
+- npm run build
+- npm run test:website: offline adapter tests and Chrome browser checks against a controlled local API. No provider calls or credentials. Chrome path can be supplied with CHROME_PATH.
+- npm run test:website:saved: optional read-only browser check against an already running backend and an existing saved live Website report. Defaults to http://127.0.0.1:3001; override with WEBSITE_API_TARGET. It does not create an audit or consume provider credits.
 
-`Score` in `src/types/dashboard.ts` requires `value: number`; `ScoreCard` and `WebsiteHealth` assume it can always display a number. A later integration must add a nullable measured-score view model or deliberately broaden those shared types/components with the frontend engineer. Passing zero in place of null would create a false result. Mode/provenance also needs to be passed to currently hard-coded mock labels instead of globally removing them from pages that still use fixtures.
-
-The Lighthouse report additionally provides:
-
-| Metric ID | Unit | Meaning in this API |
-| --- | --- | --- |
-| `first-contentful-paint` | `ms` | Lighthouse lab FCP |
-| `largest-contentful-paint` | `ms` | Lighthouse lab LCP |
-| `total-blocking-time` | `ms` | Lighthouse lab TBT |
-| `speed-index` | `ms` | Lighthouse lab Speed Index |
-| `cumulative-layout-shift` | `unitless` | Lighthouse lab CLS |
-
-Each metric has nullable `value` and `displayValue`. Retain units when formatting and show unavailable rather than a fabricated measurement. Label results mobile/desktop lab measurements with `provider`, `lighthouseVersion`, `fetchedAt`, and report URL provenance. These measurements do not establish field Core Web Vitals, complete accessibility compliance, actual search-engine rankings, or social performance.
-
-Coverage is the registered homepage HTML response plus a remote Lighthouse navigation when requested. The backend does not crawl the mock services/contact URLs or return a page inventory, a crawl budget result, site-wide broken-link count, sitemap discovery result, or independent robots.txt collection result. Redirected homepage URLs and a different Lighthouse final URL are provenance, not proof of a multi-page crawl. A provider check such as `robots-txt` can appear in Lighthouse results, but do not attach the fictional mock `/robots.txt` or `/sitemap.xml` evidence to it.
-
-## Passed, skipped, manual, and failed checks
-
-The backend stores every normalized Lighthouse check's `scoreDisplayMode` and nullable score. It currently creates review findings only for category-referenced `binary`/`numeric` checks with a non-null score below 1. Category `auditIds` identify which checks belong to a category. One check may belong to multiple categories; count it once when presenting a distinct-check total.
-
-For a future Great Condition column:
-
-- A category-referenced `binary` check with score 1 can be shown as a passing Lighthouse check with its report URL, title, description, device, engine version, and fetch time. The existing `Passed` label is suitable once provenance is explicit.
-- A numeric score of 1 means full score on that measured Lighthouse check; agree whether such graded measurements belong in the same column or a separate metrics section. Do not silently mix graded metrics with binary pass totals.
-- Keep `manual`, `notApplicable`, `informative`, and `error` outcomes distinct. None is proof of a pass, and a null score must not become zero. Unknown future display modes need an explicit fallback.
-- Do not infer HTML passes from an empty findings array. HTML evidence includes collection metadata and observations, not a complete structured outcome inventory. If authoritative HTML pass badges/counts are required, add versioned check outcomes on the backend in a later task.
-- Reserve `Verified` for a defined verification process using fresh evidence after an approved change. A Lighthouse run or a local manual-review click does not verify remediation.
-
-`WebsiteFindings` declares a `passedTotal` prop but currently does not use it; its column counts come from the supplied board items. `PassedChecks`, if reintroduced, currently describes examples from a mock aggregate. Decide whether the future UI lists every eligible passing check or a subset, and label its total accordingly.
-
-## Recommendations and controls
-
-Current backend recommendations support review only. No API approves, edits, rejects, executes, or verifies external changes. `Fix with AI` must remain unavailable. `Fix Now` currently opens a disclosure; clarify that it reveals suggestions rather than applying a fix. `View Fix Steps` can display the backend's `recommendedChange`; local `Review Manually` feedback must remain explicitly local and must not become a persisted backend approval or a `Verified` status.
-
-The evidence text and measured outcomes should drive the actual recommendations. Do not reuse the mock assumptions that empty alt text always represents informative images, that a canonical difference is necessarily wrong, or that a service-page link was tested. Current backend findings deliberately request contextual review for empty alternatives and canonical differences.
-
-## Proposed integration sequence and decisions
-
-1. Agree on one business/website identity mapping for the initial single-business demo. Keep the adapter parameterized by business ID; the current API has no business-list or multi-site registration endpoint.
-2. Extract or promote the lab's public API client/types and polling hook into shared frontend service/hook locations in a dedicated integration change. Keep the lab operational while moving imports; avoid two diverging implementations of timeout, cancellation, duplicate reconciliation, and atomic report hydration.
-3. Create a Website page view-model adapter. Preserve audit IDs, evidence links, dates, mode, warnings, and partial/failure state. Decide the category taxonomy and multi-URL association explicitly instead of embedding conditionals in card JSX.
-4. Agree on unavailable score presentation and the aggregate-card policy. Update shared score components only with a coordinated change that preserves other mock consumers. Display measured category scores separately from undefined combined scores.
-5. Agree on the eligible passed-check list/count and whether structured HTML outcome records are needed. Exclude manual/skipped/error states and do not promise remediation verification.
-6. Add real loading/empty/error/partial/progress states to `/website`. Replace mock wording only when showing live records, retain old results during work, and offer retry/recovery without automatically repeating a creation request.
-7. Coordinate which existing mock-specific strings become component props, including WebsiteHealth quality labels, Website page disclaimers/timestamps, board evidence notes, review controls, and PassedChecks coverage text. Keep external write controls disabled.
-8. Test the adapter and page with seeded demo, HTML-only completion, full Lighthouse completion, measured zero/null scores, provider quota failure, collection failure, stale/lost requests, reload/unmount, and per-audit identity checks. Then explicitly run a live smoke test; normal checks should not consume Google quota.
-
-No page integration, new backend capability, or score calculation is implemented by this document. The next code change should be scoped with the frontend engineer using these decisions, while `/backend-lab` remains the reference for the working API workflow.
+Browser screenshots are written under ignored node_modules/.cache/website-smoke/ directories. Coverage includes unavailable/zero scores, binary pass semantics, evidence and review controls, safe text rendering, older usable results after failures, active progress, refresh recovery, partial HTML-only results, identity rejection, demo/social exclusion and mobile overflow.

@@ -4,6 +4,10 @@ Local NestJS API using TypeScript and the Express adapter. Supports simulated de
 
 ## Setup
 
+The Social Media Run Report control uses the existing browser-authorized `POST /api/facebook/reports` endpoint. JSON requests through the frontend proxy require exact Host/Origin matching `FACEBOOK_FRONTEND_ORIGIN` (default `http://localhost:5173`) and the same hostname as `FACEBOOK_REDIRECT_URI`. Open the frontend and backend connection page using `localhost` in the same browser. OAuth/diagnostic routes remain backend-only. See [Facebook setup](FACEBOOK_SETUP.md) for details.
+
+The saved Facebook report endpoint (`GET /api/businesses/:businessId/facebook-report`) includes `analysis.evidenceSummaries`: `{version: "programmatic-evidence-v1", auditId, findings, checks: []}`. Each finding summary contains its finding ID, matching evidence IDs, readable text (at most 280 characters), and a collection source caption. Missing profile fields, posting inactivity, and phone inconsistencies receive programmatic explanations with coverage caveats. Existing explanations, customer impact and conditional recommendations populate the other detail fields. Reads derive these summaries for old archives without rewriting evidence, collecting new data or calling AI. Raw observations remain in the report download.
+
 Use Node.js 24 (verified with 24.11.1) and npm. From this directory:
 
 ```powershell
@@ -14,9 +18,15 @@ npm run dev
 
 The environment file is optional; defaults match `.env.example`. The server listens on `http://127.0.0.1:3001/api`. `HOST` is restricted to `127.0.0.1` because authentication is not implemented. Keep this API local.
 
-The server and client run independently. The dashboard investigation action uses this API while its result cards remain illustrative. The Social Media page reads saved Facebook reports; the Website page still uses fixtures. See the client integration notes for each page.
+The server and client run independently. The dashboard investigation action uses this API while its result cards remain illustrative. The Social Media and Website pages read saved live reports. See the client integration notes for each page.
+
+Website report generation includes `results.evidenceSummaries`, versioned as `programmatic-evidence-v1`. This backend step produces short evidence text from the finding's own recorded check result (including actual measured values/units), instead of repeating shared Lighthouse metadata or image payloads. It preserves raw observations, finding/evidence references, timestamps and scores. The frontend displays this text directly; it does not maintain finding-specific summaries.
+
+`GET /api/audits/:auditId/evidence-summary` returns `{version,auditId,findings,checks}` for a saved homepage/Lighthouse report. Each item contains `{id,evidenceIds,text,sourceLabel}`; text is bounded to 280 characters. This read-only endpoint also derives summaries for older archives without editing files, rescanning, or calling a model. `GET /api/audits/:auditId/report` continues to download the original archive. Future AI interpretation and weighted scoring should produce separately versioned analysis referencing these immutable observations; this first pass does not add AI calls or calculate new scores.
 
 ## Interactive API documentation
+
+Website performance priorities and actionable recommendations use the backend's [versioned priority policy](WEBSITE_PRIORITY_RULES.md). New reports persist `results.websiteAnalysis`; `GET /api/audits/:auditId/website-analysis` returns current `{version,auditId,findings,recommendations,priorities}` for saved live Website reports, including older all-low archives. This read preserves source files and measured scores and makes no provider calls. The existing Website board displays those backend classifications in its current columns.
 
 The frontend Social Media page reads saved Facebook reports through `GET /api/businesses/:businessId/facebook-report`, including versioned derived analysis, evidence, partial coverage and the latest failed attempt. The endpoint does not contact Meta or alter archives. See [Facebook setup](FACEBOOK_SETUP.md#saved-results-in-the-application).
 

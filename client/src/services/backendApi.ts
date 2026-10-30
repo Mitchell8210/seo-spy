@@ -1,5 +1,6 @@
 import type { AuditSummary, CreatedAudit, Dashboard, FindingsResponse, LighthouseResponse, RecommendationsResponse, Strategy } from '../types/backend'
-import type { FacebookReportResponse } from '../types/facebook'
+import type { CreatedFacebookReport, FacebookReportResponse } from '../types/facebook'
+import type { EvidenceSummaries, WebsiteAnalysis, WebsiteReport, WebsiteReportList } from '../types/websiteApi'
 
 export class BackendApiError extends Error {
   readonly code: string
@@ -19,12 +20,12 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-async function request<T>(path: string, signal: AbortSignal, body?: object): Promise<T> {
+async function request<T>(path: string, signal: AbortSignal, body?: object, timeoutMs = 15000): Promise<T> {
   let response: Response
   try {
     response = await fetch(`/api${path}`, {
       method: body ? 'POST' : 'GET',
-      signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
       headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
@@ -65,6 +66,13 @@ function identifier(id: string) {
 const auditPath = (id: string) => `/audits/${identifier(id)}`
 
 export const backendApi = {
+  createFacebookReport: (businessId: string, pageId: string, signal: AbortSignal) => request<CreatedFacebookReport>(
+    '/facebook/reports', signal, { businessId, pageId }, 180000,
+  ),
+  websiteAnalysis: (id: string, signal: AbortSignal) => request<WebsiteAnalysis>(`${auditPath(id)}/website-analysis`, signal),
+  evidenceSummaries: (id: string, signal: AbortSignal) => request<EvidenceSummaries>(`${auditPath(id)}/evidence-summary`, signal),
+  reports: (businessId: string, signal: AbortSignal) => request<WebsiteReportList>(`/businesses/${identifier(businessId)}/reports`, signal),
+  report: (id: string, signal: AbortSignal) => request<WebsiteReport>(`${auditPath(id)}/report`, signal),
   facebookReport: (businessId: string, signal: AbortSignal) => request<FacebookReportResponse>(`/businesses/${identifier(businessId)}/facebook-report`, signal),
   dashboard: (businessId: string, signal: AbortSignal) => request<Dashboard>(`/businesses/${identifier(businessId)}/dashboard`, signal),
   create: (businessId: string, scope: 'homepage' | 'lighthouse', strategy: Strategy, signal: AbortSignal) => request<CreatedAudit>(

@@ -37,6 +37,8 @@ Keep the architecture understandable for a small team. Use one NestJS applicatio
 
 The Social Media page now reads saved Facebook results via `GET /api/businesses/:businessId/facebook-report`: `{businessId,report,analysis,latestAttempt}`. Analysis is versioned and evidence-linked, computed from saved facts without Meta calls or archive mutation. New reports persist the improved findings. Preserve an older usable report when a newer attempt fails, and distinguish stale saved results from current authorization status.
 
+Its Run Report button posts JSON to `/api/facebook/reports` using the existing browser connection. Only this route also accepts proxy requests whose Host and Origin exactly match the configured local `FACEBOOK_FRONTEND_ORIGIN` and whose hostname matches the callback. Preserve this explicit allowlist and cookie/session authorization; OAuth, diagnostics and disconnect remain backend-origin-only. The default frontend origin is `http://localhost:5173`.
+
 The local Facebook browser flow now validates/exchanges long-lived user access, uses AES-GCM encrypted credential storage, offers authorized Page selection and registered business ID input, and creates immutable reports through `POST /api/facebook/reports`. All five read permissions are required. The browser connection survives restarts for at most 30 days, subject to earlier Meta expiry/revocation; reconnect clears old access and disconnect deletes saved credentials. This remains a local operator tool, separate from application sign-in/business ownership and main dashboard integration. Preserve the same-origin/CSP guards and keep `FACEBOOK_TOKEN_KEY` and credentials out of logs, responses and reports.
 
 Local `npm run audit:facebook` collection now creates business-scoped, immutable Facebook reports with explicit authorized Page selection. Existing archive read routes support Facebook scope/source/version and optional `results.facebook`; HTTP audit creation and main dashboard population remain separate. See [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md). Do not treat CLI business selection as production ownership authorization.
@@ -64,6 +66,10 @@ Current routes, relative to the local server origin:
 | GET    | `/api/audits/:auditId/lighthouse`       | Normalized Google Lighthouse report or null, plus failure and warnings   |
 | GET    | `/api/businesses/:businessId/reports`   | Saved report metadata sorted newest first                                |
 | GET    | `/api/audits/:auditId/report`           | Download a durable JSON report                                           |
+| GET    | `/api/audits/:auditId/evidence-summary` | Versioned concise Website evidence summaries derived from a saved report |
+| GET    | `/api/audits/:auditId/website-analysis` | Current versioned Website priorities/recommendations from saved evidence |
+
+Website performance priorities follow [WEBSITE_PRIORITY_RULES.md](WEBSITE_PRIORITY_RULES.md). Keep policy versions separate from Lighthouse category scoring. New reports persist derived analysis; old source archives remain immutable and the Website page consumes current analysis through the read-only endpoint. Do not restore blanket low severity or promote all findings solely from a category score.
 
 Local Facebook diagnostic routes are `/api/facebook` and its `/status`, `/connect`, `/callback`, `/connection`, and `/disconnect` routes; see [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for methods and setup. Keep provider tokens server-only, bound to the test browser session, and out of audit archives. Do not expose this local tool publicly or imply that permission grants verify write capability.
 

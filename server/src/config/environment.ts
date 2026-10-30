@@ -38,6 +38,13 @@ const environmentSchema = z.object({
     .trim()
     .min(1)
     .default("reports/facebook-connections"),
+  FACEBOOK_FRONTEND_ORIGIN: z.string().url().refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname) &&
+        url.pathname === "/" && !url.search && !url.hash && !url.username && !url.password && url.origin === value;
+    } catch { return false; }
+  }).default("http://localhost:5173"),
   FACEBOOK_GRAPH_VERSION: z
     .string()
     .regex(/^v\d+\.0$/)

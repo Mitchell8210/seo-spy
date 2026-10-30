@@ -1,5 +1,13 @@
 # SEO Spy — Frontend Development Instructions
 
+## 0. Strict frontend preservation - required
+
+Read and follow the **Strict frontend preservation rule** in [the project instructions](../AGENTS.md). It applies to all frontend work and takes precedence over broader implementation, design, accessibility, component, and roadmap guidance below.
+
+Unless the user explicitly requests or approves the specific change, never alter existing labels, titles, static copy, icons, styles, layouts, or responsive behavior, and never add, remove, replace, or reorganize visible sections, components, controls, or data fields. A data-integration or functionality request authorizes wiring the available data into the correct existing slots and making existing controls work; it does not authorize presentation changes.
+
+Suggest improvements freely, but discuss the exact proposed change and obtain clear user permission before implementing it. If an accurate integration requires a presentation change, ask first and continue only the independent work already authorized. Do not substitute a different metric under an existing label or invent missing values to avoid that discussion. Review the final diff strictly for unauthorized presentation changes.
+
 ## 1. Scope
 
 You are working on the **frontend of SEO Spy**.

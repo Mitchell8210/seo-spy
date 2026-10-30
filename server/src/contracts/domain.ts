@@ -4,6 +4,8 @@ import type {
 } from "../integrations/lighthouse/types.js";
 import type { ReportFileReference } from "../reports/report.types.js";
 import type { FacebookReport } from "../integrations/facebook/types.js";
+import type { EvidenceSummaries } from "../reporting/evidence-summary.js";
+import type { WebsiteAnalysis } from "../integrations/lighthouse/prioritize.js";
 
 export type AuditStatus =
   "queued" | "running" | "completed" | "partial" | "failed";
@@ -81,6 +83,8 @@ export interface Score {
 }
 
 export interface AuditResults {
+  websiteAnalysis?: WebsiteAnalysis;
+  evidenceSummaries?: EvidenceSummaries;
   evidence: Evidence[];
   findings: Finding[];
   recommendations: Recommendation[];

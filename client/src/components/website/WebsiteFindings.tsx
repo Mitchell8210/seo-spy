@@ -19,7 +19,7 @@ const columns = [
   { id: 'great', label: 'Great Condition', description: 'Healthy checks with supporting evidence.', severity: 'Passed', icon: CircleCheck, accepts: ['Passed', 'Verified'] },
 ] satisfies { id: string; label: string; description: string; severity: Severity; icon: typeof CircleAlert; accepts: Severity[] }[]
 
-function BoardCard({ item }: { item: BoardItem }) {
+function BoardCard({ item, live, evidenceLabel }: { item: BoardItem; live: boolean; evidenceLabel: string }) {
   const fixRef = useRef<HTMLHeadingElement>(null)
   const isIssue = item.kind === 'issue'
   const title = isIssue ? item.finding.title : item.check.title
@@ -27,7 +27,7 @@ function BoardCard({ item }: { item: BoardItem }) {
   const urls = isIssue ? item.pages.map((page) => page.url) : [item.check.url]
 
   return (
-    <li id={isIssue ? item.finding.id : `board-${item.check.id}`} className="min-w-0 scroll-mt-6 rounded-lg border border-line bg-surface p-4 shadow-sm">
+    <li id={isIssue ? item.finding.id : `board-${item.check.id}`} className="min-w-0 scroll-mt-6 rounded-lg border border-line bg-surface p-4 shadow-sm [overflow-wrap:anywhere]">
       <StatusBadge label={severity} tone={findingStatuses[severity].tone} />
       <h4 className="mt-3 break-words text-sm font-semibold leading-6 text-ink">{title}</h4>
       {isIssue && <>
@@ -36,7 +36,7 @@ function BoardCard({ item }: { item: BoardItem }) {
       </>}
       <ReportDisclosure title={title} isIssue={isIssue}>
         <div><h5 className="font-semibold text-ink">{isIssue ? 'What we found' : 'What was checked'}</h5><p className="mt-1">{title}</p></div>
-        <div><h5 className="font-semibold text-ink">Evidence</h5><p className="mt-1">{isIssue ? item.finding.evidence : item.check.evidence}</p><p className="mt-1 text-muted">Mock evidence · Not a live scan</p></div>
+        <div><h5 className="font-semibold text-ink">Evidence</h5><p className="mt-1">{isIssue ? item.finding.evidence : item.check.evidence}</p><p className="mt-1 text-muted">{live ? (isIssue ? item.finding.evidenceLabel : item.check.evidenceLabel) ?? evidenceLabel : 'Mock evidence · Not a live scan'}</p></div>
         {isIssue && <div><h5 className="font-semibold text-ink">Why it matters</h5><p className="mt-1">{item.finding.explanation}</p></div>}
         <div>
           <h5 className="font-semibold text-ink">{isIssue ? 'Affected page(s)' : 'Relevant URL'}</h5>
@@ -48,8 +48,8 @@ function BoardCard({ item }: { item: BoardItem }) {
             {item.recommendations.length > 0 ? <ul className="mt-1 space-y-3">{item.recommendations.map((recommendation) => <li key={recommendation.id} data-recommendation-id={recommendation.id}>{recommendation.action}</li>)}</ul> : <p className="mt-1 text-muted">No recommended fix is linked to this finding yet.</p>}
             <p className="mt-2 text-muted">Priority: {item.finding.severity} · Suggested change · Not applied</p>
           </div>
-          <FindingActions fixRef={fixRef} hasRecommendation={item.recommendations.length > 0} />
-        </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{item.check.status} in this mock analysis. No live verification was performed.</p></div>}
+          <FindingActions live={live} fixRef={fixRef} hasRecommendation={item.recommendations.length > 0} />
+        </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{live ? 'Passed in this Lighthouse run. Remediation has not been verified.' : `${item.check.status} in this mock analysis. No live verification was performed.`}</p></div>}
         <dl className="space-y-1 border-t border-line pt-3 text-muted">
           <div><dt className="inline font-medium text-secondary">Source: </dt><dd className="inline">{isIssue ? item.finding.source : 'Website'}</dd></div>
           <div><dt className="inline font-medium text-secondary">Status: </dt><dd className="inline">{isIssue ? item.finding.status : item.check.status}</dd></div>
@@ -63,11 +63,13 @@ type WebsiteFindingsProps = {
   findings: WebsiteFinding[]
   pages: AffectedPage[]
   passedChecks: PassedCheck[]
-  passedTotal: number
+  passedTotal: number | null
+  live?: boolean
+  evidenceLabel?: string
   recommendations: WebsiteRecommendation[]
 }
 
-export function WebsiteFindings({ findings, pages, passedChecks, recommendations }: WebsiteFindingsProps) {
+export function WebsiteFindings({ findings, pages, passedChecks, recommendations, live = false, evidenceLabel = '' }: WebsiteFindingsProps) {
   const items: BoardItem[] = [
     ...findings.map((finding): BoardItem => ({
       kind: 'issue',
@@ -90,7 +92,7 @@ export function WebsiteFindings({ findings, pages, passedChecks, recommendations
           const grouped = items.filter((item) => column.accepts.some((severity) => severity === (item.kind === 'issue' ? item.finding.severity : item.check.status)))
           return (
             <PriorityColumn key={column.id} headingId={`findings-${column.id}-title`} label={column.label} description={column.description} severity={column.severity} count={grouped.length}>
-              {grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} />)}
+              {grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} live={live} evidenceLabel={evidenceLabel} />)}
             </PriorityColumn>
           )
         })}
