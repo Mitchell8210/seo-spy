@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "preview:backend-lab": "vite preview --config vite.backend-lab.config.ts --host 127.0.0.1",
-    "test:backend-lab": "node scripts/backend-lab-smoke.mjs"
+    "test:backend-lab": "node scripts/backend-lab-smoke.mjs",
+    "test:dashboard": "node scripts/backend-lab-smoke.mjs --dashboard",
+    "test:social-media": "node scripts/social-media-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.62.0",

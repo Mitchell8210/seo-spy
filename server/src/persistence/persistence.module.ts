@@ -1,6 +1,9 @@
-import { Module } from '@nestjs/common';
-import { AUDIT_REPOSITORY, BUSINESS_REPOSITORY } from './repositories.js';
-import { MemoryAuditRepository, MemoryBusinessRepository } from './memory/memory.repositories.js';
+import { Module } from "@nestjs/common";
+import { AUDIT_REPOSITORY, BUSINESS_REPOSITORY } from "./repositories.js";
+import {
+  MemoryAuditRepository,
+  MemoryBusinessRepository,
+} from "./memory/memory.repositories.js";
 
 @Module({
   providers: [

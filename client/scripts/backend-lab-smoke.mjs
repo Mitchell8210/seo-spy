@@ -1,4 +1,5 @@
-// Offline fixtures by default. --live runs Lighthouse; --live --homepage runs HTML-only checks.
+// Offline fixtures by default. --dashboard checks dashboard status-only integration.
+// --live runs Lighthouse; --live --homepage runs HTML-only checks; --live --dashboard runs one dashboard audit.
 // No credentials are read by this script; live mode lets the backend load its own environment.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -15,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
 const liveMode = process.argv.includes('--live');
+const dashboardMode = process.argv.includes('--dashboard');
 const liveScope = process.argv.includes('--homepage') ? 'homepage' : 'lighthouse';
 const fixtureHost = '127.0.0.1';
 const businessId = 'demo-guzman';
@@ -36,6 +38,7 @@ let available = true;
 let apiRequests = 0;
 let statusRequests = 0;
 let loseNextCreateResponse = false;
+let nextOutcome = null;
 const stageDelayMs = 6500;
 
 function summary(id, { scope = 'lighthouse', mode = 'live', status = 'completed', stage = 'complete', failure = null } = {}) {
@@ -80,10 +83,10 @@ function settleJobs() {
   if (!activeId) return;
   const job = jobs.get(activeId);
   if (Date.now() - job.created < stageDelayMs) return;
-  job.summary.status = job.partial ? 'partial' : 'completed';
+  job.summary.status = job.failed ? 'failed' : job.partial ? 'partial' : 'completed';
   job.summary.stage = 'complete';
   job.summary.completedAt = stamp();
-  job.summary.failure = job.partial ? { code: 'PAGESPEED_QUOTA_EXCEEDED', message: 'Fixture PageSpeed quota exhausted; HTML findings are retained.' } : null;
+  job.summary.failure = job.failed ? { code: 'AUDIT_FAILED', message: 'Fixture investigation failed. Please try again.' } : job.partial ? { code: 'PAGESPEED_QUOTA_EXCEEDED', message: 'Fixture PageSpeed quota exhausted; HTML findings are retained.' } : null;
   job.report = job.partial ? null : lighthouseReport();
   latestId = activeId;
   activeId = null;
@@ -124,7 +127,8 @@ async function serveFixture(req, res) {
     const id = `00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`;
     const audit = summary(id, { scope: input.scope, status: 'running', stage: input.scope === 'lighthouse' ? 'running_lighthouse' : 'collecting_evidence' });
     if (input.strategy) audit.strategy = input.strategy;
-    jobs.set(id, { summary: audit, created: Date.now(), partial: creationCount === 2, report: null });
+    jobs.set(id, { summary: audit, created: Date.now(), partial: nextOutcome === 'partial' || (!dashboardMode && creationCount === 2), failed: nextOutcome === 'failed', report: null });
+    nextOutcome = null;
     activeId = id;
     if (loseNextCreateResponse) {
       loseNextCreateResponse = false;
@@ -222,6 +226,118 @@ async function screenshot(filename) {
   const destination = path.join(artifactDir, filename);
   await writeFile(destination, Buffer.from(shot.data, 'base64'));
   return destination;
+}
+
+const dashboardStatus = () => elementText('dashboard-investigation-status');
+const dashboardDisabled = () => evaluate(`document.querySelector(${JSON.stringify(selector('dashboard-run-audit'))})?.disabled`);
+const dashboardMocks = () => evaluate(`JSON.stringify([...document.querySelectorAll('section[aria-labelledby="main-spy-title"], section[aria-labelledby="consistency-title"], section[aria-labelledby="results-title"], section[aria-labelledby="connections-title"], section[aria-labelledby="findings-title"], section[aria-labelledby="recommendations-title"]')].map(node => node.innerText))`);
+function assertDashboardRequests(requests) {
+  assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must never request report result endpoints.');
+  for (const request of requests.filter(request => request.method === 'POST')) {
+    assert.equal(new URL(request.url).pathname, `/api/businesses/${businessId}/audits`);
+    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { scope: 'lighthouse', strategy: 'mobile' });
+  }
+}
+
+async function dashboardScenario(base, backendBase) {
+  await cdp.send('Network.enable');
+  const requestStart = browserRequests.length;
+  await navigate(`${base}/dashboard`);
+  await waitFor(async () => /Your online performance/.test(await pageText()) && await dashboardDisabled() === false, 'dashboard ready');
+  const mocks = await dashboardMocks();
+  assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
+  assert.equal(creationCount, 0);
+  assert.equal(browserRequests.slice(requestStart).filter(request => request.method === 'POST').length, 0, 'Loading the dashboard must not start an audit.');
+  pass('Dashboard loads illustrative results without starting an audit');
+
+  const submit = async outcome => {
+    nextOutcome = outcome;
+    const expected = creationCount + 1;
+    await click('dashboard-run-audit'); await click('dashboard-run-audit');
+    if (!liveMode) await waitFor(() => creationCount === expected, 'one dashboard POST');
+    await waitFor(async () => await dashboardDisabled() === true, 'disabled investigation button');
+    await waitFor(async () => /lighthouse|measur|performance|running|queued/i.test(await dashboardStatus()), 'running stage label');
+    return expected;
+  };
+  const terminal = async pattern => {
+    await waitFor(async () => pattern.test(await dashboardStatus()) && await dashboardDisabled() === false, 'dashboard terminal state', liveMode ? 170000 : 22000);
+    assert.equal(await dashboardMocks(), mocks, 'Investigation status must leave all illustrative cards unchanged.');
+    assert.doesNotMatch(await pageText(), /Fixture image review|Review fixture image text|fixture-13\.0\.0/);
+    assertDashboardRequests(browserRequests.slice(requestStart));
+  };
+  const stopped = async () => {
+    await delay(500); const polls = statusRequests; await delay(3000);
+    assert.equal(statusRequests, polls, 'Terminal status must stop polling.');
+  };
+  await submit('completed');
+  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\. Dashboard results below are still illustrative\./);
+  assert.match(await dashboardStatus(), /[a-f0-9-]{36}/i, 'Status must identify the backend audit.');
+  pass('One mobile Lighthouse POST, duplicate prevention, stage progress, and unchanged mock results');
+  if (liveMode) {
+    const requests = browserRequests.slice(requestStart);
+    assert.equal(requests.filter(request => request.method === 'POST').length, 1, 'Live dashboard must create exactly one real audit.');
+    const auditId = /([a-f0-9-]{36})/i.exec(await dashboardStatus())?.[1];
+    const audit = await (await fetch(`${backendBase}/api/audits/${auditId}`, { signal: AbortSignal.timeout(10000) })).json();
+    assert.equal(audit.status, 'completed');
+    assert.equal(audit.scope, 'lighthouse'); assert.equal(audit.strategy, 'mobile');
+    await screenshot('dashboard-live-desktop.png');
+    await writeFile(path.join(artifactDir, 'dashboard-live-summary.json'), `${JSON.stringify({ auditId, status: audit.status, auditPosts: 1, reportReads: 0 }, null, 2)}\n`);
+  } else {
+    await stopped();
+    await submit('partial'); await terminal(/Investigation partially completed\. A partial report is available\./); await stopped();
+    pass('Partial provider failure preserves mock cards and stops polling');
+    await submit('failed'); await terminal(/failed|could not complete/i); await stopped();
+    pass('Full failure is shown without replacing illustrative cards');
+
+    const expected = await submit('completed');
+    await cdp.send('Page.reload');
+    await waitFor(async () => await dashboardDisabled() === true, 'reload resumes active audit');
+    assert.equal(creationCount, expected);
+    pass('Reload resumes an active job without another POST');
+    await navigate(`${base}/website`);
+    await waitFor(() => evaluate('location.pathname === "/website"'), 'website navigation');
+    await delay(500); const polls = statusRequests; await delay(3000);
+    assert.equal(statusRequests, polls, 'Leaving dashboard cancels polling.');
+    pass('Leaving dashboard for website cancels polling');
+    // Finish the detached fixture before testing API recovery.
+    if (activeId) { jobs.get(activeId).created = Date.now() - stageDelayMs - 1; settleJobs(); }
+    available = false;
+    await navigate(`${base}/dashboard`);
+    await waitFor(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(selector('dashboard-investigation-retry'))}))`), 'dashboard retry button');
+    assert.equal(creationCount, expected);
+    available = true;
+    await click('dashboard-investigation-retry');
+    await waitFor(async () => await dashboardDisabled() === false, 'dashboard API recovery');
+    await delay(500); assert.equal(creationCount, expected, 'Retry must only reconcile status, never auto-submit.');
+    pass('API error and retry never automatically submit an audit');
+    loseNextCreateResponse = true;
+    await click('dashboard-run-audit');
+    await waitFor(() => creationCount === expected + 1, 'lost dashboard POST accepted');
+    await waitFor(async () => (await dashboardStatus()).includes(`00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`), 'lost dashboard POST reconciled audit ID');
+    await terminal(/Investigation complete\. Report generated\./);
+    assert.equal(creationCount, expected + 1);
+    assert.match(await dashboardStatus(), new RegExp(`00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`));
+    assert.equal(await evaluate('document.querySelectorAll(\'[role="alert"]\').length'), 0);
+    await delay(800); assert.equal(creationCount, expected + 1);
+    pass('Lost POST reconciles an already completed job without resubmitting');
+
+    const restartCreations = await submit('completed');
+    const forgottenId = activeId;
+    assert.ok(forgottenId, 'Restart fixture needs an active accepted job.');
+    activeId = null; latestId = seedId; jobs.delete(forgottenId);
+    await waitFor(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(selector('dashboard-investigation-retry'))}))`), 'missing in-memory job retry');
+    await click('dashboard-investigation-retry');
+    await waitFor(async () => await dashboardDisabled() === false && !await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector('dashboard-investigation-retry'))}))`), 'reconcile dashboard after backend restart');
+    assert.equal(creationCount, restartCreations, 'Restart recovery must not automatically POST another audit.');
+    assert.equal(await evaluate('document.querySelectorAll(\'[role="alert"]\').length'), 0, 'Restart recovery must clear the missing-job error.');
+    assert.equal((await dashboardStatus()).includes(forgottenId), false, 'Restart recovery must clear stale job status.');
+    assert.equal(await dashboardMocks(), mocks);
+    await delay(800); assert.equal(creationCount, restartCreations);
+    pass('Backend restart clears a missing active job through status-only retry');
+  }
+  assertDashboardRequests(browserRequests.slice(requestStart));
+  assert.deepEqual(browserErrors, []);
+  console.log(JSON.stringify({ mode: liveMode ? 'live-dashboard' : 'fixture-dashboard', passed: results.length, scenarios: results, artifactDirectory: artifactDir }, null, 2));
 }
 
 async function liveScenario(base, backendBase) {
@@ -332,15 +448,20 @@ try {
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
 
-  if (liveMode) {
+  if (dashboardMode) {
+    await dashboardScenario(base, backendBase);
+  } else if (liveMode) {
     await liveScenario(base, backendBase);
   } else {
+  await cdp.send('Network.enable');
+  const initialRequests = browserRequests.length;
   await navigate(`${base}/dashboard`);
   await waitFor(async () => /Your online performance/.test(await pageText()), 'original dashboard');
   await delay(800);
-  assert.equal(apiRequests, 0, 'Original dashboard must not request the backend.');
+  assert.equal(creationCount, 0, 'Dashboard must not start an audit before a click.');
+  assertDashboardRequests(browserRequests.slice(initialRequests));
   assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
-  pass('Original dashboard remains mock-only with no API requests');
+  pass('Dashboard remains mock-only without starting an audit');
 
   await navigate(`${base}/backend-lab`);
   await waitFor(async () => (await pageText()).includes('Fixture Tax Accounting'), 'backend lab data');
@@ -382,7 +503,7 @@ try {
   await waitFor(async () => (await pageText()).includes('Fixture Tax Accounting'), 'reload data');
   await delay(3000); assert.equal(creationCount, 3, 'Reload must resume an existing job instead of creating one.');
   pass('Reload resumes the active audit without creating another job');
-  await navigate(`${base}/dashboard`); await waitFor(async () => /Your online performance/.test(await pageText()), 'leave lab');
+  await navigate(`${base}/website`); await waitFor(() => evaluate('location.pathname === "/website"'), 'leave lab');
   await delay(500); const leavingPolls = statusRequests; await delay(3000);
   assert.equal(statusRequests, leavingPolls, 'Leaving the lab must cancel status polling.');
   pass('Leaving the lab cancels polling');

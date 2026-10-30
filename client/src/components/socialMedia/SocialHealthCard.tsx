@@ -14,19 +14,20 @@ export function SocialHealthCard({ metric }: { metric: SocialHealthMetric }) {
     <article className="flex min-w-0 flex-col rounded-2xl border border-blue-400/15 bg-surface p-5 shadow-lg shadow-black/10 sm:p-6">
       <div className={`mb-5 flex size-16 items-center justify-center rounded-2xl border shadow-inner shadow-white/5 ${tile}`}><Icon size={30} strokeWidth={1.75} aria-hidden="true" /></div>
       <h3 className="min-h-12 text-sm font-semibold leading-6 text-secondary">{metric.title}</h3>
-      <p className="mt-2 text-[2.75rem] font-semibold tracking-tight text-ink">{metric.value}</p>
+      <p className={`mt-2 break-words font-semibold tracking-tight text-ink ${metric.value.length > 10 ? 'text-2xl' : 'text-[2.75rem]'}`}>{metric.value}</p>
       <dl className="mt-6 space-y-3.5 border-t border-line pt-5">{metric.supporting.map((item) => {
-        const negative = item.id === 'unfollowed'
+        const neutral = item.direction === 'neutral'
+        const negative = item.direction === 'down' || item.id === 'unfollowed'
         const Indicator = negative ? ArrowDownRight : ArrowUpRight
         return (
           <div key={item.id} className="flex items-start justify-between gap-3">
             <dt className="flex min-w-0 flex-1 items-start gap-2 text-sm leading-6 text-muted">
-              <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md ${negative ? 'bg-red-400/10 text-red-400' : 'bg-emerald-400/10 text-emerald-400'}`}>
-                <Indicator size={15} aria-hidden="true" /><span className="sr-only">{negative ? 'People lost: ' : 'Positive activity: '}</span>
+              <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md ${neutral ? 'bg-elevated text-muted' : negative ? 'bg-red-400/10 text-red-400' : 'bg-emerald-400/10 text-emerald-400'}`}>
+                <Indicator size={15} aria-hidden="true" />{!neutral && <span className="sr-only">{negative ? 'People lost: ' : 'Positive activity: '}</span>}
               </span>
               <span>{item.label}</span>
             </dt>
-            <dd className="shrink-0 text-base font-semibold text-ink">{item.value}</dd>
+            <dd className={`shrink-0 whitespace-nowrap ${neutral ? 'pt-1 text-xs font-medium text-muted' : 'text-base font-semibold text-ink'}`}>{item.value}</dd>
           </div>
         )
       })}</dl>

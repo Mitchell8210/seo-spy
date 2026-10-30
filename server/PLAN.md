@@ -1,10 +1,61 @@
 # SEO Spy backend plan
 
-Status: foundation, homepage checks, Lighthouse integration, and isolated backend-lab workflow implemented and verified. Integration into the main frontend pages remains a separate task.
+Status: foundation, homepage checks, Lighthouse integration, isolated backend-lab workflow, and durable report files implemented. Main dashboard action/status integration is available; real result-card integration and cumulative scoring remain separate tasks.
 Created: October 27, 2026.
 Last updated: October 28, 2026.
 
 ## Progress record
+
+### October 29, 2026 - integrate the remote Social Media components
+
+- Fast-forwarded local main to origin/main `9229270`, preserving uncommitted backend and client work. The overlapping local page/router were backed up under ignored `reports/integration-backups/main-9229270/` before the pull.
+- Adapted saved Facebook data to the remote SocialScoreHero, SocialHealthCard and SocialMediaReport/priority-column layout. Kept remote Settings, navigation and Website components. Unsupported scores/benchmarks/contact metrics remain unavailable; source post engagement and media views are not relabeled as reach or contacts.
+- Connection management remains the explicit local backend OAuth workflow. Saved-report refresh is a separate read-only API action.
+- Verified frontend lint/build and 14 offline Chrome scenarios, including native component layout, absent score/benchmark, evidence disclosure, failed/empty/retry states, mobile overflow and the remote Settings route. App/Settings/navigation/Website files match fetched origin/main exactly; no commit or push was made.
+
+### October 29, 2026 - Facebook analysis and saved Social Media results
+
+- Added deterministic, versioned Facebook analysis for populated profile fields, posting inactivity within the collected sample, phone inconsistencies and measured performance summaries. Recommendations reference saved evidence; unsupported data stays unavailable and scores remain undefined.
+- Added `GET /api/businesses/:businessId/facebook-report` to read the newest usable Facebook archive with current derived analysis and separate newest-attempt metadata. Reads preserve immutable files and avoid provider calls; newer failures do not erase previous usable results.
+- New report collections persist improved findings/recommendations with an analysis version. Existing reports gain derived display analysis without rewriting archives.
+- Connected the Social Media page to saved results, with retry/empty/partial/failure states, evidence and read-only recommendations. The browser connection tool remains the entry point for live collection; main dashboard/website integration and customer authorization remain separate.
+- Verified backend type-check, lint, build and 175 passing tests (one platform-dependent skip). Read the real saved Guzman report through the new HTTP endpoint: current analysis identified hours, username, posting inactivity and differing contact numbers without provider calls or archive changes.
+- Frontend lint/build passed, along with 11 offline Chrome smoke scenarios covering partial/empty/error/retry states, zero versus unavailable values, failed-latest preservation, business mismatch rejection, inert provider text, mobile layout and read-only requests. See `../client/SOCIAL_MEDIA_INTEGRATION.md`.
+
+### October 29, 2026 - browser-authorized Facebook reports
+
+- Connected browser OAuth to registered business/Page selection and durable report creation. All five read permissions must be granted. Reports use the browser credential, not the optional `.env` test token.
+- Added long-lived token exchange and debug-token app/type/validity/expiry validation. AES-256-GCM credentials persist across restarts using a separate local encryption key, with a 30-day browser/server connection limit, expiry checks, revocation handling, and disconnect deletion.
+- Retained bounded collection, safe partial/failed archives, duplicate browser report prevention, shutdown cancellation and token-free response/report boundaries. Application authentication, business ownership, production hosting, scheduling and main frontend integration remain deferred.
+- Controlled validation passed 161 tests (one skipped), type-check, lint and build. Basic live browser OAuth was verified previously; the extended exchange and populated browser report still require reconnecting through the user browser.
+
+- Scoped the Facebook test page/connect CSP form-action allowlist to self plus https://www.facebook.com so browser form redirects can reach Meta. Other routes retain strict defaults. Added regression coverage for both CSP policies and the config-ID/callback redirect.
+
+- Fixed the Facebook test page's referrer policy so same-origin browser form POSTs can pass the strict Origin check. Callback responses retain no-referrer; mismatched hostname/port errors identify the configured test URL. Type-check, lint and 12 provider tests passed.
+
+### October 29, 2026 UTC - saved Facebook audit reports
+
+- Added a bounded, validated Facebook collector and explicit local CLI with Page selection. Profile, recent post and insight evidence retain dates, missing/failed availability, coverage, and linked review recommendations; numeric scores remain unavailable.
+- Reused immutable report storage and archived-result retrieval with additive Facebook scope/source/version and optional results.facebook. CLI-created audits do not change main dashboard state or enable HTTP Facebook audit creation.
+- Customer ownership/authentication, browser onboarding, frontend mapping, cross-channel analysis, full-history collection and approved writes remain separate work.
+- Verified type-check, lint, production build, and 143 passing tests (one platform-dependent test skipped). Live archive write/readback succeeded for failed attempts; Meta rejected the saved token with 190/463 on October 29. A fresh token is needed to verify a populated Facebook archive against live data.
+
+### October 28, 2026 - local Facebook connection diagnostics
+
+- Added a local-only OAuth connection test and sanitized permission/Page diagnostics, separate from audit scoring and main dashboard results. See [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for configuration, browser flow, routes, and Meta dashboard actions.
+- Browser-bound, single-use OAuth state and temporary in-memory sessions keep provider credentials on the backend. Restart/expiry discards the connection; disconnect forgets it locally rather than revoking Meta authorization.
+- Test reads cover granted permissions, bounded authorized Page listing, and independent Page metadata/posts/insights probes. Granted optional write permissions do not execute or verify external writes.
+- Live token checks verified all five requested read permissions through representative endpoints (47 probes, 42 accessible, five metric requests rejected with error 100). Browser consent remains pending. Production authentication, per-business ownership, durable credential storage, full analytics collection, and approved Page changes remain deferred.
+
+### October 28, 2026 - durable per-run report archive
+
+- Kept execution/runtime state in memory while adding automatic immutable JSON snapshots for completed, partial, and failed investigations. The startup demo seed is not archived as a new run.
+- Added versioned `seo-spy.audit-report.v1` files under ignored `server/reports/audits/`, named with a Windows-safe UTC generation timestamp and audit UUID. Report IDs match audit IDs; snapshots include business/audit metadata, scope and version provenance, and available results. Credentials/configuration/raw HTML are excluded.
+- Added bounded archive reads, atomic non-overwriting publication, same-audit idempotency, and safe storage errors. Successful terminal status is published after its report file exists; unavailable disk storage yields REPORT_WRITE_FAILED.
+- Added date-sorted business report listing and report download endpoints, optional report metadata in audit summaries, and archived fallback for known per-audit reads after restart. Active jobs and the dashboard selection are not restored from files.
+- Verified filesystem/HTTP tests covering distinct and concurrent writes, complete normalized data, failed/partial reports, file errors, and restart retrieval. The symlink escape case is skipped on Windows where privileged symlink creation is unavailable; it runs on other supported test platforms.
+- Live homepage validation created `2026-10-29T01-44-18-740Z_7c9e9000-5c9e-42de-bc78-36080bdbefb8.json`. A separate backend process listed and downloaded that same report and recovered its completed audit/evidence. The run retained seven evidence records and one finding.
+- Future AI evaluation should create separate derived results referencing the immutable report ID/schema version. No AI analysis, aggregate scoring, approval/execution integration, or external write actions were added.
 
 ### October 28, 2026 - validated Lighthouse and backend-lab checkpoint
 
@@ -188,28 +239,28 @@ Each feature directory follows the audits example as needed. Export services/pro
 
 Foundation tools are now installed in `server/package.json` with resolved versions in its lockfile. Tools for later milestones remain planned. Verify compatible stable versions and runtime requirements when adding them.
 
-| Tool | Purpose | Timing / decision |
-| --- | --- | --- |
-| Node.js | Backend runtime and HTTP fetching | Select a supported LTS release compatible with dependencies |
-| TypeScript | Strict application and contract typing | Foundation; compile and type-check with `tsc` |
-| NestJS (`@nestjs/core`, `@nestjs/common`, `@nestjs/platform-express`) | Feature modules, HTTP controllers, dependency injection, and lifecycle management | Foundation; use the Express adapter and compatible Express version |
-| Nest CLI | Scaffold, watch, and build the TypeScript application | Foundation; use local package scripts and compile for production |
-| `@nestjs/swagger` | Interactive endpoint documentation and OpenAPI schemas | Installed; `/api/docs` and `/api/docs-json` |
-| `@nestjs/config` + Zod | Load and validate environment configuration; validate structured provider output later | Foundation; keep configuration validation explicit |
-| `class-validator` + `class-transformer` | Validate request DTOs through Nest's global `ValidationPipe` | Foundation; reject unknown request fields and validate parameter/body types; avoid duplicate Zod request schemas |
-| ESLint and typescript-eslint | Static checks | Foundation; align conventions with the client |
-| nestjs-pino / Pino | Structured application and request logs integrated with Nest | Proposed for foundation; redact credentials |
-| Helmet | Baseline HTTP response headers | Foundation; configure for an API |
-| `@nestjs/testing` + Jest + Supertest | Isolated provider tests and HTTP integration tests | Foundation; override repository/provider dependencies and apply the same global app configuration as runtime |
-| Cheerio | Parse fetched HTML into structured evidence | First website audit |
-| PostgreSQL | Durable records, relationships, and audit history | Persistence milestone |
-| PostgreSQL driver/query builder or ORM | Database access and migrations | Choose with persistence; evaluate `pg`, Drizzle, or Prisma and select one approach |
-| Meta Graph API / Facebook Login | Authorized Facebook Page identity and available audit data | Later; confirm permissions, app review, metric availability, and reporting windows |
-| Meta-compatible model API | Structured AI analysis and recommendations | Later; confirm actual provider, model, hosting, pricing, and data handling before integration |
-| Baseten | Possible model hosting/provider integration | Candidate only; do not assume it is required |
-| Playwright or another browser collector | Render JavaScript-dependent pages | Optional later; not needed for the initial HTML-only collector |
-| Google PageSpeed Insights v5 | Remote Lighthouse lab measurements, categories, metrics, and checks | Implemented through a fixed provider adapter; Google API key/quota applies |
-| WordPress API/integration | Apply explicitly approved website changes | Deferred; requires a defined authorization and verification design |
+| Tool                                                                  | Purpose                                                                                | Timing / decision                                                                                                |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Node.js                                                               | Backend runtime and HTTP fetching                                                      | Select a supported LTS release compatible with dependencies                                                      |
+| TypeScript                                                            | Strict application and contract typing                                                 | Foundation; compile and type-check with `tsc`                                                                    |
+| NestJS (`@nestjs/core`, `@nestjs/common`, `@nestjs/platform-express`) | Feature modules, HTTP controllers, dependency injection, and lifecycle management      | Foundation; use the Express adapter and compatible Express version                                               |
+| Nest CLI                                                              | Scaffold, watch, and build the TypeScript application                                  | Foundation; use local package scripts and compile for production                                                 |
+| `@nestjs/swagger`                                                     | Interactive endpoint documentation and OpenAPI schemas                                 | Installed; `/api/docs` and `/api/docs-json`                                                                      |
+| `@nestjs/config` + Zod                                                | Load and validate environment configuration; validate structured provider output later | Foundation; keep configuration validation explicit                                                               |
+| `class-validator` + `class-transformer`                               | Validate request DTOs through Nest's global `ValidationPipe`                           | Foundation; reject unknown request fields and validate parameter/body types; avoid duplicate Zod request schemas |
+| ESLint and typescript-eslint                                          | Static checks                                                                          | Foundation; align conventions with the client                                                                    |
+| nestjs-pino / Pino                                                    | Structured application and request logs integrated with Nest                           | Proposed for foundation; redact credentials                                                                      |
+| Helmet                                                                | Baseline HTTP response headers                                                         | Foundation; configure for an API                                                                                 |
+| `@nestjs/testing` + Jest + Supertest                                  | Isolated provider tests and HTTP integration tests                                     | Foundation; override repository/provider dependencies and apply the same global app configuration as runtime     |
+| Cheerio                                                               | Parse fetched HTML into structured evidence                                            | First website audit                                                                                              |
+| PostgreSQL                                                            | Durable records, relationships, and audit history                                      | Persistence milestone                                                                                            |
+| PostgreSQL driver/query builder or ORM                                | Database access and migrations                                                         | Choose with persistence; evaluate `pg`, Drizzle, or Prisma and select one approach                               |
+| Meta Graph API / Facebook Login                                       | Authorized Facebook Page identity and available audit data                             | Later; confirm permissions, app review, metric availability, and reporting windows                               |
+| Meta-compatible model API                                             | Structured AI analysis and recommendations                                             | Later; confirm actual provider, model, hosting, pricing, and data handling before integration                    |
+| Baseten                                                               | Possible model hosting/provider integration                                            | Candidate only; do not assume it is required                                                                     |
+| Playwright or another browser collector                               | Render JavaScript-dependent pages                                                      | Optional later; not needed for the initial HTML-only collector                                                   |
+| Google PageSpeed Insights v5                                          | Remote Lighthouse lab measurements, categories, metrics, and checks                    | Implemented through a fixed provider adapter; Google API key/quota applies                                       |
+| WordPress API/integration                                             | Apply explicitly approved website changes                                              | Deferred; requires a defined authorization and verification design                                               |
 
 No paid service is needed for the initial API or deterministic website audit. Do not spend Meta credits during foundation work.
 
@@ -226,17 +277,17 @@ Reference documentation:
 
 Use generated identifiers and UTC timestamps from the start. IDs should not depend on display names or URLs.
 
-| Record | Core information |
-| --- | --- |
-| Business | ID, name, website URL, timestamps; ownership added before shared deployment |
-| Connection | Business ID, platform, identity, authorization/connection status, last checked time |
-| Audit | Business ID, requested scope, status, stage, timestamps, warnings, failure information, scoring version |
-| Evidence | Audit ID, source URL/platform, collection time, check identifier, observed values and relevant excerpts |
-| Finding | Audit ID, evidence references, check identifier, severity, source, title, explanation, review status |
-| Recommendation | Audit ID, finding references, explanation, proposed change, purpose, review/action status |
-| Score | Audit ID, category, value or unavailable state, maximum, scoring version, contributing checks and coverage |
-| Action, later | Approved recommendation revision, actor, target, execution state and result |
-| Verification, later | Action reference, before/after evidence, check result and timestamp |
+| Record              | Core information                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Business            | ID, name, website URL, timestamps; ownership added before shared deployment                                |
+| Connection          | Business ID, platform, identity, authorization/connection status, last checked time                        |
+| Audit               | Business ID, requested scope, status, stage, timestamps, warnings, failure information, scoring version    |
+| Evidence            | Audit ID, source URL/platform, collection time, check identifier, observed values and relevant excerpts    |
+| Finding             | Audit ID, evidence references, check identifier, severity, source, title, explanation, review status       |
+| Recommendation      | Audit ID, finding references, explanation, proposed change, purpose, review/action status                  |
+| Score               | Audit ID, category, value or unavailable state, maximum, scoring version, contributing checks and coverage |
+| Action, later       | Approved recommendation revision, actor, target, execution state and result                                |
+| Verification, later | Action reference, before/after evidence, check result and timestamp                                        |
 
 Contract rules:
 
@@ -254,14 +305,14 @@ Contract rules:
 
 Paths are proposed contracts to finalize during the foundation milestone.
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| GET | `/api/health` | Basic process health |
-| GET | `/api/businesses/:businessId/dashboard` | Business, connections, latest audit summary, scores, priority findings and recommendations |
-| POST | `/api/businesses/:businessId/audits` | Validate scope and enqueue an audit; return `202` with audit ID and status URL |
-| GET | `/api/audits/:auditId` | Lifecycle state, stage, timestamps, warnings and summary |
-| GET | `/api/audits/:auditId/findings` | Findings and evidence references for that audit |
-| GET | `/api/audits/:auditId/recommendations` | Recommendations for that audit |
+| Method | Route                                   | Purpose                                                                                    |
+| ------ | --------------------------------------- | ------------------------------------------------------------------------------------------ |
+| GET    | `/api/health`                           | Basic process health                                                                       |
+| GET    | `/api/businesses/:businessId/dashboard` | Business, connections, latest audit summary, scores, priority findings and recommendations |
+| POST   | `/api/businesses/:businessId/audits`    | Validate scope and enqueue an audit; return `202` with audit ID and status URL             |
+| GET    | `/api/audits/:auditId`                  | Lifecycle state, stage, timestamps, warnings and summary                                   |
+| GET    | `/api/audits/:auditId/findings`         | Findings and evidence references for that audit                                            |
+| GET    | `/api/audits/:auditId/recommendations`  | Recommendations for that audit                                                             |
 
 Initially seed the demo business rather than implementing full business management. Add creation/settings endpoints when the corresponding UI is ready.
 

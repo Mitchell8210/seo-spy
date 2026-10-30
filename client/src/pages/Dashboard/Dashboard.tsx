@@ -1,19 +1,20 @@
-import { useState } from 'react'
-import { ArrowUpRight, CheckCircle2, Play } from 'lucide-react'
+import { ArrowUpRight, LoaderCircle, Play } from 'lucide-react'
 import { AssetGroup } from '../../components/dashboard/AssetGroup'
 import { WebsiteHealth } from '../../components/dashboard/WebsiteHealth'
 import { SocialPerformance } from '../../components/dashboard/SocialPerformance'
 import { MainSpyScore } from '../../components/dashboard/MainSpyScore'
 import { BusinessConsistency } from '../../components/dashboard/BusinessConsistency'
+import { InvestigationStatus } from '../../components/dashboard/InvestigationStatus'
 import { FindingCard } from '../../components/findings/FindingCard'
 import { StatusBadge } from '../../components/common/StatusBadge'
 import { mockBusiness, mockConnections } from '../../data/mockBusiness'
 import { mockWebsiteResults, mockSocialResults, mockConsistency, mockMainSpyResults } from '../../data/mockResults'
 import { mockFindings } from '../../data/mockFindings'
 import { mockRecommendations } from '../../data/mockRecommendations'
+import { useInvestigation } from '../../hooks/useInvestigation'
 
 export function Dashboard() {
-  const [demoRunComplete, setDemoRunComplete] = useState(false)
+  const investigation = useInvestigation(mockBusiness.id)
 
   const websites = mockConnections.filter((connection) => connection.platform === 'website')
   const socialAccounts = mockConnections.filter((connection) => connection.platform !== 'website')
@@ -39,21 +40,14 @@ export function Dashboard() {
             </a>
             <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary"><span>{websites.length} website{websites.length === 1 ? '' : 's'} connected</span><span>{socialAccounts.length} social account{socialAccounts.length === 1 ? '' : 's'} connected</span></p>
           </div>
-          <button type="button" onClick={() => setDemoRunComplete(true)} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 xl:self-auto">
-            <Play size={16} aria-hidden="true" />Run Investigation
+          <button data-testid="dashboard-run-audit" type="button" onClick={() => void investigation.start()} disabled={investigation.busy || Boolean(investigation.error)} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 xl:self-auto">
+            {investigation.busy ? <LoaderCircle size={16} className="motion-safe:animate-spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{investigation.submitting ? 'Starting investigation…' : investigation.loading ? 'Checking investigation…' : investigation.busy ? 'Investigation running…' : 'Run Investigation'}
           </button>
         </div>
         <div className="mt-5 border-t border-line pt-3 text-xs leading-5 text-muted">
-          Demo workspace. Connections, scores, findings, and recommendations are mock data, not a live assessment.
+          Run Investigation starts a real website audit. The connections, scores, findings, and recommendations shown below are still illustrative. Investigation reports are not displayed on this dashboard yet.
         </div>
-        <div role="status" aria-live="polite">
-          {demoRunComplete && (
-            <p className="mt-4 flex items-start gap-2 rounded-lg bg-blue-950 p-3 text-sm leading-6 text-blue-200">
-              <CheckCircle2 size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Demo investigation complete. The sample results below are ready to review. No website scan or external action was performed.
-            </p>
-          )}
-        </div>
+        <InvestigationStatus audit={investigation.audit} loading={investigation.loading} submitting={investigation.submitting} error={investigation.error} onRetry={investigation.retry} />
       </section>
 
       <MainSpyScore results={mockMainSpyResults} />
