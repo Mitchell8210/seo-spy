@@ -30,8 +30,12 @@ const facebook = {
   profile: { followers_count: { status: 'available', value: 15, collectedAt: now }, hours: { status: 'missing', value: null, collectedAt: now } },
   posts: { status: 'available', items: [{ id: '123_456', message: '<img src=x onerror="window.fixtureExecuted=true">', createdTime: now, url: 'https://www.facebook.com/123_456' }], truncated: true, collectedAt: now },
   metrics: [
+    { name: 'page_daily_follows_unique', status: 'available', period: 'day', points: [{ endTime: now, value: 3 }], aggregation: 'sum', total: 3, collectedAt: now },
+    { name: 'page_daily_unfollows_unique', status: 'available', period: 'day', points: [{ endTime: now, value: 1 }], aggregation: 'sum', total: 1, collectedAt: now },
     { name: 'page_post_engagements', status: 'available', period: 'day', points: [{ endTime: now, value: 0 }], aggregation: 'sum', total: 0, collectedAt: now },
-    { name: 'page_media_view', status: 'unavailable', period: 'day', points: [], aggregation: 'sum', total: null, collectedAt: now },
+    { name: 'page_media_view', status: 'available', period: 'day', points: [{ endTime: now, value: 63 }], aggregation: 'sum', total: 63, collectedAt: now },
+    { name: 'page_views_total', status: 'available', period: 'day', points: [{ endTime: now, value: 3 }], aggregation: 'sum', total: 3, collectedAt: now },
+    { name: 'page_video_views', status: 'available', period: 'day', points: [{ endTime: now, value: 12 }], aggregation: 'sum', total: 12, collectedAt: now },
   ],
   summary: { followersStart: 15, followersEnd: 15, followersChange: 0, latestPostAt: now, postsInWindow: 1, postsInWindowComplete: false },
   coverage: { profileFieldsAvailable: 1, profileFieldsMissing: 1, profileFieldsUnavailable: 0, metricsAvailable: 1, metricsRequested: 2, postsLimit: 50 },
@@ -104,11 +108,24 @@ try {
   await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'saved Facebook report');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), false, 'The saved account dropdown must be interactive.');
   assert.equal(await evaluate('document.querySelector("#social-account").value'), '123');
-  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Post engagements\s+0/); assert.match(await text(), /Media views\s+Not available/);
+  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+0/); assert.match(await text(), /People Reached\s+Not available/);
   assert.match(await text(), /Review the phone number/);
   assert.match(await text(), /Social Media Health Summary/); assert.match(await text(), /SEO Spy Social Media Report/);
   assert.doesNotMatch(await text(), /returned daily measurements|Newest collected post|Report coverage and business details/);
-  assert.match(await text(), /Customer contacts\s+Not available/);
+  assert.match(await text(), /People Who Contacted You\s+Not available/);
+  const healthLabels = await evaluate(`Array.from(document.querySelectorAll('section[aria-labelledby="social-health-title"] article')).map(card => ({ title: card.querySelector('h3').textContent, labels: Array.from(card.querySelectorAll('dt')).map(row => row.lastElementChild.textContent.trim()) }))`);
+  assert.deepEqual(healthLabels, [
+    { title: 'Followers', labels: ['New Followers', 'Unfollowed'] },
+    { title: 'People Reached', labels: ['Media views', 'Page views', 'Video views'] },
+    { title: 'People Who Contacted You', labels: ['Website Clicks', 'Address Clicks', 'People Mentioning Your Business'] },
+    { title: 'Interactions', labels: ['Likes', 'Comments', 'Shares', 'Messages'] },
+  ], 'Health tiles preserve main labels while retaining correctly labeled view metrics.');
+  assert.match(await text(), /Media views\s+63/);
+  assert.match(await text(), /Page views\s+3/);
+  assert.match(await text(), /Video views\s+12/);
+  assert.match(await text(), /Positive activity:.*New Followers\s+3/s);
+  assert.match(await text(), /People lost:.*Unfollowed\s+1/s);
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('section[aria-labelledby="social-health-title"] dd')).filter(value => value.textContent === 'Not collected').every(value => getComputedStyle(value).fontSize === '12px' && getComputedStyle(value).whiteSpace === 'nowrap')`), true, 'Uncollected values use compact, nonwrapping text.');
   assert.doesNotMatch(await text(), /Mock score|Mock benchmark|higher than.*similar local businesses/);
   assert.equal(await evaluate('document.querySelectorAll("[data-performance-graphic]").length'), 1);
   assert.equal(await evaluate('document.querySelector("[data-performance-graphic]").getAttribute("aria-hidden")'), 'true', 'The original graph illustration is decorative.');

@@ -42,12 +42,15 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
   }
   const profileFollowers = facebook.profile.followers_count
   const followers = profileFollowers?.status === 'available' && typeof profileFollowers.value === 'number' ? formatNumber(profileFollowers.value) : 'Not available'
-  const supporting = (id: string, label: string, content: string) => ({ id, label, value: content, direction: 'neutral' as const })
+  const supporting = (id: string, label: string, content: string): SocialHealthMetric['supporting'][number] => ({
+    id, label, value: content,
+    direction: content === 'Not available' || content === 'Not collected' ? 'neutral' : id === 'unfollowed' ? 'down' : 'up',
+  })
   const healthMetrics: SocialHealthMetric[] = [
-    { id: 'followers', title: 'Followers', value: followers, supporting: [supporting('followed', 'Daily new followers', value('page_daily_follows_unique')), supporting('unfollowed', 'Daily unfollows', value('page_daily_unfollows_unique')), supporting('change', 'Net change', formatNumber(facebook.summary.followersChange))] },
-    { id: 'reach', title: 'Media views', value: value('page_media_view'), supporting: [supporting('page-views', 'Page views', value('page_views_total')), supporting('video-views', 'Video views', value('page_video_views'))] },
-    { id: 'contacts', title: 'Customer contacts', value: 'Not available', supporting: [supporting('messages', 'Messages', 'Not collected'), supporting('calls', 'Calls', 'Not collected')] },
-    { id: 'interactions', title: 'Post engagements', value: value('page_post_engagements'), supporting: [supporting('likes', 'Post likes', 'Not collected'), supporting('comments', 'Comments', 'Not collected'), supporting('shares', 'Shares', 'Not collected')] },
+    { id: 'followers', title: 'Followers', value: followers, supporting: [supporting('new-followers', 'New Followers', value('page_daily_follows_unique')), supporting('unfollowed', 'Unfollowed', value('page_daily_unfollows_unique'))] },
+    { id: 'reach', title: 'People Reached', value: 'Not available', supporting: [supporting('media-views', 'Media views', value('page_media_view')), supporting('page-views', 'Page views', value('page_views_total')), supporting('video-views', 'Video views', value('page_video_views'))] },
+    { id: 'contacts', title: 'People Who Contacted You', value: 'Not available', supporting: [supporting('website-clicks', 'Website Clicks', 'Not collected'), supporting('address-clicks', 'Address Clicks', 'Not collected'), supporting('mentions', 'People Mentioning Your Business', 'Not collected')] },
+    { id: 'interactions', title: 'Interactions', value: value('page_post_engagements'), supporting: [supporting('likes', 'Likes', 'Not collected'), supporting('comments', 'Comments', 'Not collected'), supporting('shares', 'Shares', 'Not collected'), supporting('messages', 'Messages', 'Not collected')] },
   ]
   const findings: SocialFinding[] = sources.map(finding => {
     const recommendation = recommendations.find(item => item.findingId === finding.id)
@@ -55,5 +58,5 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
       evidence: evidenceText(report.results.evidence.filter(item => finding.evidenceIds.includes(item.id))), impact: recommendation?.purpose ?? 'Review the collected evidence before deciding whether a change is appropriate.', affectedArea: facebook.pageName,
       recommendation: { id: recommendation?.id ?? `${finding.id}-review`, action: recommendation?.recommendedChange ?? 'Review this finding and the saved evidence before making changes.' } }
   })
-  return { facebook, healthMetrics, findings, scoreSummary, summaries: analysis?.summaries ?? [], periodLabel: `${facebook.window.requestedDays}-day requested window`, evidenceLabel: `Saved Facebook evidence · Collected ${facebook.collectedAt}` }
+  return { facebook, healthMetrics, findings, scoreSummary, summaries: analysis?.summaries ?? [], periodLabel: `Last ${facebook.window.requestedDays} days`, evidenceLabel: `Saved Facebook evidence · Collected ${facebook.collectedAt}` }
 }

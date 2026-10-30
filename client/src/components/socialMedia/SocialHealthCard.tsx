@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, Eye, Heart, MessageCircle, Minus, Users } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Eye, Heart, MessageCircle, Users } from 'lucide-react'
 import type { SocialHealthMetric } from '../../types/socialMedia'
 
 const treatments = {
@@ -17,8 +17,8 @@ export function SocialHealthCard({ metric }: { metric: SocialHealthMetric }) {
       <p className={`mt-2 break-words font-semibold tracking-tight text-ink ${metric.value.length > 10 ? 'text-2xl' : 'text-[2.75rem]'}`}>{metric.value}</p>
       <dl className="mt-6 space-y-3.5 border-t border-line pt-5">{metric.supporting.map((item) => {
         const neutral = item.direction === 'neutral'
-        const negative = item.direction === 'down' || (!item.direction && item.id === 'unfollowed')
-        const Indicator = neutral ? Minus : negative ? ArrowDownRight : ArrowUpRight
+        const negative = item.direction === 'down' || item.id === 'unfollowed'
+        const Indicator = negative ? ArrowDownRight : ArrowUpRight
         return (
           <div key={item.id} className="flex items-start justify-between gap-3">
             <dt className="flex min-w-0 flex-1 items-start gap-2 text-sm leading-6 text-muted">
@@ -27,7 +27,7 @@ export function SocialHealthCard({ metric }: { metric: SocialHealthMetric }) {
               </span>
               <span>{item.label}</span>
             </dt>
-            <dd className="shrink-0 text-base font-semibold text-ink">{item.value}</dd>
+            <dd className={`shrink-0 whitespace-nowrap ${neutral ? 'pt-1 text-xs font-medium text-muted' : 'text-base font-semibold text-ink'}`}>{item.value}</dd>
           </div>
         )
       })}</dl>

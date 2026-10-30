@@ -28,7 +28,7 @@ export function SocialScoreHero({ score, summary, benchmark, mode = 'demo' }: { 
             <div className="mb-2 flex items-center gap-2 text-blue-300"><BadgeCheck size={20} aria-hidden="true" /><p className="text-sm font-semibold text-ink">You’re doing well!</p><TrendingUp size={16} className="ml-auto shrink-0" aria-hidden="true" /></div>
             <p className="text-sm leading-6 text-secondary">Your score is higher than <strong className="font-semibold text-ink">{benchmark.percentile}%</strong> of similar local businesses.</p>
             <p className="mt-2 text-xs leading-5 text-muted">Mock benchmark · Demo comparison</p>
-          </aside> : <aside aria-label="Report coverage insight" className="rounded-xl border border-blue-400/25 bg-blue-400/10 p-4"><p className="text-sm font-semibold text-ink">Review your measured results</p><p className="mt-2 text-sm leading-6 text-secondary">Findings below link to the collected evidence and suggested next steps.</p><p className="mt-2 text-xs leading-5 text-muted">No comparison with other businesses has been measured.</p></aside>}
+          </aside> : <aside aria-label="Benchmark insight" className="rounded-xl border border-blue-400/25 bg-blue-400/10 p-4"><div className="mb-2 flex items-center gap-2 text-blue-300"><BadgeCheck size={20} aria-hidden="true" /><p className="text-sm font-semibold text-ink">Not available</p><TrendingUp size={16} className="ml-auto shrink-0" aria-hidden="true" /></div><p className="text-sm leading-6 text-secondary">No comparison with other businesses has been measured.</p></aside>}
         </div>
       </div>
     </section>
