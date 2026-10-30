@@ -15,7 +15,7 @@ export interface SocialHealthMetric {
   id: 'followers' | 'reach' | 'contacts' | 'interactions'
   title: string
   value: string
-  supporting: { id: string; label: string; value: string }[]
+  supporting: { id: string; label: string; value: string; direction?: 'up' | 'down' | 'neutral' }[]
 }
 
 export interface SocialFinding {

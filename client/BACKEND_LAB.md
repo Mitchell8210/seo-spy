@@ -1,6 +1,6 @@
 # Isolated backend test dashboard
 
-This page exercises the real backend without integrating the production dashboard. Open `/backend-lab` directly; it is intentionally absent from the main sidebar. `/dashboard`, its mock data, and its shared presentation components remain unchanged. The lab is lazy-loaded through one additive route in `src/App.tsx`.
+This page displays real backend reports separately from the main dashboard's illustrative results. Open `/backend-lab` directly; it is intentionally absent from the main sidebar. `/dashboard` now starts investigations and displays their status only; its result cards and mock data remain unchanged. See [DASHBOARD_INVESTIGATION.md](DASHBOARD_INVESTIGATION.md). The lab is lazy-loaded through one additive route in `src/App.tsx`.
 
 ## Run locally
 
@@ -34,8 +34,8 @@ All private provider keys remain in ignored `server/.env`. The frontend neither 
 - Keeps previous results visible during a new job and after a failed attempt. Partial results display the new usable HTML evidence without borrowing older Lighthouse scores.
 - Displays the four Lighthouse category scores, measured zero values, unavailable/null scores, lab metrics, report version/device/time, findings, recommendations, and expandable evidence as text.
 - Keeps combined SEO Spy and social scores unavailable. This page performs no Facebook authorization or external writes.
-- Resumes an active audit after refresh. Leaving the route aborts frontend requests and polling; it does not cancel the server job. Backend restarts clear jobs and reports because storage is in memory.
-- API errors pause polling and provide Retry/Refresh. The lab service and hook are contained in `src/pages/BackendLab/`; browser code does not import backend implementation modules.
+- Resumes an active audit after refresh. Leaving the route aborts frontend requests and polling; it does not cancel the server job. Backend restarts clear in-memory jobs, but terminal report files now survive under `server/reports/audits/`; saved reports can be listed and downloaded through the backend API.
+- API errors pause polling and provide Retry/Refresh. Public API types/client live in `src/types/backend.ts` and `src/services/backendApi.ts` with lab compatibility re-exports. The report-loading hook remains in `src/pages/BackendLab/`; browser code does not import backend implementation modules.
 
 To inspect responses directly, use backend Swagger at **http://127.0.0.1:3001/api/docs**. Normal inspection/refresh uses read requests; starting Lighthouse consumes Google PageSpeed quota.
 
@@ -51,7 +51,7 @@ npm run test:backend-lab
 
 The browser smoke test requires local Chrome/Chromium (or `CHROME_PATH` pointing to its executable), Node.js 24, and installed client dependencies. It launches headless Chrome and temporary local Vite/API fixture servers, uses no new testing dependencies, makes no Google audit calls, and closes its child processes. Screenshots and browser profiles are stored under ignored `client/node_modules/.cache/backend-lab-smoke/`.
 
-The fixture suite verifies that the original dashboard makes no API requests, the new route labels simulated results, polling completes, zero/null scores render correctly, duplicate clicks are prevented, partial results do not retain stale scores, reloading resumes work, leaving cancels polling, backend errors support retry, a lost submission response can recover a job that already completed, and a mobile viewport has no horizontal overflow.
+The fixture suite verifies that the dashboard reads only investigation summaries/status while keeping mock results, the lab route labels simulated results, polling completes, zero/null scores render correctly, duplicate clicks are prevented, partial results do not retain stale scores, reloading resumes work, leaving for a page without investigation tracking cancels polling, backend errors support retry, a lost submission response can recover a job that already completed, and a mobile viewport has no horizontal overflow. Run `npm run test:dashboard` for focused dashboard status-only behavior checks.
 
 For an explicit live browser test, first build the backend, then run:
 

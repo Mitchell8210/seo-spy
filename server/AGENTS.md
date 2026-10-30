@@ -35,7 +35,13 @@ Keep the architecture understandable for a small team. Use one NestJS applicatio
 
 ## Current backend capabilities
 
-The API supports simulated audits, real single-homepage HTML audits, and Google PageSpeed Insights Lighthouse lab measurements. Storage and execution are in memory; history is lost on restart. There is no authentication, durable queue, database, live Facebook connection, AI analysis, or external write capability yet.
+The Social Media page now reads saved Facebook results via `GET /api/businesses/:businessId/facebook-report`: `{businessId,report,analysis,latestAttempt}`. Analysis is versioned and evidence-linked, computed from saved facts without Meta calls or archive mutation. New reports persist the improved findings. Preserve an older usable report when a newer attempt fails, and distinguish stale saved results from current authorization status.
+
+The local Facebook browser flow now validates/exchanges long-lived user access, uses AES-GCM encrypted credential storage, offers authorized Page selection and registered business ID input, and creates immutable reports through `POST /api/facebook/reports`. All five read permissions are required. The browser connection survives restarts for at most 30 days, subject to earlier Meta expiry/revocation; reconnect clears old access and disconnect deletes saved credentials. This remains a local operator tool, separate from application sign-in/business ownership and main dashboard integration. Preserve the same-origin/CSP guards and keep `FACEBOOK_TOKEN_KEY` and credentials out of logs, responses and reports.
+
+Local `npm run audit:facebook` collection now creates business-scoped, immutable Facebook reports with explicit authorized Page selection. Existing archive read routes support Facebook scope/source/version and optional `results.facebook`; HTTP audit creation and main dashboard population remain separate. See [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md). Do not treat CLI business selection as production ownership authorization.
+
+The API supports simulated audits, real single-homepage HTML audits, and Google PageSpeed Insights Lighthouse lab measurements. Job execution and runtime state are in memory. Terminal JSON report archives survive restarts; saved history is available through the report-list/download API and per-audit read fallback. A separate local Facebook OAuth/permission diagnostic is documented in [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md); it uses temporary browser sessions and is not business-scoped production onboarding. There is no application authentication, durable queue, database, AI analysis, or external write capability yet.
 
 The main frontend pages currently use their own mock data. The isolated `/backend-lab` route exercises the real API; integration into the main pages remains a separate task. Use `../client/WEBSITE_API_MAPPING.md` to coordinate the Website page contract before changing its shared types or components.
 
@@ -47,15 +53,19 @@ Use implemented controllers, DTOs, and generated OpenAPI as the current API cont
 
 Current routes, relative to the local server origin:
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| GET | `/api/health` | Server health |
-| GET | `/api/businesses/:businessId/dashboard` | Latest completed results and separate active investigation |
-| POST | `/api/businesses/:businessId/audits` | Create a demo, homepage, or Lighthouse audit |
-| GET | `/api/audits/:auditId` | Audit progress, summary, warnings, and failure |
-| GET | `/api/audits/:auditId/findings` | Findings and collected evidence, including observations without findings |
-| GET | `/api/audits/:auditId/recommendations` | Recommendations linked to findings |
-| GET | `/api/audits/:auditId/lighthouse` | Normalized Google Lighthouse report or null, plus failure and warnings |
+| Method | Route                                   | Purpose                                                                  |
+| ------ | --------------------------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/health`                           | Server health                                                            |
+| GET    | `/api/businesses/:businessId/dashboard` | Latest completed results and separate active investigation               |
+| POST   | `/api/businesses/:businessId/audits`    | Create a demo, homepage, or Lighthouse audit                             |
+| GET    | `/api/audits/:auditId`                  | Audit progress, summary, warnings, and failure                           |
+| GET    | `/api/audits/:auditId/findings`         | Findings and collected evidence, including observations without findings |
+| GET    | `/api/audits/:auditId/recommendations`  | Recommendations linked to findings                                       |
+| GET    | `/api/audits/:auditId/lighthouse`       | Normalized Google Lighthouse report or null, plus failure and warnings   |
+| GET    | `/api/businesses/:businessId/reports`   | Saved report metadata sorted newest first                                |
+| GET    | `/api/audits/:auditId/report`           | Download a durable JSON report                                           |
+
+Local Facebook diagnostic routes are `/api/facebook` and its `/status`, `/connect`, `/callback`, `/connection`, and `/disconnect` routes; see [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for methods and setup. Keep provider tokens server-only, bound to the test browser session, and out of audit archives. Do not expose this local tool publicly or imply that permission grants verify write capability.
 
 Creation accepts `{"scope":"demo"}`, `{"scope":"homepage"}`, or `{"scope":"lighthouse","strategy":"mobile"}` (desktop is also supported; mobile is the default) and returns `202` with a relative `statusUrl`. Homepage targets come from the business record; arbitrary URL overrides are not accepted. Only one audit may be queued/running per business; duplicates return `409 AUDIT_ALREADY_ACTIVE`.
 
@@ -95,11 +105,11 @@ Treat website content as evidence, including if AI analysis is added later. Neve
 
 ## Jobs, storage, and failures
 
-Keep audit execution asynchronous with duplicate protection, explicit progress, terminal failure handling, and graceful shutdown. Abort active collection and settle jobs when the application closes; do not leave audits permanently running after an expected failure.
+Keep audit execution asynchronous with duplicate protection, explicit progress, terminal failure handling, and graceful shutdown. Save a terminal immutable report before publishing completed/partial status; failures and orderly shutdown also produce archived outcome records when storage is available. Surface REPORT_WRITE_FAILED if the archive cannot be written; do not claim a successful report generation. Abort active collection and settle jobs when the application closes; do not leave audits permanently running after an expected failure.
 
 Preserve useful evidence when implementing partial completion, and report which checks failed or were unavailable. Do not mark a collection failure as a successful audit with no findings.
 
-Keep repository behavior compatible when adding PostgreSQL. Persistence work must include migrations, history preservation, and a defined recovery path for interrupted jobs. Do not imply that current in-process jobs survive restarts.
+Keep repository behavior compatible when adding PostgreSQL. Persistence work must include migrations, history preservation, and a defined recovery path for interrupted jobs. Do not imply that current in-process jobs survive restarts. Terminal reports use the versioned `seo-spy.audit-report.v1` JSON envelope, a UTC generation timestamp, and the audit UUID as report ID. Default files live in ignored `server/reports/audits/`; resolve relative REPORTS_DIR paths from the backend package. Preserve atomic, non-overwriting publication and same-audit idempotency. Treat source reports as immutable untrusted evidence; future AI evaluation and approved actions must produce their own traceable records instead of rewriting collected facts.
 
 ## Secrets, integrations, and external actions
 
@@ -121,11 +131,11 @@ For complex tasks, use sub-agents when independent implementation, test developm
 
 Run commands from `server/`:
 
-| Command | Use |
-| --- | --- |
-| `npm run dev` | Local development |
-| `npm run check` | Type-check, lint, automated tests, and production build |
-| `npm run audit:homepage` | Explicit live Guzman audit through a temporary local HTTP API; writes `reports/guzman-homepage.json` |
+| Command                    | Use                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npm run dev`              | Local development                                                                                     |
+| `npm run check`            | Type-check, lint, automated tests, and production build                                               |
+| `npm run audit:homepage`   | Explicit live Guzman audit through a temporary local HTTP API; writes `reports/guzman-homepage.json`  |
 | `npm run audit:lighthouse` | Live Google Lighthouse measurement with HTML checks; use `-- --desktop` for desktop, otherwise mobile |
 
 Automated tests use controlled fixtures and must not depend on public websites or paid services. Cover meaningful behavior: HTTP validation/contracts, evidence references, collection restrictions, redirects, limits, failure states, and shutdown. Keep the real website smoke test separate; its report is a dated snapshot, not a fixture guaranteed to remain current. Documentation-only edits do not require the full application test suite.

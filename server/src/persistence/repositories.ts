@@ -1,7 +1,7 @@
-import type { Audit, Business, Connection } from '../contracts/domain.js';
+import type { Audit, Business, Connection } from "../contracts/domain.js";
 
-export const BUSINESS_REPOSITORY = Symbol('BUSINESS_REPOSITORY');
-export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
+export const BUSINESS_REPOSITORY = Symbol("BUSINESS_REPOSITORY");
+export const AUDIT_REPOSITORY = Symbol("AUDIT_REPOSITORY");
 
 export interface BusinessRepository {
   findById(id: string): Promise<Business | null>;
