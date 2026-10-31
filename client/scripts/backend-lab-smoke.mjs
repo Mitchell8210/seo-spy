@@ -1,4 +1,4 @@
-// Offline fixtures by default. --dashboard checks dashboard status-only integration.
+// Offline fixtures by default. --dashboard checks the unified assessment and investigation workflow.
 // --live runs Lighthouse; --live --homepage runs HTML-only checks; --live --dashboard runs one dashboard audit.
 // No credentials are read by this script; live mode lets the backend load its own environment.
 import assert from 'node:assert/strict';
@@ -111,8 +111,29 @@ function reply(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function savedFacebookReport() {
+  const collectedAt = '2026-10-29T16:49:21.881Z';
+  const auditId = 'facebook-fixture-audit';
+  const finding = { id: 'facebook-fixture-finding', auditId, checkId: 'facebook:posts', evidenceIds: [],
+    severity: 'medium', source: 'facebook', title: 'Confirm the Facebook contact number',
+    explanation: 'Saved posts show different contact numbers.', status: 'needs_review' };
+  return { businessId, analysis: null, latestAttempt: null, report: {
+    schemaVersion: 'seo-spy.audit-report.v1', reportId: auditId, auditId, generatedAt: collectedAt,
+    business: { id: businessId, name: 'Fixture Tax Accounting', website: 'https://example.com/' },
+    audit: { id: auditId, businessId, scope: 'facebook', mode: 'live', status: 'partial', warnings: [], failure: null },
+    results: { scores: [], findings: [finding], recommendations: [], evidence: [], facebook: {
+      pageId: 'fixture-page', pageName: 'Saved fixture Facebook Page', collectedAt,
+      window: { requestedDays: 30 }, profile: {}, metrics: [],
+    } },
+  } };
+}
+
 async function serveFixture(req, res) {
   apiRequests++;
+  // Saved reports remain readable when the investigation service is unavailable.
+  if (req.method === 'GET' && req.url === `/api/businesses/${businessId}/facebook-report`) {
+    return reply(res, 200, savedFacebookReport());
+  }
   if (!available) return reply(res, 503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Fixture backend unavailable. Please retry.', requestId: 'fixture-request' } });
   settleJobs();
   const route = new URL(req.url, 'http://fixture').pathname;
@@ -230,9 +251,44 @@ async function screenshot(filename) {
 
 const dashboardStatus = () => elementText('dashboard-investigation-status');
 const dashboardDisabled = () => evaluate(`document.querySelector(${JSON.stringify(selector('dashboard-run-audit'))})?.disabled`);
-const dashboardMocks = () => evaluate(`JSON.stringify([...document.querySelectorAll('section[aria-labelledby="main-spy-title"], section[aria-labelledby="consistency-title"], section[aria-labelledby="results-title"], section[aria-labelledby="connections-title"], section[aria-labelledby="findings-title"], section[aria-labelledby="recommendations-title"]')].map(node => node.innerText))`);
+const assessmentSelector = 'section[aria-labelledby="spy-total-title"]';
+const dashboardMocks = () => evaluate(`JSON.stringify([...document.querySelectorAll('${assessmentSelector}, section[aria-labelledby="findings-title"], section[aria-labelledby="recommendations-title"]')].map(node => node.innerText))`);
+async function assertUnifiedAssessment() {
+  const assessment = await evaluate(`(() => {
+    const section = document.querySelector('${assessmentSelector}');
+    if (!section) return null;
+    const social = section.querySelector('section[aria-label="Social Media Performance"]');
+    return { count: document.querySelectorAll('${assessmentSelector}').length, text: section.innerText,
+      categories: Array.from(section.querySelectorAll('h3')).map(node => node.textContent),
+      socialText: social?.innerText, socialRings: social?.querySelectorAll('div[aria-label="Score: not available"] svg circle').length,
+      socialIssues: social?.querySelectorAll('li').length,
+      websiteLink: section.querySelector('a[href="/website"]')?.textContent,
+      socialLink: section.querySelector('a[href="/social-media"]')?.textContent,
+      details: section.querySelector('details summary')?.textContent,
+      manage: document.querySelector('a[href="/settings#connected-assets"]')?.textContent,
+    };
+  })()`);
+  assert.ok(assessment, 'Unified assessment must exist.');
+  assert.equal(assessment.count, 1);
+  assert.match(assessment.text, /Spy Total Score/);
+  assert.deepEqual(assessment.categories, ['Website Health', 'Social Media Performance', 'Business Consistency']);
+  assert.match(assessment.socialText, /—\s+Not available/);
+  assert.doesNotMatch(assessment.socialText, /\b82\b|\/100/);
+  assert.equal(assessment.socialRings, 1, 'Unavailable Social score must have only the empty gauge track.');
+  assert.equal(assessment.websiteLink, 'Open Website Report');
+  assert.equal(assessment.socialLink, 'Open Social Media Report');
+  assert.equal(assessment.details, 'View Consistency Details');
+  assert.equal(assessment.manage, 'Manage Connections');
+  if (!liveMode) {
+    assert.match(assessment.socialText, /Confirm the Facebook contact number/);
+    assert.match(assessment.socialText, /Saved posts show different contact numbers/);
+    assert.equal(assessment.socialIssues, 1, 'One backend finding must remain one finding.');
+    assert.equal(await evaluate(`document.querySelector('${assessmentSelector} section[aria-label="Social Media Performance"] button')?.textContent`), 'Fix with AI');
+  }
+}
+
 function assertDashboardRequests(requests) {
-  assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must never request report result endpoints.');
+  assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must not fetch website report details; saved Facebook reports are allowed.');
   for (const request of requests.filter(request => request.method === 'POST')) {
     assert.equal(new URL(request.url).pathname, `/api/businesses/${businessId}/audits`);
     assert.deepEqual(JSON.parse(request.postData ?? '{}'), { scope: 'lighthouse', strategy: 'mobile' });
@@ -244,6 +300,9 @@ async function dashboardScenario(base, backendBase) {
   const requestStart = browserRequests.length;
   await navigate(`${base}/dashboard`);
   await waitFor(async () => /Your online performance/.test(await pageText()) && await dashboardDisabled() === false, 'dashboard ready');
+  if (!liveMode) await waitFor(async () => (await pageText()).includes('Confirm the Facebook contact number'), 'saved Facebook finding');
+  await assertUnifiedAssessment();
+  pass('Unified assessment preserves saved Facebook findings, unavailable Social score, and report actions');
   const mocks = await dashboardMocks();
   assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
   assert.equal(creationCount, 0);
@@ -261,7 +320,8 @@ async function dashboardScenario(base, backendBase) {
   };
   const terminal = async pattern => {
     await waitFor(async () => pattern.test(await dashboardStatus()) && await dashboardDisabled() === false, 'dashboard terminal state', liveMode ? 170000 : 22000);
-    assert.equal(await dashboardMocks(), mocks, 'Investigation status must leave all illustrative cards unchanged.');
+    await assertUnifiedAssessment();
+    assert.equal(await dashboardMocks(), mocks, 'Investigation status must preserve the assessment and lower demo results.');
     assert.doesNotMatch(await pageText(), /Fixture image review|Review fixture image text|fixture-13\.0\.0/);
     assertDashboardRequests(browserRequests.slice(requestStart));
   };
@@ -331,6 +391,8 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(creationCount, restartCreations, 'Restart recovery must not automatically POST another audit.');
     assert.equal(await evaluate('document.querySelectorAll(\'[role="alert"]\').length'), 0, 'Restart recovery must clear the missing-job error.');
     assert.equal((await dashboardStatus()).includes(forgottenId), false, 'Restart recovery must clear stale job status.');
+    await waitFor(async () => (await pageText()).includes('Confirm the Facebook contact number'), 'saved report after recovery');
+    await assertUnifiedAssessment();
     assert.equal(await dashboardMocks(), mocks);
     await delay(800); assert.equal(creationCount, restartCreations);
     pass('Backend restart clears a missing active job through status-only retry');
@@ -461,7 +523,7 @@ try {
   assert.equal(creationCount, 0, 'Dashboard must not start an audit before a click.');
   assertDashboardRequests(browserRequests.slice(initialRequests));
   assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
-  pass('Dashboard remains mock-only without starting an audit');
+  pass('Dashboard loads demo and saved results without starting an audit');
 
   await navigate(`${base}/backend-lab`);
   await waitFor(async () => (await pageText()).includes('Fixture Tax Accounting'), 'backend lab data');

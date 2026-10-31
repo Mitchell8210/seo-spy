@@ -1,14 +1,10 @@
-import { ArrowUpRight, LoaderCircle, Play } from 'lucide-react'
-import { AssetGroup } from '../../components/dashboard/AssetGroup'
-import { WebsiteHealth } from '../../components/dashboard/WebsiteHealth'
-import { SocialPerformance } from '../../components/dashboard/SocialPerformance'
-import { MainSpyScore } from '../../components/dashboard/MainSpyScore'
-import { BusinessConsistency } from '../../components/dashboard/BusinessConsistency'
+import { ArrowRight, ArrowUpRight, LoaderCircle, Play } from 'lucide-react'
+import { Link } from 'react-router'
 import { InvestigationStatus } from '../../components/dashboard/InvestigationStatus'
 import { FindingCard } from '../../components/findings/FindingCard'
 import { StatusBadge } from '../../components/common/StatusBadge'
 import { mockBusiness, mockConnections } from '../../data/mockBusiness'
-import { mockWebsiteResults, mockSocialResults, mockConsistency, mockMainSpyResults } from '../../data/mockResults'
+import { DashboardAssessment } from '../../components/dashboard/DashboardAssessment'
 import { mockFindings } from '../../data/mockFindings'
 import { mockRecommendations } from '../../data/mockRecommendations'
 import { useInvestigation } from '../../hooks/useInvestigation'
@@ -38,37 +34,19 @@ export function Dashboard() {
               <ArrowUpRight size={16} className="shrink-0" aria-hidden="true" />
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
-            <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary"><span>{websites.length} website{websites.length === 1 ? '' : 's'} connected</span><span>{socialAccounts.length} social account{socialAccounts.length === 1 ? '' : 's'} connected</span></p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary"><span>{websites.length} website{websites.length === 1 ? '' : 's'} connected</span><span>{socialAccounts.length} social account{socialAccounts.length === 1 ? '' : 's'} connected</span><Link to="/settings#connected-assets" className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 font-medium text-blue-300 hover:text-blue-200 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">Manage Connections<ArrowRight size={14} aria-hidden="true" /></Link></div>
           </div>
           <button data-testid="dashboard-run-audit" type="button" onClick={() => void investigation.start()} disabled={investigation.busy || Boolean(investigation.error)} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 xl:self-auto">
             {investigation.busy ? <LoaderCircle size={16} className="motion-safe:animate-spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{investigation.submitting ? 'Starting investigation…' : investigation.loading ? 'Checking investigation…' : investigation.busy ? 'Investigation running…' : 'Run Investigation'}
           </button>
         </div>
         <div className="mt-5 border-t border-line pt-3 text-xs leading-5 text-muted">
-          Run Investigation starts a real website audit. The connections, scores, findings, and recommendations shown below are still illustrative. Investigation reports are not displayed on this dashboard yet.
+          Run Investigation starts a website audit. Social findings come from saved Facebook reports. Website and business consistency data, the total score, and the lower findings and recommendations are demo examples.
         </div>
         <InvestigationStatus audit={investigation.audit} loading={investigation.loading} submitting={investigation.submitting} error={investigation.error} onRetry={investigation.retry} />
       </section>
 
-      <MainSpyScore results={mockMainSpyResults} />
-
-      <BusinessConsistency results={mockConsistency} />
-
-      <section aria-labelledby="results-title">
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2"><h2 id="results-title" className="text-base font-semibold text-ink">Current Results</h2><p className="text-xs text-muted">Illustrative data · Not a live assessment</p></div>
-        <div className="grid gap-5 lg:grid-cols-2">
-          <WebsiteHealth results={mockWebsiteResults} />
-          <SocialPerformance results={mockSocialResults} />
-        </div>
-      </section>
-
-      <section aria-labelledby="connections-title">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2"><h2 id="connections-title" className="text-base font-semibold text-ink">Connected assets</h2><span className="text-xs text-muted">Demo connections · Add actions unavailable</span></div>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <AssetGroup title="Websites" action="Add website" connections={websites} />
-          <AssetGroup title="Social Media" action="Connect social account" connections={socialAccounts} />
-        </div>
-      </section>
+      <DashboardAssessment />
 
       <div className="grid items-start gap-6 xl:grid-cols-2">
         <section aria-labelledby="findings-title" className="overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
