@@ -24,10 +24,15 @@ export interface SettingsAsset {
   timeLabel?: string
 }
 
+export type ConnectionPlatform = 'website' | 'facebook' | 'instagram' | 'tiktok' | 'linkedin' | 'youtube' | 'x' | 'threads' | 'whatsapp' | 'pinterest' | 'snapchat' | 'reddit' | 'search' | 'analytics' | 'shopify' | 'woocommerce' | 'lightspeed' | 'wix' | 'bigcommerce' | 'square' | 'business-profile' | 'google-ads' | 'merchant-center' | 'lighthouse' | 'amazon' | 'ebay' | 'etsy' | 'tiktok-shop' | 'facebook-marketplace'
+
 export interface ConnectionOption {
-  id: 'website' | 'facebook' | 'instagram' | 'tiktok' | 'linkedin' | 'youtube' | 'x' | 'threads' | 'whatsapp' | 'pinterest' | 'snapchat' | 'reddit' | 'search' | 'analytics'
-  category: 'websites' | 'meta' | 'social' | 'google'
+  id: ConnectionPlatform
+  icon: ConnectionPlatform
+  state: 'demo-only' | 'connected-demo'
+  shortName?: string
+  category: 'websites' | 'meta' | 'social' | 'commerce' | 'google' | 'marketplaces'
   name: string
   description: string
-  action: 'Add Website' | 'Connect'
+  action: 'Add Website' | 'Connect' | 'Preview Tool'
 }

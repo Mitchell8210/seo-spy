@@ -6,5 +6,5 @@ export const navigation = [
   { path: '/social-media', label: 'Social Media', icon: Share2 },
   { path: '/analysis', label: 'Analysis', icon: ChartNoAxesCombined },
   { path: '/recommendations', label: 'Recommendations', icon: ListChecks },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/settings', label: 'Connections & Settings', icon: Settings },
 ]
