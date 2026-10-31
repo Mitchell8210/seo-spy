@@ -1,11 +1,8 @@
 import { useState } from 'react'
 import { CircleAlert, Monitor, Store, WandSparkles } from 'lucide-react'
 import { Link } from 'react-router'
-import { mockBusiness } from '../../data/mockBusiness'
 import { mockConsistency, mockMainSpyResults, mockWebsiteResults } from '../../data/mockResults'
-import { mockFindings } from '../../data/mockFindings'
-import { useFacebookReport } from '../../hooks/useFacebookReport'
-import { mapSocialMediaReport } from '../../services/socialMediaMapping'
+import type { DashboardAssessmentModel } from '../../hooks/useDashboardAssessment'
 import type { Score } from '../../types/dashboard'
 import { FacebookMark } from '../common/FacebookMark'
 import { SpyLogo } from '../common/SpyLogo'
@@ -14,7 +11,6 @@ import { getScoreStatus } from '../../utils/scoreStatus'
 import type { ReactNode } from 'react'
 
 interface Issue { id: string; title: string; explanation: string; severity: string }
-const priority: Record<string, number> = { Critical: 0, Medium: 1, Low: 2 }
 const buttonStyle = 'inline-flex min-h-11 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-2 text-[11px] font-semibold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 const reportStyle = 'mt-auto inline-flex min-h-11 items-center justify-center rounded-lg border border-blue-400/40 px-2 py-2 text-center text-xs font-semibold text-blue-200 hover:bg-blue-500/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 
@@ -35,7 +31,7 @@ function Category({ title, description, icon, score, source, issues, empty, chil
   issues: Issue[]; empty: string; children: ReactNode; accent: string
 }) {
   const [feedback, setFeedback] = useState<string | null>(null)
-  const topIssues = [...issues].sort((a, b) => (priority[a.severity] ?? 3) - (priority[b.severity] ?? 3)).slice(0, 3)
+  const topIssues = issues
   return <section aria-label={title} className="flex min-w-0 flex-col rounded-xl border border-line bg-elevated/50 p-3">
     <div className="flex min-h-14 items-center gap-2"><span className={`flex size-11 shrink-0 items-center justify-center rounded-xl border ${accent}`}>{icon}</span><h3 className="text-sm font-semibold leading-5 text-ink">{title}</h3></div>
     <p className="mt-2 min-h-[60px] text-xs leading-5 text-secondary">{description}</p>
@@ -55,12 +51,8 @@ function Category({ title, description, icon, score, source, issues, empty, chil
   </section>
 }
 
-export function DashboardAssessment() {
-  const social = useFacebookReport(mockBusiness.id)
-  const socialView = social.data ? mapSocialMediaReport(social.data) : null
-  const consistencyIssues = mockConsistency.checks.filter(check => !check.matches).map(check => ({
-    id: check.id, title: check.label, severity: 'Medium', explanation: `Website: ${check.website}. Facebook: ${check.social}.`,
-  }))
+export function DashboardAssessment({ model }: { model: DashboardAssessmentModel }) {
+  const { social, socialView, top } = model
   return <section aria-labelledby="spy-total-title" className="min-w-0 rounded-2xl border border-blue-500/60 bg-surface p-3 shadow-lg shadow-blue-950/20 sm:p-5">
     <div className="flex items-center gap-3"><SpyLogo /><div><p className="text-xs font-semibold text-blue-300">SEO Spy</p><h2 id="spy-total-title" className="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl">Spy Total Score</h2></div></div>
     <div className="mt-5 grid min-w-0 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-[1.08fr_1fr_1fr_1fr]">
@@ -76,15 +68,15 @@ export function DashboardAssessment() {
           ].map(item => <div key={item.label} className="flex items-start justify-between gap-2"><dt className="flex min-w-0 items-start gap-2 text-secondary"><span className={`mt-1 size-1.5 shrink-0 rounded-full ${item.dot}`} aria-hidden="true" />{item.label}</dt><dd className="shrink-0 text-right font-semibold text-ink">{item.score ? `${item.score.value}/${item.score.maximum}` : <><span aria-hidden="true">—</span><span className="block text-[10px] font-normal text-muted">Not available</span></>}</dd></div>)}
         </dl>
       </section>
-      <Category accent="border-cyan-400/30 bg-cyan-400/15 text-cyan-300" title="Website Health" description="How your website performs for search engines and visitors." icon={<Monitor size={25} aria-hidden="true" />} score={mockWebsiteResults.overall} source="Demo score and findings · Not a live assessment" issues={mockFindings.filter(finding => finding.source === 'Website')} empty="No website issues are listed in the current demo data.">
+      <Category accent="border-cyan-400/30 bg-cyan-400/15 text-cyan-300" title="Website Health" description="How your website performs for search engines and visitors." icon={<Monitor size={25} aria-hidden="true" />} score={mockWebsiteResults.overall} source="Demo score and findings · Not a live assessment" issues={top.website} empty="No website issues are listed in the current demo data.">
         <Link to="/website" className={reportStyle}>Open Website Report</Link>
       </Category>
-      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={null} source={socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · Numeric score not provided` : 'Numeric social score not available'} issues={socialView?.findings ?? []} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
+      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={null} source={socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · Numeric score not provided` : 'Numeric social score not available'} issues={top.social} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
         {social.error && <button type="button" onClick={social.refresh} className={`${reportStyle} mb-3`}>Retry saved report</button>}
         <Link to="/social-media" className={reportStyle}>Open Social Media Report</Link>
       </Category>
-      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={mockConsistency.score} source={`Demo comparison · ${mockConsistency.channels}`} issues={consistencyIssues} empty="No differences are listed in the current demo comparison.">
-        <details className="mt-auto rounded-lg border border-blue-400/40 text-xs text-blue-200"><summary className="min-h-[42px] cursor-pointer rounded-lg px-2 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-blue-300">View Consistency Details</summary><ul className="space-y-4 border-t border-line p-3">{mockConsistency.checks.map(check => <li key={check.id} className="break-words text-xs leading-5"><p className="font-semibold text-ink">{check.label} · {check.matches ? 'Matches' : 'Needs review'}</p><p>Website: {check.website}</p><p>Facebook: {check.social}</p></li>)}</ul></details>
+      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={mockConsistency.score} source={`Demo comparison · ${mockConsistency.channels}`} issues={top.consistency} empty="No differences are listed in the current demo comparison.">
+        <details id="consistency-details" tabIndex={-1} className="mt-auto rounded-lg border border-blue-400/40 text-xs text-blue-200"><summary className="min-h-[42px] cursor-pointer rounded-lg px-2 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-blue-300">View Consistency Details</summary><ul className="space-y-4 border-t border-line p-3">{mockConsistency.checks.map(check => <li key={check.id} className="break-words text-xs leading-5"><p className="font-semibold text-ink">{check.label} · {check.matches ? 'Matches' : 'Needs review'}</p><p>Website: {check.website}</p><p>Facebook: {check.social}</p></li>)}</ul></details>
       </Category>
     </div>
   </section>

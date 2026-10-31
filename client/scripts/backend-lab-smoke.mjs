@@ -39,6 +39,7 @@ let apiRequests = 0;
 let statusRequests = 0;
 let loseNextCreateResponse = false;
 let nextOutcome = null;
+let extraSocialOpportunities = false;
 const stageDelayMs = 6500;
 
 function summary(id, { scope = 'lighthouse', mode = 'live', status = 'completed', stage = 'complete', failure = null } = {}) {
@@ -121,7 +122,7 @@ function savedFacebookReport() {
     schemaVersion: 'seo-spy.audit-report.v1', reportId: auditId, auditId, generatedAt: collectedAt,
     business: { id: businessId, name: 'Fixture Tax Accounting', website: 'https://example.com/' },
     audit: { id: auditId, businessId, scope: 'facebook', mode: 'live', status: 'partial', warnings: [], failure: null },
-    results: { scores: [], findings: [finding], recommendations: [], evidence: [], facebook: {
+    results: { scores: [], findings: extraSocialOpportunities ? [finding, ...[1, 2, 3].map(index => ({ ...finding, id: `remaining-${index}`, title: ['Review contact information', 'Check profile details', 'Contact information may be inconsistent'][index - 1], severity: index === 3 ? 'low' : 'medium' }))] : [finding], recommendations: extraSocialOpportunities ? [{ id: 'remaining-action', findingId: 'remaining-3', title: 'Review your saved contact details', explanation: finding.explanation, recommendedChange: 'Confirm the correct phone number in your connected profiles.', status: 'needs_review' }] : [], evidence: [], facebook: {
       pageId: 'fixture-page', pageName: 'Saved fixture Facebook Page', collectedAt,
       window: { requestedDays: 30 }, profile: {}, metrics: [],
     } },
@@ -304,7 +305,7 @@ async function dashboardScenario(base, backendBase) {
   await assertUnifiedAssessment();
   pass('Unified assessment preserves saved Facebook findings, unavailable Social score, and report actions');
   const mocks = await dashboardMocks();
-  assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
+  assert.match(await pageText(), /Demo overall score/i);
   assert.equal(creationCount, 0);
   assert.equal(browserRequests.slice(requestStart).filter(request => request.method === 'POST').length, 0, 'Loading the dashboard must not start an audit.');
   pass('Dashboard loads illustrative results without starting an audit');
@@ -396,6 +397,29 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(await dashboardMocks(), mocks);
     await delay(800); assert.equal(creationCount, restartCreations);
     pass('Backend restart clears a missing active job through status-only retry');
+  }
+  if (!liveMode) {
+    extraSocialOpportunities = true;
+    await navigate(`${base}/dashboard`);
+    await waitFor(async () => (await pageText()).includes('Contact information may be inconsistent'), 'remaining saved Social opportunity');
+    const bottom = await evaluate(`(() => {
+      const section = document.querySelector('#next-steps-title').closest('section');
+      return { text: section.innerText, links: Array.from(section.querySelectorAll('a')).map(node => node.getAttribute('href')) };
+    })()`);
+    assert.match(bottom.text, /More Opportunities/);
+    assert.match(bottom.text, /Recommended Path/);
+    assert.match(bottom.text, /Contact information may be inconsistent/);
+    assert.match(bottom.text, /Review your saved contact details/);
+    assert.doesNotMatch(bottom.text, /Confirm the Facebook contact number|Review contact information|Check profile details|Missing image alt text|Business hours differ/);
+    assert.match(bottom.text, /Confirm the correct phone number in your connected profiles/);
+    assert.doesNotMatch(bottom.text, /opportunity \d+|Website and Business Consistency use demo data/i);
+    assert.equal((bottom.text.match(/Saved posts show different contact numbers/g) ?? []).length, 1, 'Evidence is not repeated as recommendation copy.');
+    assert.deepEqual(bottom.links, [`/social-media?businessId=${businessId}`, `/social-media?businessId=${businessId}`]);
+    await evaluate(`document.querySelector('#findings-title').closest('section').querySelector('a').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' });
+    await waitFor(() => evaluate('location.pathname === "/social-media"'), 'opportunity keyboard navigation');
+    pass('Remaining saved opportunities and linked actions exclude triage issues and navigate by keyboard');
   }
   assertDashboardRequests(browserRequests.slice(requestStart));
   assert.deepEqual(browserErrors, []);
@@ -522,7 +546,7 @@ try {
   await delay(800);
   assert.equal(creationCount, 0, 'Dashboard must not start an audit before a click.');
   assertDashboardRequests(browserRequests.slice(initialRequests));
-  assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
+  assert.match(await pageText(), /Demo overall score/i);
   pass('Dashboard loads demo and saved results without starting an audit');
 
   await navigate(`${base}/backend-lab`);
