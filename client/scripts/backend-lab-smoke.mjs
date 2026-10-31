@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
 const liveMode = process.argv.includes('--live');
+const settingsMode = process.argv.includes('--settings');
 const dashboardMode = process.argv.includes('--dashboard');
 const liveScope = process.argv.includes('--homepage') ? 'homepage' : 'lighthouse';
 const fixtureHost = '127.0.0.1';
@@ -416,14 +417,114 @@ async function dashboardScenario(base, backendBase) {
     assert.equal((bottom.text.match(/Saved posts show different contact numbers/g) ?? []).length, 1, 'Evidence is not repeated as recommendation copy.');
     assert.deepEqual(bottom.links, [`/social-media?businessId=${businessId}`, `/social-media?businessId=${businessId}`]);
     await evaluate(`document.querySelector('#findings-title').closest('section').querySelector('a').focus()`);
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter' });
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await waitFor(() => evaluate('location.pathname === "/social-media"'), 'opportunity keyboard navigation');
     pass('Remaining saved opportunities and linked actions exclude triage issues and navigate by keyboard');
   }
   assertDashboardRequests(browserRequests.slice(requestStart));
   assert.deepEqual(browserErrors, []);
   console.log(JSON.stringify({ mode: liveMode ? 'live-dashboard' : 'fixture-dashboard', passed: results.length, scenarios: results, artifactDirectory: artifactDir }, null, 2));
+}
+
+async function settingsScenario(base) {
+  await cdp.send('Network.enable');
+  const requestStart = browserRequests.length;
+  const commerce = ['Shopify', 'WooCommerce', 'Lightspeed', 'Wix', 'BigCommerce', 'Square'];
+  const assets = `document.getElementById('settings-assets')`;
+  await navigate(`${base}/dashboard`);
+  await waitFor(() => evaluate(`Boolean(document.querySelector('a[href="/settings#connected-assets"]'))`), 'Manage Connections link');
+  await evaluate(`document.querySelector('a[href="/settings#connected-assets"]').click()`);
+  await waitFor(() => evaluate(`location.pathname === '/settings' && location.hash === '#connected-assets' && document.activeElement?.id === 'settings-assets-title'`), 'Dashboard to Settings focus');
+  assert.equal(await evaluate(`document.querySelector('h1').textContent`), 'Connections & Settings');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`), ['Dashboard', 'Website', 'Social Media', 'Analysis', 'Recommendations', 'Connections & Settings']);
+  assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
+  const connected = await evaluate(`${assets}.querySelector('[aria-label="Currently connected assets"]').innerText`);
+  assert.match(connected, /guzmantaxaccounting.com/); assert.match(connected, /Guzman Tax Accounting/);
+  assert.equal((connected.match(/Connected/g) ?? []).length, 2);
+  assert.doesNotMatch(connected, /Shopify|WooCommerce|Lightspeed|Wix|BigCommerce|Square/);
+  for (const group of ['meta', 'social', 'commerce']) assert.equal(await evaluate(`Boolean(document.getElementById('available-${group}'))`), true);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelector('#available-commerce').closest('section').querySelectorAll('button')).map(node => node.getAttribute('aria-label').split(' (')[0])`), commerce);
+  for (const name of commerce) {
+    await evaluate(`Array.from(${assets}.querySelectorAll('button')).find(node => node.getAttribute('aria-label') === ${JSON.stringify(name)} + ' (demo connection option)').click()`);
+    assert.match(await pageText(), new RegExp(`${name}: Demo connection option only`));
+    assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
+  }
+  pass('Connections title, original navigation, two demo assets, three groups, and six commerce options');
+  const otherPlatforms = ['Google Analytics (GA4)', 'Google Search Console', 'Google Business Profile', 'Google Ads', 'Google Merchant Center', 'Lighthouse'];
+  const marketplaces = ['Amazon', 'eBay', 'Etsy', 'TikTok Shop', 'Facebook Marketplace'];
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] section > h4')).map(node => node.textContent)`), ['Other Connections', 'Marketplace Connections']);
+  for (const [id, names] of [['google', otherPlatforms], ['marketplaces', marketplaces]]) {
+    assert.deepEqual(await evaluate(`Array.from(document.getElementById('available-${id}').closest('section').querySelectorAll('button')).map(node => node.getAttribute('aria-label').replace(' (demo connection option)', '').replace(' (demo tool option)', ''))`), names);
+  }
+  assert.equal(await evaluate(`document.querySelector('[data-testid="secondary-connections"]').previousElementSibling.querySelectorAll('section').length`), 3, 'Primary groups stay above the secondary groups');
+  for (const name of [...otherPlatforms, ...marketplaces]) {
+    await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).find(node => node.getAttribute('aria-label').startsWith(${JSON.stringify(name)} + ' (')).click()`);
+    assert.match(await pageText(), name === 'Lighthouse' ? /No sign-in is required and no analysis has been started/ : /No account or store has been connected/);
+  }
+  assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
+  pass('Six supporting tools and five marketplaces use demo-only feedback with neutral Lighthouse wording');
+
+  await evaluate(`Array.from(${assets}.querySelectorAll('button')).find(node => node.textContent === 'Add Connection').focus()`);
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`), 'picker keyboard open');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('dialog section > h3')).map(node => node.textContent)`), ['Websites', 'Meta Platforms', 'Other Social Platforms', 'E-commerce Platforms', 'Google & SEO', 'Marketplaces']);
+  const pickerText = await evaluate(`document.querySelector('dialog').innerText`);
+  for (const name of [...commerce, ...otherPlatforms, ...marketplaces, 'Pinterest', 'Snapchat', 'Reddit']) assert.ok(pickerText.includes(name));
+  await evaluate(`document.querySelector('button[aria-label="Preview Lighthouse tool (demo)"]').click()`);
+  assert.match(await pageText(), /No sign-in is required and no analysis has been started/);
+  await evaluate(`document.querySelector('button[aria-label="Connect Shopify (demo)"]').click()`);
+  assert.match(await pageText(), /No account has been connected/);
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await waitFor(() => evaluate(`!document.querySelector('dialog[open]') && document.activeElement?.textContent === 'Add Connection'`), 'picker dismiss restores focus');
+  pass('Picker catalog preserves existing options, commerce demo feedback, keyboard activation, and return focus');
+  await evaluate(`(() => { const input = document.getElementById('business-name'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Local demo edit'); input.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+  await evaluate(`document.querySelector('#settings-business form').requestSubmit()`);
+  await waitFor(async () => (await pageText()).includes('Changes saved in this view only'), 'profile save');
+  for (const id of ['ai-suggestions', 'require-approval']) {
+    const initial = await evaluate(`document.getElementById('${id}').getAttribute('aria-checked')`);
+    await evaluate(`document.getElementById('${id}').click()`);
+    assert.notEqual(await evaluate(`document.getElementById('${id}').getAttribute('aria-checked')`), initial);
+  }
+  await evaluate(`(() => { const input = document.getElementById('content-tone'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(input, 'Friendly'); input.dispatchEvent(new Event('change', {bubbles:true})); })()`);
+  assert.equal(await evaluate(`document.getElementById('content-tone').value`), 'Friendly');
+  await evaluate(`Array.from(document.querySelector('#settings-plan').querySelectorAll('button')).find(node => node.textContent === 'View Plans').click()`);
+  assert.match(await pageText(), /No billing or subscription changes were made/);
+  for (const id of ['business', 'assets', 'preferences', 'plan']) {
+    await evaluate(`document.querySelector('button[aria-controls="settings-${id}"]').click()`);
+    await waitFor(() => evaluate(`document.activeElement?.id === 'settings-${id}-title'`), `internal navigation ${id}`);
+  }
+  pass('Business Profile save, preferences, tone, Plan preview, and internal section focus remain functional');
+  await navigate(`${base}/dashboard`);
+  await navigate(`${base}/settings#connected-assets`);
+  await waitFor(() => evaluate(`document.activeElement?.id === 'settings-assets-title'`), 'direct hash navigation');
+  for (const width of [1440, 768, 390, 320]) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width < 768 });
+    await evaluate('window.scrollTo(0, 0)'); await delay(150);
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, `Settings has no overflow at ${width}`);
+    const bounds = await evaluate(`Array.from(document.querySelectorAll('#available-meta, #available-social, #available-commerce')).map(node => node.closest('section').getBoundingClientRect().y)`);
+    if (width === 1440) {
+      assert.equal(new Set(bounds).size, 1, 'Three equal-priority groups align on desktop');
+      for (const [id, columns] of [['google', 6], ['marketplaces', 5]]) assert.equal(await evaluate(`getComputedStyle(document.getElementById('available-${id}').nextElementSibling.nextElementSibling).gridTemplateColumns.split(' ').length`), columns, 'Supporting platforms form compact desktop rows');
+    }
+    const svgChecks = await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).map(button => { const svg = button.querySelector('svg'); return svg && Array.from(svg.querySelectorAll('path')).every(path => { const box = path.getBBox(); return box.width > 0 && box.height > 0; }); })`);
+    assert.equal(svgChecks.length, 11); assert.ok(svgChecks.every(Boolean), 'All supporting platform marks are nonempty local SVGs');
+    const secondaryBounds = await evaluate(`(() => { const r = document.querySelector('[data-testid="secondary-connections"]').getBoundingClientRect(); return {x:r.x+scrollX, y:r.y+scrollY, width:r.width, height:r.height, scale:1}; })()`);
+    const secondaryShot = await cdp.send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true, clip:secondaryBounds});
+    await writeFile(path.join(artifactDir, `secondary-${width}.png`), Buffer.from(secondaryShot.data, 'base64'));
+    await screenshot(`settings-${width}.png`);
+    await evaluate(`Array.from(${assets}.querySelectorAll('button')).find(node => node.textContent === 'Add Connection').click()`);
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, `Picker has no overflow at ${width}`);
+    const dialog = await evaluate(`(() => { const r = document.querySelector('dialog').getBoundingClientRect(); return {left:r.left,right:r.right}; })()`);
+    assert.ok(dialog.left >= 0 && dialog.right <= width);
+    await evaluate(`document.querySelector('dialog').close()`);
+  }
+  assert.equal(browserRequests.slice(requestStart).filter(request => request.method === 'POST').length, 0, 'Settings must not authorize accounts or change external systems');
+  assert.deepEqual(browserErrors, []);
+  pass('Direct hash navigation, four responsive widths, picker bounds, and no external writes');
+  console.log(JSON.stringify({ passed: results.length, scenarios: results, artifactDirectory: artifactDir }, null, 2));
 }
 
 async function liveScenario(base, backendBase) {
@@ -534,7 +635,9 @@ try {
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
 
-  if (dashboardMode) {
+  if (settingsMode) {
+    await settingsScenario(base);
+  } else if (dashboardMode) {
     await dashboardScenario(base, backendBase);
   } else if (liveMode) {
     await liveScenario(base, backendBase);

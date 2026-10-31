@@ -30,7 +30,7 @@ export function Settings() {
   }, [hash])
   return (
     <div className="space-y-8">
-      <div><h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Settings</h1><p className="mt-2 text-sm leading-6 text-secondary">Manage your business information, connected accounts, and preferences.</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Connections &amp; Settings</h1><p className="mt-2 text-sm leading-6 text-secondary">Manage your business information, connections, and preferences in one place.</p></div>
       <div className="grid items-start gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="rounded-xl border border-line bg-surface p-3 shadow-sm xl:sticky xl:top-6">
           <ul className="space-y-1">{sections.map(({ id, label, icon: Icon }) => <li key={id}><button type="button" aria-current={activeSection === id ? 'true' : undefined} aria-controls={`settings-${id}`} onClick={() => {
