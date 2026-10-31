@@ -17,19 +17,21 @@ function completionTime(value: string | null) {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString()
 }
 
-export function InvestigationStatus({ audit, loading, submitting, error, onRetry }: {
+export function InvestigationStatus({ audit, loading, submitting, error, onRetry, socialRunning = false }: {
   audit: AuditSummary | null
   loading: boolean
   submitting: boolean
   error: LabError | null
   onRetry: () => Promise<void>
+  socialRunning?: boolean
 }) {
   const running = audit?.status === 'queued' || audit?.status === 'running'
-  const pending = loading || submitting || running
+  const pending = loading || submitting || running || socialRunning
   const message = submitting ? 'Starting investigation…'
     : loading ? 'Checking investigation status…'
-      : audit?.status === 'completed' ? 'Investigation complete. Report generated. Dashboard results below are still illustrative.'
-        : audit?.status === 'partial' ? 'Investigation partially completed. A partial report is available. Dashboard results below are still illustrative.'
+      : !running && socialRunning ? 'Facebook report running. Website report status is shown below.'
+      : audit?.status === 'completed' ? 'Investigation complete. Report generated.'
+        : audit?.status === 'partial' ? 'Investigation partially completed. A partial report is available.'
           : audit?.status === 'failed' ? 'Investigation failed. A complete report could not be generated.'
             : audit ? stageLabels[audit.stage] : null
   const finishedAt = audit ? completionTime(audit.completedAt) : null

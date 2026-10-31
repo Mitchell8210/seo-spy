@@ -164,6 +164,18 @@ describe("bounded collection", () => {
     ).rejects.toMatchObject({ code: "BLOCKED_DESTINATION" });
     expect(transport.fetch).not.toHaveBeenCalled();
   });
+  it("restricts registered-site verification redirects before resolving an unrelated host", async () => {
+    jest.mocked(transport.fetch).mockResolvedValueOnce({ ...ok, status: 301, location: "https://other.example/" });
+    await expect(collector.collect("https://example.com/", undefined, "https://example.com")).rejects.toMatchObject({ code: "TARGET_SITE_MISMATCH" });
+    expect(dns.resolve).toHaveBeenCalledTimes(1);
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("permits the www alias within registered-site verification and rejects a mismatching initial target", async () => {
+    await expect(collector.collect("https://different.example/", undefined, "https://example.com")).rejects.toMatchObject({ code: "TARGET_SITE_MISMATCH" });
+    expect(transport.fetch).not.toHaveBeenCalled();
+    jest.mocked(transport.fetch).mockResolvedValueOnce({ ...ok, status: 301, location: "https://www.example.com/page" });
+    await expect(collector.collect("https://example.com/", undefined, "https://example.com")).resolves.toMatchObject({ finalUrl: "https://www.example.com/page" });
+  });
   it.each(["ENETUNREACH", "ECONNREFUSED", "ETIMEDOUT"])(
     "falls back from an IPv6 %s failure to a validated IPv4 address",
     async (code) => {

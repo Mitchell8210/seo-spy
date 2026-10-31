@@ -1,4 +1,4 @@
-// Offline fixtures by default. --dashboard checks dashboard status-only integration.
+// Offline fixtures by default. --dashboard checks the investigation lifecycle with archives unavailable.
 // --live runs Lighthouse; --live --homepage runs HTML-only checks; --live --dashboard runs one dashboard audit.
 // No credentials are read by this script; live mode lets the backend load its own environment.
 import assert from 'node:assert/strict';
@@ -230,7 +230,6 @@ async function screenshot(filename) {
 
 const dashboardStatus = () => elementText('dashboard-investigation-status');
 const dashboardDisabled = () => evaluate(`document.querySelector(${JSON.stringify(selector('dashboard-run-audit'))})?.disabled`);
-const dashboardMocks = () => evaluate(`JSON.stringify([...document.querySelectorAll('section[aria-labelledby="main-spy-title"], section[aria-labelledby="consistency-title"], section[aria-labelledby="results-title"], section[aria-labelledby="connections-title"], section[aria-labelledby="findings-title"], section[aria-labelledby="recommendations-title"]')].map(node => node.innerText))`);
 function assertDashboardRequests(requests) {
   assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must never request report result endpoints.');
   for (const request of requests.filter(request => request.method === 'POST')) {
@@ -244,11 +243,10 @@ async function dashboardScenario(base, backendBase) {
   const requestStart = browserRequests.length;
   await navigate(`${base}/dashboard`);
   await waitFor(async () => /Your online performance/.test(await pageText()) && await dashboardDisabled() === false, 'dashboard ready');
-  const mocks = await dashboardMocks();
-  assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
+  assert.match(await pageText(), /not available|No saved/i);
   assert.equal(creationCount, 0);
   assert.equal(browserRequests.slice(requestStart).filter(request => request.method === 'POST').length, 0, 'Loading the dashboard must not start an audit.');
-  pass('Dashboard loads illustrative results without starting an audit');
+  pass('Dashboard keeps unavailable archive fields without starting an audit');
 
   const submit = async outcome => {
     nextOutcome = outcome;
@@ -261,7 +259,6 @@ async function dashboardScenario(base, backendBase) {
   };
   const terminal = async pattern => {
     await waitFor(async () => pattern.test(await dashboardStatus()) && await dashboardDisabled() === false, 'dashboard terminal state', liveMode ? 170000 : 22000);
-    assert.equal(await dashboardMocks(), mocks, 'Investigation status must leave all illustrative cards unchanged.');
     assert.doesNotMatch(await pageText(), /Fixture image review|Review fixture image text|fixture-13\.0\.0/);
     assertDashboardRequests(browserRequests.slice(requestStart));
   };
@@ -270,9 +267,9 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(statusRequests, polls, 'Terminal status must stop polling.');
   };
   await submit('completed');
-  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\. Dashboard results below are still illustrative\./);
+  await terminal(/Investigation complete|partially completed|failed|could not complete/i);
   assert.match(await dashboardStatus(), /[a-f0-9-]{36}/i, 'Status must identify the backend audit.');
-  pass('One mobile Lighthouse POST, duplicate prevention, stage progress, and unchanged mock results');
+  pass('One mobile Lighthouse POST, duplicate prevention, and stage progress');
   if (liveMode) {
     const requests = browserRequests.slice(requestStart);
     assert.equal(requests.filter(request => request.method === 'POST').length, 1, 'Live dashboard must create exactly one real audit.');
@@ -285,20 +282,20 @@ async function dashboardScenario(base, backendBase) {
   } else {
     await stopped();
     await submit('partial'); await terminal(/Investigation partially completed\. A partial report is available\./); await stopped();
-    pass('Partial provider failure preserves mock cards and stops polling');
+    pass('Partial provider failure stops status polling');
     await submit('failed'); await terminal(/failed|could not complete/i); await stopped();
-    pass('Full failure is shown without replacing illustrative cards');
+    pass('Full failure is shown without fabricating result cards');
 
     const expected = await submit('completed');
     await cdp.send('Page.reload');
     await waitFor(async () => await dashboardDisabled() === true, 'reload resumes active audit');
     assert.equal(creationCount, expected);
     pass('Reload resumes an active job without another POST');
-    await navigate(`${base}/website`);
-    await waitFor(() => evaluate('location.pathname === "/website"'), 'website navigation');
+    await navigate(`${base}/settings`);
+    await waitFor(() => evaluate('location.pathname === "/settings"'), 'settings navigation');
     await delay(500); const polls = statusRequests; await delay(3000);
     assert.equal(statusRequests, polls, 'Leaving dashboard cancels polling.');
-    pass('Leaving dashboard for website cancels polling');
+    pass('Leaving dashboard for settings cancels polling');
     // Finish the detached fixture before testing API recovery.
     if (activeId) { jobs.get(activeId).created = Date.now() - stageDelayMs - 1; settleJobs(); }
     available = false;
@@ -331,7 +328,6 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(creationCount, restartCreations, 'Restart recovery must not automatically POST another audit.');
     assert.equal(await evaluate('document.querySelectorAll(\'[role="alert"]\').length'), 0, 'Restart recovery must clear the missing-job error.');
     assert.equal((await dashboardStatus()).includes(forgottenId), false, 'Restart recovery must clear stale job status.');
-    assert.equal(await dashboardMocks(), mocks);
     await delay(800); assert.equal(creationCount, restartCreations);
     pass('Backend restart clears a missing active job through status-only retry');
   }
@@ -460,8 +456,8 @@ try {
   await delay(800);
   assert.equal(creationCount, 0, 'Dashboard must not start an audit before a click.');
   assertDashboardRequests(browserRequests.slice(initialRequests));
-  assert.match(await pageText(), /mock data|mock findings|demo workspace/i);
-  pass('Dashboard remains mock-only without starting an audit');
+  assert.match(await pageText(), /not available|No saved/i);
+  pass('Dashboard preserves unavailable data fields without starting an audit');
 
   await navigate(`${base}/backend-lab`);
   await waitFor(async () => (await pageText()).includes('Fixture Tax Accounting'), 'backend lab data');
@@ -503,7 +499,7 @@ try {
   await waitFor(async () => (await pageText()).includes('Fixture Tax Accounting'), 'reload data');
   await delay(3000); assert.equal(creationCount, 3, 'Reload must resume an existing job instead of creating one.');
   pass('Reload resumes the active audit without creating another job');
-  await navigate(`${base}/website`); await waitFor(() => evaluate('location.pathname === "/website"'), 'leave lab');
+  await navigate(`${base}/settings`); await waitFor(() => evaluate('location.pathname === "/settings"'), 'leave lab');
   await delay(500); const leavingPolls = statusRequests; await delay(3000);
   assert.equal(statusRequests, leavingPolls, 'Leaving the lab must cancel status polling.');
   pass('Leaving the lab cancels polling');

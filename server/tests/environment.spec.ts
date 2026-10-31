@@ -2,6 +2,20 @@ import { validateEnvironment } from "../src/config/environment.js";
 import { readFileSync } from "node:fs";
 
 describe("environment configuration", () => {
+  it("defaults Muse off with no selected model, key or paid calls and validates budget bounds", () => {
+    expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, AI_MODEL: "", MODEL_API_KEY: "", AI_MAX_CALLS_PER_PROCESS: 0, AI_MAX_CONCURRENCY: 1 });
+    for (const input of [{ AI_ENABLED: "yes" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MAX_CALLS_PER_PROCESS: -1 }, { AI_MAX_CONCURRENCY: 3 }, { AI_TIMEOUT_MS: 120001 }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+    const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+    for (const line of ["MODEL_API_KEY=", "AI_MODEL=", "AI_ENABLED=false", "AI_MAX_CALLS_PER_PROCESS=0"]) expect(example.split(/\r?\n/)).toContain(line);
+  });
+  it("keeps WordPress credentials blank and write triggers disabled until deliberately configured", () => {
+    expect(validateEnvironment({})).toMatchObject({ WORDPRESS_WRITES_ENABLED: false, WORDPRESS_OPERATOR_KEY: "", WORDPRESS_BUSINESS_ID: "", WORDPRESS_SITE_URL: "" });
+    expect(validateEnvironment({ WORDPRESS_WRITES_ENABLED: "false" }).WORDPRESS_WRITES_ENABLED).toBe(false);
+    expect(validateEnvironment({ WORDPRESS_WRITES_ENABLED: "true" }).WORDPRESS_WRITES_ENABLED).toBe(true);
+    for (const input of [{ WORDPRESS_WRITES_ENABLED: "yes" }, { WORDPRESS_OPERATOR_KEY: "short" }, { WORDPRESS_SITE_URL: "https://user:secret@example.com" }, { WORDPRESS_SITE_URL: "http://example.com" }, { WORDPRESS_SITE_URL: "https://example.com/?key=private" }, { WORDPRESS_FRONTEND_ORIGIN: "https://attacker.invalid" }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+    const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+    for (const name of ["WORDPRESS_USERNAME", "WORDPRESS_APPLICATION_PASSWORD", "WORDPRESS_OPERATOR_KEY"]) expect(example.split(/\r?\n/).find(line => line.startsWith(`${name}=`))).toBe(`${name}=`);
+  });
   it("keeps Facebook disabled without credentials and restricts callbacks to local testing", () => {
     expect(validateEnvironment({})).toMatchObject({
       FACEBOOK_APP_ID: "",

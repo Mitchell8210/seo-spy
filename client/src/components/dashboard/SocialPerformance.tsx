@@ -4,11 +4,11 @@ import type { SocialResults } from '../../types/dashboard'
 
 const icons = { followers: Users, reach: Eye, engagement: Heart, interactions: MousePointer2 }
 
-export function SocialPerformance({ results }: { results: SocialResults }) {
+export function SocialPerformance({ results, caption = 'Mock metrics' }: { results: SocialResults; caption?: string }) {
   return (
     <section aria-labelledby="social-performance-title" className="flex min-w-0 flex-col rounded-xl border border-line bg-surface p-5 shadow-sm sm:p-6">
       <div className="flex items-center gap-2.5"><FacebookMark /><h3 id="social-performance-title" className="font-semibold text-ink">Social Media Performance</h3></div>
-      <p className="mt-1.5 text-xs leading-5 text-muted">{results.account} · Mock metrics</p>
+      <p className="mt-1.5 text-xs leading-5 text-muted">{results.account} · {caption}</p>
       <dl className="my-6 grid flex-1 grid-cols-2 gap-5">
         {results.metrics.map((metric) => {
           const Icon = icons[metric.id]

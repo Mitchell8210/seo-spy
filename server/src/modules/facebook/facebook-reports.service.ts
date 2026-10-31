@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -27,11 +28,18 @@ export type FacebookBrowserReport = ReportFileReference & {
   status: AuditStatus;
   failure: Audit["failure"];
 };
+export interface FacebookReportProgress {
+  businessId: string;
+  active: { pageId: string; status: "running" } | null;
+  latest: { pageId: string; result: FacebookBrowserReport | null; error: { code: string; message: string } | null } | null;
+}
 
 /** Local operator workflow; Page authorization does not establish business ownership. */
 @Injectable()
 export class FacebookReportsService implements OnModuleDestroy {
   private readonly jobs = new Map<string, Promise<FacebookBrowserReport>>();
+  private readonly owners = new Map<string, { sessionId: string | undefined; pageId: string }>();
+  private readonly outcomes = new Map<string, { at: number; value: FacebookReportProgress["latest"] }>();
   private readonly abort = new AbortController();
   private closing = false;
 
@@ -42,6 +50,31 @@ export class FacebookReportsService implements OnModuleDestroy {
     private readonly graph: FacebookGraph,
     private readonly facebook: FacebookService,
   ) {}
+
+  async status(sessionId: string | undefined, businessId: string): Promise<FacebookReportProgress> {
+    if (typeof businessId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(businessId))
+      throw new BadRequestException({ code: "INVALID_FACEBOOK_TARGET", message: "Select a registered business." });
+    await this.facebook.credential(sessionId);
+    if (!(await this.businesses.findById(businessId)))
+      throw new NotFoundException({ code: "BUSINESS_NOT_FOUND", message: "Business not found." });
+    this.pruneOutcomes();
+    const owner = this.owners.get(businessId);
+    return { businessId,
+      active: owner && owner.sessionId === sessionId ? { pageId: owner.pageId, status: "running" } : null,
+      latest: this.outcomes.get(`${sessionId}:${businessId}`)?.value ?? null };
+  }
+
+  private pruneOutcomes() {
+    for (const [key, entry] of this.outcomes) if (Date.now() - entry.at > 3600000) this.outcomes.delete(key);
+    while (this.outcomes.size > 256) this.outcomes.delete(this.outcomes.keys().next().value!);
+  }
+
+  private outcome(sessionId: string | undefined, businessId: string, value: FacebookReportProgress["latest"]) {
+    const key = `${sessionId}:${businessId}`;
+    this.outcomes.delete(key);
+    this.outcomes.set(key, { at: Date.now(), value });
+    this.pruneOutcomes();
+  }
 
   async create(
     sessionId: string | undefined,
@@ -74,10 +107,23 @@ export class FacebookReportsService implements OnModuleDestroy {
       this.run(sessionId, businessId, pageId),
     );
     this.jobs.set(businessId, job);
+    this.owners.set(businessId, { sessionId, pageId });
+    this.outcomes.delete(`${sessionId}:${businessId}`);
     try {
-      return await job;
+      const result = await job;
+      this.outcome(sessionId, businessId, { pageId, result, error: null });
+      return result;
+    } catch (error) {
+      const response = error instanceof HttpException ? error.getResponse() : null;
+      const detail = response && typeof response === "object" ? response as Record<string, unknown> : null;
+      this.outcome(sessionId, businessId, { pageId, result: null, error: {
+        code: typeof detail?.code === "string" ? detail.code : "FACEBOOK_REPORT_FAILED",
+        message: typeof detail?.message === "string" ? detail.message : "The Facebook report could not be generated. Please try again.",
+      } });
+      throw error;
     } finally {
       this.jobs.delete(businessId);
+      this.owners.delete(businessId);
     }
   }
 

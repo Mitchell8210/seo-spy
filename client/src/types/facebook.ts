@@ -60,3 +60,9 @@ export interface CreatedFacebookReport extends ReportFileReference {
   status: 'completed' | 'partial' | 'failed'
   failure: AuditFailure | null
 }
+
+export interface FacebookReportJobStatus {
+  businessId: string
+  active: { pageId: string; status: 'running' } | null
+  latest: { pageId: string; result: CreatedFacebookReport | null; error: { code: string; message: string } | null } | null
+}

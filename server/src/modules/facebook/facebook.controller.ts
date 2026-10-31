@@ -20,7 +20,7 @@ import type { Request, Response } from "express";
 import helmet from "helmet";
 import { ConfigService } from "@nestjs/config";
 import { FacebookService } from "./facebook.service.js";
-import { FacebookReportsService } from "./facebook-reports.service.js";
+import { FacebookReportsService, type FacebookReportProgress } from "./facebook-reports.service.js";
 import { ApiProperty } from "@nestjs/swagger";
 import { IsString, Matches, MaxLength } from "class-validator";
 import { ReportFileReferenceDto } from "../../reports/report-reference.dto.js";
@@ -46,6 +46,23 @@ class FacebookBrowserReportDto extends ReportFileReferenceDto {
     "completed" | "partial" | "failed";
   @ApiProperty({ type: () => AuditFailureDto, nullable: true })
   failure!: AuditFailureDto | null;
+}
+class FacebookReportProgressActiveDto {
+  @ApiProperty() pageId!: string;
+  @ApiProperty({ enum: ["running"] }) status!: "running";
+}
+class FacebookReportProgressLatestDto {
+  @ApiProperty() pageId!: string;
+  @ApiProperty({ type: () => FacebookBrowserReportDto, nullable: true }) result!: FacebookBrowserReportDto | null;
+  @ApiProperty({ type: () => AuditFailureDto, nullable: true }) error!: AuditFailureDto | null;
+}
+class FacebookReportProgressDto implements FacebookReportProgress {
+  @ApiProperty() businessId!: string;
+  @ApiProperty({ type: () => FacebookReportProgressActiveDto, nullable: true }) active!: FacebookReportProgressActiveDto | null;
+  @ApiProperty({ type: () => FacebookReportProgressLatestDto, nullable: true }) latest!: FacebookReportProgressLatestDto | null;
+}
+class FacebookReportProgressQueryDto {
+  @ApiProperty() @IsString() @Matches(/^[a-zA-Z0-9_-]+$/) @MaxLength(128) businessId!: string;
 }
 const escapeHtml = (value: string) =>
   value.replace(
@@ -78,14 +95,15 @@ export class FacebookController {
     // Only report generation accepts the explicitly configured local frontend.
     // The proxy preserves Host and Origin; OAuth/diagnostic routes stay backend-only.
     const frontend = this.config.get<string>("FACEBOOK_FRONTEND_ORIGIN") ?? "http://localhost:5173";
-    if (frontendReport && req.is("application/json") &&
+    if (frontendReport && (mutation ? Boolean(req.is("application/json")) : req.method === "GET") &&
         new URL(frontend).hostname === new URL(expected).hostname &&
-        `http://${req.get("host")}` === frontend && req.get("origin") === frontend) return;
+        `http://${req.get("host")}` === frontend &&
+        (req.get("origin") === frontend || (!mutation && !req.get("origin")))) return;
     if (`http://${req.get("host")}` !== expected)
       throw new BadRequestException(
         `Open ${expected}/api/facebook directly, using the configured hostname and port.`,
       );
-    if (mutation && req.get("origin") !== expected)
+    if ((mutation || (frontendReport && req.get("origin"))) && req.get("origin") !== expected)
       throw new BadRequestException(
         `Reload ${expected}/api/facebook and submit its form. The request must originate from that page.`,
       );
@@ -277,6 +295,14 @@ export class FacebookController {
     });
     res.redirect(303, "/api/facebook");
   }
+  @Get("reports/status")
+  @ApiOperation({ summary: "Read this browser's Facebook report progress without contacting Meta", description: "In-memory progress survives page navigation, not backend restarts. Terminal outcomes are retained up to one hour with a bounded cache; immutable reports remain available separately." })
+  @ApiOkResponse({ type: () => FacebookReportProgressDto })
+  async reportStatus(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: FacebookReportProgressQueryDto): Promise<FacebookReportProgress> {
+    this.guard(req, res, false, true);
+    return this.reports.status(this.session(req), query.businessId);
+  }
+
   @Post("reports")
   @ApiOperation({
     summary:

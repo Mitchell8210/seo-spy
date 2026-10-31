@@ -589,6 +589,29 @@ describe("Facebook local HTTP boundary", () => {
     expect(graph.request).not.toHaveBeenCalled();
   });
 
+  it("reads session-scoped report progress through the frontend proxy without provider calls", async () => {
+    const id = "d".repeat(64);
+    await store.save(id, { token: "private-browser-token", expiresAt: Date.now() + 60000, createdAt: new Date().toISOString() });
+    const response = await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(200);
+    expect(response.body).toEqual({ businessId: "demo-guzman", active: null, latest: null });
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.text).not.toContain("private-browser-token");
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173").expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173")
+      .set("Origin", "https://attacker.invalid").set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5174")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "../invalid" }).set("Host", "localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    expect(graph.request).not.toHaveBeenCalled();
+  });
+
   it("accepts a same-origin report form and offers a download only after archiving browser-derived evidence", async () => {
     const id = "b".repeat(64);
     await store.save(id, {

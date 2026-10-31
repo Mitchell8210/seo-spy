@@ -5,9 +5,10 @@ export function configureSwagger(app: INestApplication) {
   const config = new DocumentBuilder()
     .setTitle("SEO Spy API")
     .setDescription(
-      'Local API. Use scope "demo" for simulated results, "homepage" for protected HTML checks, or "lighthouse" for HTML checks plus Google PageSpeed Insights lab measurements. Lighthouse supports mobile (default) and desktop strategy. Poll statusUrl; completed/partial/failed are terminal. Facebook routes provide local OAuth/report creation. Read saved Facebook results and versioned evidence-based analysis through businesses/{businessId}/facebook-report. No AI or external writes.',
+      'Local API. Website scopes: demo, homepage, lighthouse. Facebook routes provide local OAuth/report creation and saved analysis. WordPress local-operator endpoints support immutable evidence reports, reviewed content-update proposals, public image-alt verification and explicitly requested Rank Math audits. Muse interpretation is read-only, disabled by default and requires confirmed generation plus configured model/key/call limits. WordPress writes/audit triggers require their separate write gate and exact approval. Saved reads make no provider calls.',
     )
     .setVersion("0.2.0")
+    .addBearerAuth({ type: "http", scheme: "bearer", description: "Private WORDPRESS_OPERATOR_KEY for local operator endpoints only; never send the WordPress application password here." })
     .build();
   SwaggerModule.setup(
     "api/docs",

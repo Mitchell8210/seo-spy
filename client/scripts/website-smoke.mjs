@@ -14,8 +14,10 @@ import { fileURLToPath } from 'node:url';
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const children = [], errors = [], requests = [];
 const savedTarget = process.argv.includes('--saved') ? process.env.WEBSITE_API_TARGET ?? 'http://127.0.0.1:3001' : null;
+const dashboardMode = process.argv.includes('--dashboard');
 let mode = 'loaded', cdp, server, artifacts;
 let rerun = null, rejectRun = false;
+let facebookJob = null, facebookLatest = null;
 const rerunId = '00000000-0000-4000-8000-000000000002';
 const now = '2026-10-29T01:57:37.216Z';
 const auditId = '00000000-0000-4000-8000-000000000001';
@@ -33,6 +35,18 @@ const report = {
   }
 };
 const summary = (scope, mode) => ({ reportId: report.auditId, auditId: report.auditId, businessId: business.id, scope, mode, status: report.audit.status, generatedAt: now });
+const facebookAuditId = '00000000-0000-4000-8000-000000000003';
+const facebookFinding = { id: 'facebook-review', auditId: facebookAuditId, checkId: 'facebook:profile:hours', evidenceIds: ['facebook-evidence'], severity: 'medium', source: 'facebook', title: 'Review the Page business hours', explanation: 'Meta did not return populated business hours. <script>window.fixtureExecuted=true</script>', status: 'needs_review' };
+const facebookReport = {
+  schemaVersion: 'seo-spy.audit-report.v1', reportId: facebookAuditId, auditId: facebookAuditId, generatedAt: now, business,
+  audit: { ...report.audit, id: facebookAuditId, scope: 'facebook', mode: 'live', status: 'partial' },
+  results: { facebook: { provider: 'facebook-graph', version: 'facebook-v1', graphVersion: 'v26.0', pageId: '123', pageName: 'Fixture Facebook Page', collectedAt: now,
+    window: { requestedDays: 30, since: now, until: now }, profile: { followers_count: { status: 'available', value: 15, collectedAt: now } },
+    metrics: [{ name: 'page_post_engagements', aggregation: 'sum', status: 'available', total: 0, points: [], period: 'day', collectedAt: now }, { name: 'page_media_view', status: 'available', total: 999 }],
+    posts: { status: 'available', items: [], truncated: false, collectedAt: now }, limitations: [], summary: {}, coverage: {} },
+    evidence: [{ id: 'facebook-evidence', auditId: facebookAuditId, checkId: 'facebook:profile:hours', mode: 'live', observed: { status: 'missing' } }],
+    findings: [facebookFinding], recommendations: [{ id: 'facebook-rec', auditId: facebookAuditId, findingId: facebookFinding.id, title: 'Review your Page hours', explanation: 'Help visitors plan a visit.', recommendedChange: 'Check the hours shown on Facebook before changing them.', status: 'needs_review' }], scores: [] }
+};
 async function waitFor(test, label, timeout = 15000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) { try { if (await test()) return; } catch { /* Startup/navigation can transiently fail. */ } await delay(100); }
@@ -82,6 +96,29 @@ try {
   server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: req.url });
     let data;
+    if (req.url.startsWith('/api/facebook/reports/status?')) {
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: business.id, active: facebookJob, latest: facebookLatest })); return;
+    }
+    if (req.method === 'POST' && req.url === '/api/facebook/reports') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      assert.deepEqual(JSON.parse(body), { businessId: business.id, pageId: '123' });
+      facebookJob = { pageId: '123', status: 'running' };
+      setTimeout(() => {
+        facebookReport.results.facebook.profile.followers_count.value = 17;
+        facebookJob = null;
+        facebookLatest = { pageId: '123', result: { reportId: facebookAuditId, auditId: facebookAuditId, status: 'partial', failure: null }, error: null };
+        res.writeHead(201, { 'content-type': 'application/json' }); res.end(JSON.stringify(facebookLatest.result));
+      }, 5000);
+      return;
+    }
+    if (req.url.endsWith('/facebook-report')) {
+      if (mode === 'facebook-error' || mode === 'error') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'FIXTURE_FACEBOOK_ERROR', message: 'Saved Facebook reports are temporarily unavailable.' } })); return; }
+      const empty = mode === 'empty';
+      data = { businessId: business.id, report: empty ? null : facebookReport,
+        analysis: empty ? null : { version: 'facebook-analysis-v1', auditId: facebookAuditId, findings: facebookReport.results.findings, recommendations: facebookReport.results.recommendations, summaries: [] },
+        latestAttempt: mode === 'failed-latest' ? { auditId: 'failed-facebook', status: 'failed' } : null };
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); return;
+    }
     if (req.method === 'POST' && req.url === '/api/businesses/demo-guzman/audits') {
       let body = ''; for await (const chunk of req) body += chunk;
       requests.at(-1).body = JSON.parse(body);
@@ -123,7 +160,73 @@ try {
   let port; await waitFor(async () => { port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]); return Boolean(port); }, 'Chrome startup');
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); cdp = await connect(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  if (savedTarget) {
+  if (dashboardMode) {
+    const go = async (query = '') => { await navigateReport(base + '/dashboard' + query); };
+    const sectionText = id => evaluate('document.querySelector("section[aria-labelledby=' + id + ']").innerText');
+    await go();
+    await waitFor(async () => (await text()).includes('Fixture Facebook Page') && (await text()).includes('Review fixture image alternatives'), 'both saved channel reports');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 0, 'Viewing the Dashboard starts no audit.');
+    assert.match(await text(), /Fixture Business/);
+    assert.doesNotMatch(await text(), /Guzman|mock|illustrative|demo connections|Business hours differ|Phone formatting differs|business name matches/i);
+    assert.equal(await evaluate('window.fixtureExecuted === true'), false);
+    assert.ok((await sectionText('social-performance-title')).includes('<script>') === false);
+    assert.match(await sectionText('social-performance-title'), /Followers\s+15/);
+    assert.match(await sectionText('social-performance-title'), /Reach — 30 days\s+—/);
+    assert.match(await sectionText('social-performance-title'), /Engagement Rate\s+—/);
+    assert.match(await sectionText('social-performance-title'), /Interactions — 30 days\s+0/);
+    assert.doesNotMatch(await sectionText('social-performance-title'), /999/);
+    assert.match(await sectionText('findings-title'), /Facebook/);
+    assert.match(await sectionText('recommendations-title'), /Check the hours shown on Facebook before changing them/);
+    const gauges = await evaluate('Array.from(document.querySelectorAll("[role=img]")).map(el=>el.getAttribute("aria-label"))');
+    assert.ok(gauges.some(value => value.startsWith('Performance: 0 out of 100')));
+    assert.equal(await evaluate('document.querySelector("section[aria-labelledby=main-spy-title] [role=img]").getAttribute("aria-label")'), 'Score: not available');
+    assert.equal(await evaluate('document.querySelectorAll("section[aria-labelledby=consistency-title] li").length'), 4);
+    assert.equal(await evaluate('document.querySelectorAll("section[aria-labelledby=connections-title] li .text-emerald-300").length'), 2, 'Both connected assets keep green checks.');
+    assert.match(await text(), /1 website connected/); assert.match(await text(), /1 social account connected/);
+    const sections = await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby]")).map(el=>el.getAttribute("aria-labelledby"))');
+    assert.deepEqual(sections, ['business-title', 'main-spy-title', 'consistency-title', 'results-title', 'website-health-title', 'social-performance-title', 'connections-title', 'findings-title', 'recommendations-title']);
+    await screenshot('dashboard-desktop.png');
+    for (const width of [320, 390, 768, 1280]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, 'Dashboard overflow at ' + width);
+    }
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await screenshot('dashboard-mobile.png');
+    mode = 'failed-latest'; await go();
+    await waitFor(async () => (await text()).includes('A newer report attempt failed.') && (await text()).includes('Review fixture image alternatives'), 'failed newer attempts');
+    assert.match(await text(), /Review fixture image alternatives/); assert.match(await text(), /Fixture Facebook Page/);
+    mode = 'facebook-error'; await evaluate('window.dispatchEvent(new Event("focus"))');
+    await waitFor(async () => (await text()).includes('Saved Facebook reports are temporarily unavailable'), 'Facebook refresh failure');
+    assert.match(await sectionText('social-performance-title'), /Followers\s+15/);
+    assert.match(await text(), /Review fixture image alternatives/);
+    mode = 'loaded'; facebookReport.results.facebook.profile.followers_count.value = 16;
+    await evaluate('window.dispatchEvent(new Event("focus"))');
+    await waitFor(async () => /Followers\s+16/.test(await sectionText('social-performance-title')), 'Facebook refresh recovery');
+    mode = 'empty'; await go(); await waitFor(async () => (await text()).includes('No saved website report is available.'), 'no live reports');
+    assert.equal(await evaluate('document.querySelectorAll("#findings-title ~ div article").length'), 0);
+    assert.equal(await evaluate('document.querySelector("section[aria-labelledby=website-health-title] [role=img]").getAttribute("aria-label")'), 'Score: not available');
+    assert.match(await sectionText('social-performance-title'), /Followers\s+—/);
+    mode = 'loaded'; await go('?businessId=other-business');
+    await waitFor(async () => (await text()).includes('different business') || (await text()).includes('selected business'), 'business identity rejection');
+    assert.doesNotMatch(await text(), /Fixture Business|Fixture Facebook Page|Review fixture image alternatives/);
+    await go(); await waitFor(async () => (await text()).includes('Review fixture image alternatives'), 'report restored');
+    await waitFor(async () => await evaluate('!document.querySelector("[data-testid=dashboard-run-audit]").disabled'), 'investigation ready');
+    await evaluate('document.querySelector("[data-testid=dashboard-run-audit]").click(); document.querySelector("[data-testid=dashboard-run-audit]").click()');
+    await waitFor(async () => (await text()).includes('Investigation queued'), 'existing investigation starts');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 2, 'Dashboard starts exactly one Website and one Facebook report.');
+    assert.match(await text(), /Review fixture image alternatives/);
+    await navigateReport(base + '/social-media');
+    await waitFor(async () => (await text()).includes('Report running'), 'Social page resumes backend progress after navigation');
+    assert.equal(await evaluate('document.querySelector("[data-testid=social-run-report]").disabled'), true);
+    await cdp.send('Page.reload');
+    await waitFor(async () => (await text()).includes('Report running'), 'Social progress survives reload');
+    await go();
+    await waitFor(async () => (await text()).includes('Fresh report image alternatives'), 'investigation refreshes Dashboard results');
+    await waitFor(async () => /Followers\s+17/.test(await sectionText('social-performance-title')), 'new Facebook report refreshes after leaving initiating page');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 2, 'Navigation and reload do not submit duplicate jobs.');
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ passed: ['both saved channels', 'business identity', 'zero versus unavailable', 'no invented scores or metrics', 'priority findings and linked recommendations', 'green connected assets', 'preserved section order and metric labels', 'failed attempts retain reports', 'refresh recovery', 'demo exclusion', 'business rejection', 'mobile overflow', 'investigation duplicate protection and fresh results'], artifactDirectory: artifacts }, null, 2));
+  } else if (savedTarget) {
     const list = await (await fetch(savedTarget + '/api/businesses/demo-guzman/reports')).json();
     const candidate = list.reports.find(item => item.mode === 'live' && ['homepage', 'lighthouse'].includes(item.scope) && ['completed', 'partial'].includes(item.status));
     assert.ok(candidate, 'A saved real Website report is required for --saved.');

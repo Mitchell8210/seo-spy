@@ -1,8 +1,8 @@
-import type { Finding } from '../../types/dashboard'
+import type { DashboardFinding } from '../../types/dashboardLive'
 import { findingStatuses } from '../../utils/findingStatus'
 import { StatusBadge } from '../common/StatusBadge'
 
-export function FindingCard({ finding }: { finding: Finding }) {
+export function FindingCard({ finding }: { finding: DashboardFinding }) {
   return (
     <article className="px-5 py-4 sm:px-6">
       <div className="flex flex-wrap items-center gap-2">

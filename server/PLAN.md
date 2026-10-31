@@ -1,10 +1,57 @@
 # SEO Spy backend plan
 
+Detailed next-stage backlog: [Meta Muse agent integration plan](AI_AGENT_INTEGRATION_PLAN.md). The WordPress-only read-only slice is implemented behind default-off gates; broader cross-channel scoring/actions remain planned. This backlog supersedes the generic future-AI outline for task sequencing; existing implementation history remains below.
+
 Status: foundation, homepage checks, Lighthouse integration, isolated backend-lab workflow, and durable report files implemented. Main dashboard action/status integration is available; real result-card integration and cumulative scoring remain separate tasks.
 Created: October 27, 2026.
 Last updated: October 28, 2026.
 
 ## Progress record
+
+### October 31, 2026 - WordPress saved evidence, Muse pipeline and public verification
+
+- Implemented separate immutable WordPress evidence reports, saved history/reads, published non-password-protected sample selection, parent-bound media and filtered Rank Math metadata/stored scores. Null scoring/freshness and explicit per-source failures are preserved. First live report saved and read back successfully; its media mapping failure is preserved in the original archive and corrected for subsequent reports.
+- Added minimized cited Muse bundles, default-off fixed Responses transport, bounded calls/tokens/concurrency, strict output/target/reference validation and separate immutable WordPress-only interpretation records. Generation requires an explicit confirmed operator request. Live key/model/processing-mode/budget setup remains pending; no live AI calls, scores or model execution tools.
+- Added public source-HTML media-alt verification through a shared protected collector with registered-site redirect binding, independent stored/public statuses and saved receipts. Fixtures cover cache mismatch, later propagation, builder/source conflicts and failed collection.
+- Prepared the exact media-alt pilot requested by the user on the existing Guzman live site; the preview expired without approval and was not applied. A fresh preview/hash/review is required. Separate staging isolation is not established. The pilot CLI cannot retry uncertain writes or restore automatically. No frontend change was made.
+- Final live report `12897672-5152-4f1c-b727-b72cd3cdfe9c` has current visibility-policy proof, all five sources available, 20 pages/17 posts/20 media and 91 bounded Muse observations. Saved/history/preparation checks passed without model calls, writes or a fresh audit. Backend check passed: 24 suites, 429 tests plus one skipped, typecheck/lint/build.
+- See [report contracts/results](WORDPRESS_REPORTS.md), [provider setup](MUSE_PROVIDER.md), [pilot workflow](WORDPRESS_STAGING.md) and [remaining tasks](WORDPRESS_NEXT_STEPS.md). Specialized editors, application identity/shared execution, scoring and broader combined assessments remain future work.
+
+### October 31, 2026 - WordPress traffic-data discovery
+
+- Verified active Site Kit with configured/connected GA4 and Search Console. Configuration reads work, but both report reads returned 403 `missing_required_scopes`; the WordPress user behind current credentials has no Google authorization in Site Kit.
+- Read existing Rank Math analytics summaries without syncing or auditing: no usable traffic totals; explicit `n/a` is preserved, not converted to zero. Documented candidate metrics and access limitations in [analytics discovery](WORDPRESS_ANALYTICS_DISCOVERY.md). The user explicitly excluded Google authorization setup; no reconnect/OAuth/analytics setup follow-up is planned.
+- Added explicit read-only operator diagnostics only; no frontend/API changes, new analytics connection, tracking configuration change or scoring calculation. Writes remain disabled.
+
+### October 30, 2026 - stored Rank Math scoring direction
+
+- User approved using available WordPress/Rank Math metadata and stored scores in the future assessment, with stored scores contributing only a small supporting weight. Exact numeric weights remain undecided; no score calculation was implemented.
+- Recorded freshness, sample coverage, missing-data and overlap requirements in the [scoring plan](AI_AGENT_INTEGRATION_PLAN.md#accepted-direction-stored-rank-math-evidence). Evidence packaging can proceed without a fresh sitewide audit; Muse interpretation and final backend scoring remain later work.
+
+### October 30, 2026 - Rank Math execution diagnostics
+
+- Investigated the original unavailable audit without retrying it. Lost HTTP/error data prevents a conclusive historical cause; a 30-second outer deadline versus Rank Math's own 30-second remote wait is the leading timing hypothesis. Existing parser shape matches the installed audit schema.
+- Added optional redacted transport diagnostics, explicit audit execution states, standard MCP/JSON-RPC envelope parsing and read-only unknown overlays for old receipts. Kept working evidence reads, write gates, reservations and no retries.
+- Discovered both live tool schemas and independently called `analyze-post-content` once on page 5652: HTTP 200, evidence plus 22 test IDs, no executed score. Node execution requires no AI host; Muse interpretation and the final backend scoring policy remain separate. See [investigation and validation](RANKMATH_AUDIT_INVESTIGATION.md).
+
+### October 30, 2026 - WordPress next steps phases 1 and 2
+
+- Configured the ignored local business/site binding and independent operator key with writes disabled. Verified actual module HTTP reads for account capabilities, lists, representative editable records and authorization rejection through a fresh temporary loopback backend.
+- Added a repeatable live read-only module diagnostic and [credential-free verification record](WORDPRESS_MODULE_VERIFICATION.md).
+- Corrected Rank Math ability paths to match the installed REST index and serialized definition discovery to respect transport concurrency. Offline checks pass; fresh audit authorization remains separate from evidence reads.
+- Corrected ability input encoding to structured query fields after live HTTP 400 responses. Verified page/post metadata and bounded stored-score samples through the module (20 pages, 17 posts), preserving null scores.
+- Following explicit user authorization, dispatched one fresh Rank Math audit request. Its saved result is unavailable (null score, no established findings, unknown remote coverage); no successful remote scan is claimed. Verified identical same-ID replay and saved GET receipt with exactly one remote audit dispatch, then confirmed writes disabled. See the verification record for request ID, timestamps and limitations. Phase 2 verification is complete; no content edit was performed.
+
+### October 30, 2026 - WordPress local operator module and Rank Math evidence
+
+- Added business-bound WordPress reads and exact-hash approved page/post/media updates through an HTTPS/DNS-pinned bounded adapter. Writes default off; no live changes performed. Local operator authentication is separate from the WordPress application password and future customer sign-in.
+- Added persisted proposals, single-execution/target reservations, stale-target checks and distinct stored-field verification. Unknown outcomes/publication failures retain locks; remote compare-and-swap and automatic reconciliation are not implemented.
+- Added Rank Math ability discovery, stored metadata/content scores and explicitly requested audit results with durable receipts. No fresh audit runs on GET evidence. See [module setup and limitations](WORDPRESS_MODULE.md) and [Rank Math notes](RANKMATH_API_NOTES.md).
+
+### October 30, 2026 - Dashboard starts both report channels
+
+- Dashboard Run Investigation now requests a Website Lighthouse audit and a browser-authorized Facebook report independently. Both retain saved results during collection/failure.
+- Added session-scoped Facebook progress/outcome reads without provider calls; Dashboard and Social Media recover running state after navigation and refresh saved results at completion. Progress is in memory; immutable reports remain durable.
 
 ### October 30, 2026 - Social Media report rerun control
 

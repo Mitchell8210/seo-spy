@@ -122,6 +122,38 @@ function fixture() {
 }
 
 describe("Facebook reports from browser authorization", () => {
+  it("exposes running and terminal progress only to the initiating browser without Meta reads", async () => {
+    const f = fixture();
+    let release!: (value: ReportFileReference) => void;
+    let entered!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    f.write.mockImplementation(async () => { entered(); return new Promise(resolve => { release = resolve; }); });
+    const job = f.service.create("session", business.id, "123");
+    await writing;
+    const calls = f.graph.request.mock.calls.length;
+    expect(await f.service.status("session", business.id)).toEqual({ businessId: business.id, active: { pageId: "123", status: "running" }, latest: null });
+    expect(await f.service.status("another-session", business.id)).toEqual({ businessId: business.id, active: null, latest: null });
+    expect(f.graph.request).toHaveBeenCalledTimes(calls);
+    release(reference); await job;
+    expect(await f.service.status("session", business.id)).toMatchObject({ active: null, latest: { pageId: "123", result: { auditId: "saved", status: "completed" }, error: null } });
+    expect((await f.service.status("another-session", business.id)).latest).toBeNull();
+    expect(f.graph.request).toHaveBeenCalledTimes(calls);
+  });
+
+  it("retains safe terminal failures and clears prior outcomes when another run starts", async () => {
+    const f = fixture();
+    f.requirePermissions.mockRejectedValueOnce(new Error("private provider details"));
+    await expect(f.service.create("session", business.id, "123")).rejects.toThrow();
+    const status = await f.service.status("session", business.id);
+    expect(status).toMatchObject({ active: null, latest: { result: null, error: { code: "FACEBOOK_REPORT_FAILED" } } });
+    expect(JSON.stringify(status)).not.toContain("private provider details");
+    await f.service.create("session", business.id, "123");
+    expect((await f.service.status("session", business.id)).latest?.error).toBeNull();
+    f.credential.mockRejectedValueOnce(new Error("Reconnect required"));
+    await expect(f.service.status(undefined, business.id)).rejects.toThrow("Reconnect");
+    await expect(f.service.status("session", "../invalid")).rejects.toThrow("registered business");
+  });
+
   it("collects with the browser user token and returns only after the archive write completes", async () => {
     const f = fixture();
     let release!: (reference: ReportFileReference) => void;
