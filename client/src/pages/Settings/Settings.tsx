@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router'
 import { Building2, Crown, Link2, Sparkles } from 'lucide-react'
 import { BusinessProfileSettings } from '../../components/settings/BusinessProfileSettings'
 import { ConnectedAssetsSettings } from '../../components/settings/ConnectedAssetsSettings'
@@ -15,8 +16,18 @@ const sections = [
 type SettingsSection = typeof sections[number]['id']
 
 export function Settings() {
+  const { hash } = useLocation()
   const [activeSection, setActiveSection] = useState<SettingsSection>('business')
   const headings = useRef<Partial<Record<SettingsSection, HTMLHeadingElement | null>>>({})
+  useEffect(() => {
+    if (hash !== '#connected-assets') return
+    const frame = requestAnimationFrame(() => {
+      setActiveSection('assets')
+      headings.current.assets?.focus({ preventScroll: true })
+      document.getElementById('settings-assets')?.scrollIntoView({ block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [hash])
   return (
     <div className="space-y-8">
       <div><h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Settings</h1><p className="mt-2 text-sm leading-6 text-secondary">Manage your business information, connected accounts, and preferences.</p></div>
