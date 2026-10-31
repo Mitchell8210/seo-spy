@@ -236,6 +236,10 @@ describe("saved Facebook report presentation API", () => {
       join(directory, ref.fileName),
       "broken private provider data",
     );
+    const intact = await request(app.getHttpServer()).get("/api/businesses/demo-guzman/facebook-report").expect(200);
+    expect(intact.body.latestAttempt.auditId).toBe(failed.id);
+    // A corrupt export cannot replace the primary record; corrupt unseen legacy data still fails closed.
+    await writeFile(join(directory, ref.fileName.replace(ref.auditId, randomUUID())), "broken private provider data");
     const invalid = await request(app.getHttpServer())
       .get("/api/businesses/demo-guzman/facebook-report")
       .expect(503);

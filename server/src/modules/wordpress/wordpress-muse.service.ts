@@ -67,7 +67,7 @@ export class WordPressMuseService {
       || !Number.isInteger(maxOutputTokens) || maxOutputTokens < 16 || maxOutputTokens > 1500
       || !Number.isInteger(maxInputBytes) || maxInputBytes < 4096 || maxInputBytes > 32768)
       throw new ServiceUnavailableException({ code: "AI_NOT_CONFIGURED", message: "The analysis settings exceed the permitted development bounds." });
-    return { mode, model: model as "muse-spark-1.3" | "muse-spark-1.2", reasoning, maxOutputTokens, maxInputBytes };
+    return { mode, model: model as "muse-spark-1.3" | "muse-spark-1.2", reasoning, maxOutputTokens, maxInputBytes, instructionsHash: digest(instructions) };
   }
   private usable(bundle: WordPressMuseEvidenceBundle) {
     if (bundle.source.availability === "unavailable" || !bundle.observations.length) throw new BadRequestException({ code: "WORDPRESS_MUSE_EVIDENCE_UNAVAILABLE", message: "Usable saved WordPress evidence is required before requesting Muse analysis." });
@@ -97,7 +97,7 @@ export class WordPressMuseService {
       const cached = await this.store.findByCacheKey(businessId, bundle.business.siteUrl, reportId, cacheKey);
       if (cached) {
         if (cached.sourceHash !== bundle.source.contentHash || cached.generationMode !== settings.mode || cached.isMock !== (settings.mode === "mock")) throw new ServiceUnavailableException({ code: "WORDPRESS_MUSE_STORAGE_ERROR", message: "The saved analysis cache does not match its evidence or operating mode." });
-        validateWordPressMuseOutput(cached.output, bundle);
+        validateWordPressMuseOutput(cached.output, selected);
         return cached;
       }
       if (settings.mode !== "mock" && (!authorization?.intentId || !authorization.actor)) throw new ServiceUnavailableException({ code: "AI_APPROVAL_REQUIRED", message: "Every real model request requires a separately approved administrator intent." });
@@ -105,7 +105,7 @@ export class WordPressMuseService {
         ? { output: buildMockWordPressMuseOutput(selected), model: settings.model, usage: { inputTokens: 0, outputTokens: 0 }, requestId: null, attemptId: undefined }
         : await this.provider.generate({ instructions, input: selected, schema }, undefined, { ...authorization!, scope: `wordpress:${businessId}:${reportId}` });
       if (generation.model !== settings.model) throw new BadGatewayException({ code: "WORDPRESS_MUSE_OUTPUT_INVALID", message: "The model returned analysis for an unexpected configuration." });
-      const output = validateWordPressMuseOutput(generation.output, bundle);
+      const output = validateWordPressMuseOutput(generation.output, selected);
       const record = wordpressMuseAnalysisSchema.parse({
         schemaVersion: "seo-spy.wordpress-muse-analysis.v1", id: randomUUID(), businessId, siteUrl: bundle.business.siteUrl,
         reportId, sourceHash: bundle.source.contentHash, model: generation.model,

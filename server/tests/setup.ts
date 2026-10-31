@@ -10,3 +10,5 @@ process.env.MODEL_API_KEY = "";
 process.env.AI_ENABLED = "false";
 process.env.MOCK_AI = "true";
 process.env.AI_MODE = "mock";
+// Each test app gets an isolated DB unless a test selects a durable temp path.
+process.env.DATABASE_PATH = ":memory:";

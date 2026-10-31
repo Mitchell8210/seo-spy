@@ -145,6 +145,7 @@ export class AiUsageStore implements OnModuleDestroy {
     return { chargedMicros: Number(row.charged), todayChargedMicros: Number(row.daily), calls: Number(row.calls) };
   }
   private verifyBudget(database: DatabaseSync, intent: AiUsageIntent, limits?: AiUsageLimits): void {
+    if (intent.mode === "demo" && intent.demoAuthorizationId !== this.demo(database)?.id) throw fail("AI_DEMO_APPROVAL_REQUIRED", "Demo authorization changed; review a fresh estimate under the current limits.");
     const selected = intent.mode === "poc" ? this.developmentLimits(database, limits) : this.demo(database, intent.demoAuthorizationId);
     if (!selected) throw fail("AI_DEMO_APPROVAL_REQUIRED", "Demo mode requires separate persisted administrator authorization.");
     if (intent.mode === "demo" && limits && (limits.budgetMicros !== selected.budgetMicros || limits.dailyMicros !== selected.dailyMicros || limits.maxCalls !== selected.maxCalls)) throw fail("AI_DEMO_APPROVAL_REQUIRED", "The configured demo limits differ from their administrator authorization.");
@@ -154,19 +155,20 @@ export class AiUsageStore implements OnModuleDestroy {
     if (totals.todayChargedMicros + intent.reserveMicros > selected.dailyMicros) throw fail("AI_DAILY_BUDGET", "This request would exceed the authorized UTC daily AI spending limit.");
   }
 
-  async estimate(input: AiUsageEstimateInput): Promise<AiUsageIntent> {
+  async estimate(input: AiUsageEstimateInput, limits?: AiUsageLimits): Promise<AiUsageIntent> {
     const parsed = inputSchema.safeParse(input);
     if (!parsed.success) throw fail("AI_ESTIMATE_INVALID", "A bounded scoped estimate and proof-of-concept reason are required.");
     // Standard Spark prices are at least $1.25/$4.25 per million input/output
     // tokens. Never accept a lower reservation even if a caller underestimates.
     const minimum = Math.ceil((parsed.data.maxInputTokens * parsed.data.inputPriceMicrosPerMillion + parsed.data.maxOutputTokens * parsed.data.outputPriceMicrosPerMillion) / 1_000_000);
     if (parsed.data.reserveMicros < minimum) throw fail("AI_ESTIMATE_INVALID", "The maximum-cost reservation is below the supported Standard pricing floor.");
+    if (parsed.data.mode === "poc" && limits) this.transaction(database => this.developmentLimits(database, limits));
     return this.transaction(database => {
       const now = Date.now();
       const demo = parsed.data.mode === "demo" ? this.demo(database) : null;
       if (parsed.data.mode === "demo" && !demo) throw fail("AI_DEMO_APPROVAL_REQUIRED", "Demo mode requires separate persisted administrator authorization.");
       const intent: AiUsageIntent = { ...parsed.data, id: randomUUID(), createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 15 * 60_000).toISOString(), approvedAt: null, approvedBy: null, consumedAt: null, demoAuthorizationId: demo?.id ?? null };
-      this.verifyBudget(database, intent);
+      this.verifyBudget(database, intent, limits);
       const payload = JSON.stringify(parsed.data);
       database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,?)").run(intent.id, payload, digest(payload), intent.createdAt, intent.expiresAt, intent.demoAuthorizationId);
       return intent;

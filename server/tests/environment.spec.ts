@@ -2,11 +2,11 @@ import { validateEnvironment } from "../src/config/environment.js";
 import { readFileSync } from "node:fs";
 
 describe("environment configuration", () => {
-  it("defaults Muse off with no selected model, key or paid calls and validates budget bounds", () => {
-    expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, AI_MODEL: "", MODEL_API_KEY: "", AI_MAX_CALLS_PER_PROCESS: 0, AI_MAX_CONCURRENCY: 1 });
-    for (const input of [{ AI_ENABLED: "yes" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MAX_CALLS_PER_PROCESS: -1 }, { AI_MAX_CONCURRENCY: 3 }, { AI_TIMEOUT_MS: 120001 }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+  it("defaults Muse to cost-free mocks and rejects settings beyond development safeguards", () => {
+    expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, MOCK_AI: true, AI_MODE: "mock", AI_MODEL: "muse-spark-1.3", AI_PROCESSING_MODE: "standard", AI_REASONING_EFFORT: "low", MODEL_API_KEY: "", AI_MAX_OUTPUT_TOKENS: 1500, AI_MAX_INPUT_BYTES: 32768, AI_MAX_CONCURRENCY: 1, AI_DEV_BUDGET_MICROS: 2000000, AI_DEV_DAILY_MICROS: 500000, AI_DEV_MAX_CALLS: 10 });
+    for (const input of [{ AI_ENABLED: "yes" }, { MOCK_AI: "yes" }, { AI_MODE: "automatic" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MODEL: "muse-wonder-1.0" }, { AI_PROCESSING_MODE: "contributor" }, { AI_REASONING_EFFORT: "high" }, { AI_MAX_OUTPUT_TOKENS: 1501 }, { AI_MAX_INPUT_BYTES: 32769 }, { AI_MAX_CONCURRENCY: 2 }, { AI_TIMEOUT_MS: 120001 }, { AI_DEV_BUDGET_MICROS: 2000001 }, { AI_DEV_DAILY_MICROS: 500001 }, { AI_DEV_MAX_CALLS: 11 }, { AI_INPUT_PRICE_MICROS_PER_MILLION: 1 }, { AI_ADMIN_KEY: "short" }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
     const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
-    for (const line of ["MODEL_API_KEY=", "AI_MODEL=", "AI_ENABLED=false", "AI_MAX_CALLS_PER_PROCESS=0"]) expect(example.split(/\r?\n/)).toContain(line);
+    for (const line of ["MODEL_API_KEY=", "AI_ADMIN_KEY=", "AI_MODEL=muse-spark-1.3", "AI_ENABLED=false", "MOCK_AI=true", "AI_MODE=mock", "AI_MAX_OUTPUT_TOKENS=1500", "AI_DEV_BUDGET_MICROS=2000000"]) expect(example.split(/\r?\n/)).toContain(line);
   });
   it("keeps WordPress credentials blank and write triggers disabled until deliberately configured", () => {
     expect(validateEnvironment({})).toMatchObject({ WORDPRESS_WRITES_ENABLED: false, WORDPRESS_OPERATOR_KEY: "", WORDPRESS_BUSINESS_ID: "", WORDPRESS_SITE_URL: "" });

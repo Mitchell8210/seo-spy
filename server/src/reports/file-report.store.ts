@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
@@ -10,6 +10,7 @@ import type { Audit, AuditResults, Business } from "../contracts/domain.js";
 import { facebookReportSchema } from "../integrations/facebook/types.js";
 import { summarizeEvidence } from "../reporting/evidence-summary.js";
 import { analyzeWebsite } from "../integrations/lighthouse/prioritize.js";
+import { AppDatabase } from "../persistence/sqlite/app-database.js";
 import {
   ReportStorageError,
   type AuditReportRecord,
@@ -242,14 +243,48 @@ function validRecord(value: unknown): value is AuditReportRecord {
 }
 
 @Injectable()
-export class FileReportStore {
+export class FileReportStore implements OnApplicationShutdown {
   private readonly directory: string;
+  private readonly database: AppDatabase;
+  private readonly ownsDatabase: boolean;
 
-  constructor(config: ConfigService) {
+  constructor(config: ConfigService, @Optional() database?: AppDatabase) {
     this.directory = resolve(
       fileURLToPath(new URL("../../", import.meta.url)),
       config.get<string>("REPORTS_DIR") ?? "reports/audits",
     );
+    this.database = database ?? new AppDatabase(config);
+    this.ownsDatabase = database === undefined;
+  }
+
+  onApplicationShutdown(): void {
+    if (this.ownsDatabase) this.database.close();
+  }
+
+  private stored(auditId: string): AuditReportRecord | null {
+    try {
+      const artifact = this.database.readArtifact("audit-report", auditId);
+      if (!artifact) return null;
+      if (!validRecord(artifact.payload) || artifact.payload.auditId !== auditId || artifact.businessId !== artifact.payload.business.id || artifact.createdAt !== artifact.payload.generatedAt) throw corrupt();
+      return artifact.payload;
+    } catch (error) {
+      if (error instanceof ReportStorageError) throw error;
+      throw failure();
+    }
+  }
+
+  private remember(record: AuditReportRecord): boolean {
+    try {
+      const inserted = this.database.insertArtifact({ kind: "audit-report", id: record.auditId, businessId: record.business.id, createdAt: record.generatedAt, payload: record });
+      if (!inserted) {
+        const existing = this.stored(record.auditId);
+        if (!existing || existing.business.id !== record.business.id || existing.audit.scope !== record.audit.scope || existing.audit.mode !== record.audit.mode) throw corrupt();
+      }
+      return inserted;
+    } catch (error) {
+      if (error instanceof ReportStorageError) throw error;
+      throw failure();
+    }
   }
 
   private validateId(id: string): void {
@@ -319,21 +354,46 @@ export class FileReportStore {
 
   async read(auditId: string): Promise<AuditReportRecord | null> {
     this.validateId(auditId);
+    const stored = this.stored(auditId);
+    if (stored) return stored;
     const names = (await this.names()).filter((name) =>
       name.endsWith(`_${auditId}.json`),
     );
     if (names.length > 1) throw corrupt();
-    return names[0] ? this.load(names[0]) : null;
+    if (!names[0]) return null;
+    const record = await this.load(names[0]);
+    this.remember(record);
+    return this.stored(auditId);
+  }
+
+  /** Idempotent adoption of validated historical JSON; originals are never changed. */
+  async importLegacy(): Promise<{ imported: number; existing: number }> {
+    const seen = new Set<string>();
+    let imported = 0;
+    let existing = 0;
+    for (const name of await this.names()) {
+      const id = FILE.exec(name)?.[2];
+      if (!id || !UUID.test(id) || seen.has(id)) throw corrupt();
+      seen.add(id);
+      if (this.stored(id)) { existing++; continue; }
+      const record = await this.load(name);
+      if (this.remember(record)) imported++; else existing++;
+    }
+    return { imported, existing };
   }
 
   async list(businessId: string): Promise<StoredReportSummary[]> {
+    await this.importLegacy();
     const records: AuditReportRecord[] = [];
-    const seen = new Set<string>();
-    for (const name of await this.names()) {
-      const record = await this.load(name);
-      if (seen.has(record.auditId)) throw corrupt();
-      seen.add(record.auditId);
-      if (record.business.id === businessId) records.push(record);
+    try {
+      for (const artifact of this.database.listArtifacts("audit-report", businessId)) {
+        const record = this.stored(artifact.id);
+        if (!record || record.business.id !== businessId) throw corrupt();
+        records.push(record);
+      }
+    } catch (error) {
+      if (error instanceof ReportStorageError) throw error;
+      throw failure();
     }
     return records
       .sort(
@@ -361,6 +421,12 @@ export class FileReportStore {
         "INVALID_REPORT",
         "Only terminal audits with a matching business can be archived.",
       );
+    const assertExisting = (existing: AuditReportRecord) => {
+      if (existing.business.id !== business.id || existing.audit.scope !== audit.scope || existing.audit.mode !== audit.mode) throw corrupt();
+      return reportReference(existing);
+    };
+    const saved = this.stored(audit.id);
+    if (saved) return assertExisting(saved);
     let lock: Awaited<ReturnType<typeof open>> | undefined;
     const lockPath = join(this.directory, `.${audit.id}.lock`);
     let temp: string | undefined;
@@ -377,7 +443,7 @@ export class FileReportStore {
       }
       if (!lock) throw failure();
       const existing = await this.read(audit.id);
-      if (existing) return reportReference(existing);
+      if (existing) return assertExisting(existing);
       const record: AuditReportRecord = {
         schemaVersion: "seo-spy.audit-report.v1",
         reportId: audit.id,
@@ -431,7 +497,10 @@ export class FileReportStore {
         await handle.close();
       }
       await link(temp, join(this.directory, filename(record)));
-      return reportReference(record);
+      this.remember(record);
+      const committed = this.stored(record.auditId);
+      if (!committed) throw failure();
+      return reportReference(committed);
     } catch (error) {
       if (error instanceof ReportStorageError) throw error;
       throw failure();

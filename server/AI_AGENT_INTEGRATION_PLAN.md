@@ -2,6 +2,8 @@
 
 Date: October 30, 2026. Updated October 31: the WordPress-only read-only slice is implemented with mocked provider evaluation: saved evidence, minimized citations, default-off Muse transport, strict informational output validation and separate analysis archives. See [actual contracts and limits](WORDPRESS_REPORTS.md). Live model/account/budget evaluation is pending. The broader cross-channel, scoring, durable jobs, application-user authorization and action milestones below remain a planning backlog; their unchecked items are not claims that the WordPress slice has no implementation.
 
+October 31 credit policy supersedes broader experimentation/retry suggestions below: [AI_USAGE_RULES.md](AI_USAGE_RULES.md). Spark 1.3 Standard/low is selected, the key is privately configured, and mock-first fixtures/cache plus persistent SQLite exact approvals/budget reservations are implemented. Development stays within $2 lifetime/$0.50 UTC day/ten real attempts, with individual administrator approval and no automatic retries or bulk live testing. No real call is currently approved. SQLite spending records do not establish the future application identity, business database, durable action queue or public deployment milestones.
+
 This document is the implementation backlog for adding a backend agent that interprets Website and Facebook reports, explains evidence, recommends fixes, assesses effort and risk, supports a weighted SEO Spy score, and carries out specific changes initiated by the user. Writing this plan does not authorize API spending, credential configuration, deployments, frontend redesigns, or external changes.
 
 ## 1. Decisions and boundaries
@@ -68,7 +70,7 @@ M1 may be developed locally without public authentication, but only using explic
 - [ ] A4. Implement a small `MetaMuseProvider` interface using native server HTTP or one reviewed compatible SDK. Select the dependency during implementation; avoid installing an agent framework by default.
 - [ ] A5. Add proposed backend configuration: `AI_ENABLED`, `MODEL_API_KEY`, `AI_MODEL`, timeout, input/output token limits, maximum calls, concurrency and spending limits. Keep real keys out of templates, logs, reports and all `VITE_` variables.
 - [ ] A6. Fix/allowlist the provider destination; never accept a provider URL or authorization header from report content or a browser request. Reject redirects and bound response size.
-- [ ] A7. Support cancellation, total deadlines, bounded retries with jitter, rate-limit responses and sanitized errors. Account for SDK retries so nested retry layers cannot multiply spending.
+- [x] A7 (WordPress slice). Support cancellation, total deadlines, rate-limit outcomes and sanitized errors. Automatic retries are prohibited by the accepted credit policy; mocked tests cover failures without spending.
 - [ ] A8. Separate provider authentication failure, quota/rate limit, timeout, refusal, truncated output, invalid schema and invalid evidence references.
 - [ ] A9. Return safe provider status and request correlation IDs; never expose raw provider error bodies or secrets.
 - [ ] A10. Define cache keys from business, report hashes, model, prompt, schema and policy versions. Reusing an assessment must not imply a fresh scan.
@@ -84,7 +86,7 @@ Acceptance: disabled AI makes zero provider calls; missing keys fail clearly; mo
 - [ ] B3. Assessment inputs contain business/asset IDs, source report IDs, schema versions, content hashes, collection times, selection reason, device strategy and coverage. References use `(reportId, evidenceId)` pairs to avoid collisions across audits.
 - [ ] B4. Store the original provider/model identifier, prompt/schema/policy versions, input hash, validated output, usage, timestamps and safe failure reason for each attempt. Do not request or persist private chain-of-thought; store concise decision rationales.
 - [ ] B5. Version new assessment artifacts independently, for example `seo-spy.assessment.v1`. Do not change old audit archives or pretend that one channel's audit ID owns both channels.
-- [ ] B6. Select PostgreSQL access/migration tooling and document backup/restore. Add migrations, foreign keys, tenant ownership, uniqueness constraints and optimistic concurrency versions.
+- [x] B6 (local persistence). SQLite selected instead of PostgreSQL; native Node SQLite, transactional schema migrations, durable repositories, report/action artifacts, foreign keys, indexes, revisions, additive history adoption and backup/recovery procedures are implemented. Public tenant identity/ownership remains separate future work. See [DATABASE.md](DATABASE.md).
 - [ ] B7. Assessment-only prototyping may use an isolated atomic file store with explicit interrupted-job behavior. Before actions, persist approvals, reservations, idempotency keys and execution state transactionally in the database.
 - [ ] B8. Implement durable job claiming, leases, cancellation, maximum attempts, shutdown behavior and restart reconciliation. Do not advertise in-memory locks as restart-safe duplicate protection.
 - [ ] B9. Introduce application sign-in and business membership/roles. Define who may view reports, request analyses, edit proposals, approve and execute actions.

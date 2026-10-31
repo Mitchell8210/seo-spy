@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ConflictException, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -6,18 +6,21 @@ import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { wordpressMuseAnalysisSchema, type WordPressMuseAnalysis } from "./wordpress-muse.types.js";
+import { AppDatabase } from "../../persistence/sqlite/app-database.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BYTES = 512 * 1024;
 const codeIs = (error: unknown, code: string) => typeof error === "object" && error !== null && "code" in error && error.code === code;
 const failure = () => new ServiceUnavailableException({ code: "WORDPRESS_MUSE_STORAGE_ERROR", message: "The WordPress Muse analysis archive could not be accessed safely." });
 
-/** Separate immutable interpretation records; source evidence and action state are never rewritten. */
+/** SQLite interpretations/cache; source evidence, old JSON and AI budgets are never rewritten. */
 @Injectable()
 export class WordPressMuseStore {
   private readonly directory: string;
-  constructor(config: ConfigService) {
+  private readonly database: AppDatabase;
+  constructor(config: ConfigService, @Optional() database?: AppDatabase) {
     this.directory = resolve(fileURLToPath(new URL("../../../", import.meta.url)), config.get<string>("WORDPRESS_MUSE_DIR") ?? "reports/wordpress-muse");
+    this.database = database ?? new AppDatabase(config);
   }
   private async ready(create = false): Promise<boolean> {
     try {
@@ -27,7 +30,7 @@ export class WordPressMuseStore {
       return true;
     } catch (error) { if (!create && codeIs(error, "ENOENT")) return false; throw failure(); }
   }
-  async publish(record: WordPressMuseAnalysis): Promise<void> {
+  private async exportJson(record: WordPressMuseAnalysis): Promise<void> {
     let temporary: string | undefined;
     try {
       const parsed = wordpressMuseAnalysisSchema.safeParse(record);
@@ -46,7 +49,7 @@ export class WordPressMuseStore {
     } catch (error) { if (error instanceof ConflictException) throw error; throw failure(); }
     finally { if (temporary) await unlink(temporary).catch(() => undefined); }
   }
-  async read(id: string): Promise<WordPressMuseAnalysis | null> {
+  private async readLegacy(id: string): Promise<WordPressMuseAnalysis | null> {
     if (!UUID.test(id)) throw failure();
     if (!await this.ready()) return null;
     try {
@@ -72,16 +75,61 @@ export class WordPressMuseStore {
       } finally { await handle.close(); }
     } catch { throw failure(); }
   }
-  async findByCacheKey(businessId: string, siteUrl: string, reportId: string, cacheKey: string): Promise<WordPressMuseAnalysis | null> {
-    if (!UUID.test(reportId) || !/^[a-f0-9]{64}$/.test(cacheKey)) throw failure();
-    if (!await this.ready()) return null;
+  private stored(id: string): WordPressMuseAnalysis | null {
+    const artifact = this.database.readArtifact("wordpress-muse", id);
+    if (!artifact) return null;
+    if (Buffer.byteLength(JSON.stringify(artifact.payload)) > MAX_BYTES) throw failure();
+    const parsed = wordpressMuseAnalysisSchema.safeParse(artifact.payload);
+    if (!parsed.success || parsed.data.id !== artifact.id || parsed.data.businessId !== artifact.businessId || parsed.data.generatedAt !== artifact.createdAt) throw failure();
+    return parsed.data;
+  }
+  private insert(record: WordPressMuseAnalysis): boolean {
+    return this.database.insertArtifact({ kind: "wordpress-muse", id: record.id, businessId: record.businessId, createdAt: record.generatedAt, payload: record });
+  }
+  async publish(record: WordPressMuseAnalysis): Promise<void> {
     try {
-      // Validate each candidate sequentially; corrupt cache storage must not cause a paid fallback.
+      const parsed = wordpressMuseAnalysisSchema.safeParse(record);
+      if (!parsed.success || !UUID.test(parsed.data.id) || Buffer.byteLength(JSON.stringify(parsed.data)) > MAX_BYTES) throw failure();
+      if (this.stored(parsed.data.id)) throw new ConflictException({ code: "WORDPRESS_MUSE_ANALYSIS_EXISTS", message: "The saved Muse analysis cannot be overwritten." });
+      await this.exportJson(parsed.data);
+      if (!this.insert(parsed.data)) throw new ConflictException({ code: "WORDPRESS_MUSE_ANALYSIS_EXISTS", message: "The saved Muse analysis cannot be overwritten." });
+    } catch (error) { if (error instanceof ConflictException) throw error; throw failure(); }
+  }
+  async read(id: string): Promise<WordPressMuseAnalysis | null> {
+    if (!UUID.test(id)) throw failure();
+    try {
+      const stored = this.stored(id);
+      if (stored) return stored;
+      const legacy = await this.readLegacy(id);
+      if (!legacy) return null;
+      this.insert(legacy);
+      return this.stored(id);
+    } catch { throw failure(); }
+  }
+  async importLegacy(): Promise<{ imported: number; existing: number }> {
+    try {
+      this.database.connection();
+      const result = { imported: 0, existing: 0 };
+      if (!await this.ready()) return result;
       for (const name of await readdir(this.directory)) {
         if (!name.endsWith(".json") || !UUID.test(name.slice(0, -5))) continue;
-        const record = await this.read(name.slice(0, -5));
+        const id = name.slice(0, -5);
+        if (this.stored(id)) { result.existing++; continue; }
+        const legacy = await this.readLegacy(id);
+        if (!legacy) throw failure();
+        if (this.insert(legacy)) result.imported++; else result.existing++;
+      }
+      return result;
+    } catch { throw failure(); }
+  }
+  async findByCacheKey(businessId: string, siteUrl: string, reportId: string, cacheKey: string): Promise<WordPressMuseAnalysis | null> {
+    if (!UUID.test(reportId) || !/^[a-f0-9]{64}$/.test(cacheKey)) throw failure();
+    try {
+      await this.importLegacy();
+      for (const artifact of this.database.listArtifacts("wordpress-muse", businessId)) {
+        const record = this.stored(artifact.id);
         if (!record) throw failure();
-        if (record.businessId === businessId && record.siteUrl === siteUrl && record.reportId === reportId && record.cacheKey === cacheKey && record.generationMode !== undefined) return record;
+        if (record.siteUrl === siteUrl && record.reportId === reportId && record.cacheKey === cacheKey && record.generationMode !== undefined) return record;
       }
       return null;
     } catch { throw failure(); }

@@ -82,7 +82,7 @@ Preflight compares current before-values/modification time against the reviewed 
 - Successful outcomes are persisted before releasing the target lock. Failed preflight/target reservation is recorded as not dispatched where storage is available.
 - Restarting the server does not erase proposal/started/outcome files. A start marker without an outcome is pending or unknown, never permission to resend.
 - For a stale/unknown lock: disable writes, stop relevant workers, inspect the original operation/receipt and fresh remote state, then have the trusted operator record the reconciliation and remove only the identified stale lock. No automatic unlock, rollback, reconciliation API or expiry-based write replay is implemented. Preserve the original operation records. Do not run broad cleanup against the action directory.
-- These are local file-based protections, not a distributed queue or transactional database. Protect the directory from untrusted local writers; inspect corrupt/partial records rather than treating them as missing. The full application approval/identity workflow remains the later AI-plan milestone.
+- Operation records now persist immutably in the primary SQLite database, retaining exclusive file-first execution journals and target-lock files for compatibility/safety. These are not a distributed queue or atomic WordPress compare-and-swap. Protect all state from untrusted local writers, retain unknown locks, and never treat corrupt/partial records as missing. Adoption does not authorize replay or unlock. The public application identity/approval workflow remains separate future work; see [database migration/recovery](DATABASE.md).
 
 ## Rank Math behavior and limitations
 

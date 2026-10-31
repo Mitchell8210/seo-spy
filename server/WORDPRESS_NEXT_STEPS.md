@@ -12,7 +12,7 @@ Implementation reference: [WordPress module](WORDPRESS_MODULE.md). Broader roadm
 - **Traffic discovery: complete.** Site Kit reports require Google authorization that our current user does not have; Rank Math traffic summaries return `n/a`. The user excluded Google authorization setup. No traffic integration or authorization work is planned.
 - **Edit pilot: previewed, not applied.** The user selected the existing Guzman live website rather than separate staging. Media 5522's exact alt-only proposal was prepared, but expired at `2026-10-31T18:12:33.201Z` without approval. A fresh preview/hash/review is required before Apply; staging isolation is not established. See [pilot workflow](WORDPRESS_STAGING.md). Writes remain disabled.
 - **Public verification: implemented.** Applied media-alt-only proposals can collect bound public HTML and save separate verified/mismatch/inconclusive receipts. Fixtures cover caches, overrides and failures; live outcome remains to be recorded.
-- **Muse: implemented with mocks; live setup pending.** Default-off provider, strict evidence/target validation and separate immutable interpretations are available. Model, processing mode, private key and budget setup remain pending. No live call or numerical scoring is claimed.
+- **Muse: mock-first implementation and credit controls complete.** The user configured a private key and selected Spark 1.3 Standard/low reasoning. Labeled mocks, durable caching, exact administrator approvals and SQLite reservations enforce $2 lifetime/$0.50 UTC-daily/ten-call development ceilings. Local mock API verification passed with zero external requests/charges. No individual real call is approved; live acceptance and numerical scoring remain unverified. See [usage rules](AI_USAGE_RULES.md).
 - **Steps 5 and 6: future work.** Specialized Rank Math/Elementor editors and application-user authorization/UI approval controls remain unimplemented. Local operator testing does not establish shared/public readiness.
 - **Fresh audit follow-up: deferred.** No retry is planned without new explicit authorization. It does not block use of existing evidence.
 
@@ -116,7 +116,8 @@ October 31 update: the user chose the existing Guzman site for a narrow live med
 - [x] Keep scores unavailable until a reviewed backend policy exists; no formula or silent blend is implemented.
 - [ ] Use stored Rank Math scores only as a low-weight supporting signal under the [accepted scoring direction](AI_AGENT_INTEGRATION_PLAN.md#accepted-direction-stored-rank-math-evidence). Approve the exact contribution cap and aggregation later; preserve unknown freshness/nulls and avoid duplicate deductions.
 - [x] Evaluate WordPress-only interpretation with controlled reports and mocked providers. There are no model execution tools.
-- [ ] Select model/processing mode, configure the key privately and authorize a bounded live evaluation; record output quality and limitations.
+- [x] Select Spark 1.3 Standard/low reasoning, configure the key privately, and implement mock-first persistent cost/approval protections with offline tests.
+- [ ] If essential functionality cannot be validated with mocks, review one exact maximum-cost estimate and obtain separate administrator approval before a real call. Preserve credits; no bulk live evaluation or repeated prompt tuning.
 
 **Checkpoint:** Muse can explain WordPress/Rank Math evidence and propose supported fixes, while the backend independently enforces explicit user initiation, authorization and verification.
 

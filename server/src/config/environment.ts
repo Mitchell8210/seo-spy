@@ -19,6 +19,7 @@ const environmentSchema = z.object({
     .max(180000)
     .default(120000),
   REPORTS_DIR: z.string().trim().min(1).max(4096).default("reports/audits"),
+  DATABASE_PATH: z.string().trim().min(1).max(4096).default("reports/seo-spy.sqlite"),
   WORDPRESS_BUSINESS_ID: z.string().regex(/^[a-zA-Z0-9_-]*$/).max(128).default(""),
   WORDPRESS_SITE_URL: z.string().refine(value => {
     if (!value) return true;

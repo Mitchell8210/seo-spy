@@ -4,7 +4,7 @@ import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
 import { createHash } from "node:crypto";
 import { AiUsageStore } from "./ai-usage.store.js";
-import { AiUsageError, type AiLiveMode, type AiModel, type AiUsageIntent } from "./ai-usage.types.js";
+import { AiUsageError, type AiLiveMode, type AiModel, type AiUsageIntent, type AiUsageLimits } from "./ai-usage.types.js";
 import { estimateMuseCost, museUsageCostMicros, MuseCostError, MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, type MuseCostEstimate } from "./muse-cost.js";
 
 export const META_MUSE_ENDPOINT = "https://api.meta.ai/v1/responses";
@@ -86,6 +86,13 @@ export class MetaMuseProvider {
   private accountingError(error: unknown): MetaMuseError {
     return error instanceof AiUsageError ? failure(error.code, error.message) : failure("AI_BUDGET_STORAGE_ERROR", "Persistent model authorization and budget accounting are unavailable; no further request is permitted.");
   }
+  private developmentLimits(): AiUsageLimits {
+    return {
+      budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 2_000_000, 0, 2_000_000),
+      dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 500_000, 0, 500_000),
+      maxCalls: this.integer("AI_DEV_MAX_CALLS", 10, 0, 10),
+    };
+  }
 
   /** Pure cost preview: no credentials, network or spending reservation. */
   prepare(input: MetaMuseInput): MetaMusePrepared {
@@ -127,7 +134,8 @@ export class MetaMuseProvider {
     const { payload: _payload, ...cost } = prepared;
     void _payload;
     try {
-      return await this.ledger.estimate({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode: this.mode() === "demo" ? "demo" : "poc" });
+      const mode = this.mode() === "demo" ? "demo" : "poc";
+      return await this.ledger.estimate({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode }, mode === "poc" ? this.developmentLimits() : undefined);
     } catch (error) { throw this.accountingError(error); }
   }
 
@@ -150,11 +158,7 @@ export class MetaMuseProvider {
         model: prepared.model, maxInputTokens: prepared.maxInputTokens, maxOutputTokens: prepared.maxOutputTokens,
         reserveMicros: prepared.reserveMicros, priceVersion: prepared.priceVersion,
         inputPriceMicrosPerMillion: prepared.inputPriceMicrosPerMillion, outputPriceMicrosPerMillion: prepared.outputPriceMicrosPerMillion,
-      }, {
-        budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 2_000_000, 0, 2_000_000),
-        dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 500_000, 0, 500_000),
-        maxCalls: this.integer("AI_DEV_MAX_CALLS", 10, 0, 10),
-      });
+      }, mode === "poc" ? this.developmentLimits() : undefined);
     } catch (error) { throw this.accountingError(error); }
 
     const controller = new AbortController();
@@ -181,7 +185,7 @@ export class MetaMuseProvider {
       dispatched = true;
       const response = await Promise.race([this.transport.post(prepared.payload, key, controller.signal, grant), cancelled]);
       requestId = safeId(response.requestId);
-      if (response.status !== 200) definitiveFailure = true;
+      if ([400, 401, 402, 403, 404, 405, 413, 422, 429].includes(response.status)) definitiveFailure = true;
       if (Buffer.byteLength(response.body) > META_MUSE_MAX_RESPONSE_BYTES) throw failure("AI_RESPONSE_TOO_LARGE", "The model response exceeded its size limit.");
       if (response.status >= 300 && response.status < 400) throw failure("AI_REDIRECT_REJECTED", "Model provider redirects are not allowed.");
       if ([401, 403].includes(response.status)) throw failure("AI_AUTH_FAILED", "The model provider rejected authorization.");

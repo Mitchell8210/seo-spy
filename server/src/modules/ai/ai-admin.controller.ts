@@ -31,7 +31,9 @@ export class AiAdminController {
   status() {
     return this.safe(async () => ({
       effectiveMode: this.config.get("MOCK_AI") !== false || this.config.get("AI_MODE") === "mock" ? "mock" : this.config.get("AI_MODE"),
-      realCallsEnabled: this.config.get("AI_ENABLED") === true && this.config.get("MOCK_AI") === false && ["poc", "demo"].includes(this.config.get<string>("AI_MODE") ?? "mock"),
+      realModeConfigured: this.config.get("AI_ENABLED") === true && this.config.get("MOCK_AI") === false && ["poc", "demo"].includes(this.config.get<string>("AI_MODE") ?? "mock"),
+      everyRealCallRequiresAdministratorApproval: true,
+      configuredDevelopmentLimits: { budgetMicros: this.config.get("AI_DEV_BUDGET_MICROS") ?? 2000000, dailyMicros: this.config.get("AI_DEV_DAILY_MICROS") ?? 500000, maxCalls: this.config.get("AI_DEV_MAX_CALLS") ?? 10 },
       providerBillingBalanceVerified: false,
       usage: await this.usage.status(),
     }));

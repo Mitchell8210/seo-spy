@@ -4,9 +4,26 @@ Detailed next-stage backlog: [Meta Muse agent integration plan](AI_AGENT_INTEGRA
 
 Status: foundation, homepage checks, Lighthouse integration, isolated backend-lab workflow, and durable report files implemented. Main dashboard action/status integration is available; real result-card integration and cumulative scoring remain separate tasks.
 Created: October 27, 2026.
-Last updated: October 28, 2026.
+Last updated: October 31, 2026.
 
 ## Progress record
+
+### October 31, 2026 - SQLite selected and application persistence adopted
+
+- User selected SQLite as the application's database instead of PostgreSQL. Added a primary `reports/seo-spy.sqlite` with transactional migrations, foreign keys, indexed businesses/audits, durable statuses/timestamps, findings/suggestions and immutable report/action artifacts. Repository tokens/API contracts are preserved; frontend presentation is unchanged.
+- Existing JSON archives are preserved as compatibility exports and idempotent migration sources. Actual adoption imported 12 audit reports/audits, three WordPress evidence reports, one Muse analysis and three WordPress operation records. Original creation/completion dates and report payloads were retained. Registered identities/newer runtime state are never replaced by archive snapshots.
+- Application records/history and Website latest-result selection now survive restart. Facebook audits have separate channel reservations and do not overwrite Website dashboard results. Jobs remain in-process; operator recovery can adopt a saved terminal outcome or close an interrupted run without replaying collection or spending credits.
+- The protected AI usage database remains separate and byte-unchanged by migration. WordPress target locks and encrypted credential stores remain protected. No external request, model call, WordPress change, budget reset or history deletion occurred. See [database operation, backup and recovery](DATABASE.md).
+- Verification passed: 33 suites, 550 tests and one skipped, plus typecheck/lint/build. Actual adoption rerun inserted nothing and retained all existing counts; the saved mock-analysis API reused its original ID from SQLite in a new process with zero real calls/charges. No client files changed.
+
+### October 31, 2026 - Promotional-credit preservation and mock-first AI
+
+- Implemented the user's $2 lifetime development/$0.50 UTC-daily/ten-call ceilings with transactional SQLite reservations, versioned schema migrations and persistent attempt/approval history. Process restarts and mode changes cannot reset cumulative limits; reductions remain sticky. Unknown outcomes/overruns halt usage; missing/corrupt initialized storage fails closed. No automatic retry, expiry unlock or budget reset exists.
+- All real model access now shares one protected provider and payload-bound one-use native dispatch grant. The separate local AI administrator must approve every exact scoped estimate/hash/cost before reservation. One global active/unknown attempt and 60-second spacing apply across processes. Demo requires a separate recorded authorization and cannot draw from development or reset prior usage.
+- Safe defaults are MOCK_AI=true, AI_MODE=mock, AI_ENABLED=false, Muse Spark 1.3 Standard/low reasoning, at most 1500 output tokens and 32768 input bytes. The supplied private model key was preserved; a separate ignored administrator credential was configured without exposing it. Adding either credential does not spend credits.
+- Added labeled realistic fixtures, summarized cited inputs, mode-isolated persistent cache and local end-to-end mock verification. The actual local API generated mock analysis a1283558-6b10-4c37-8120-9f3563b631b4 from the saved Guzman report, reused its cache and read it back with zero external requests. Persistent development/demo counts and charges remained zero. No live request or live approval was created.
+- See [credit protection and administrator runbook](AI_USAGE_RULES.md). Deterministic SEO/Lighthouse collection, numeric scoring and WordPress action authorization remain separate. Provider billing limits are still required; the account's actual credit balance has not been queried.
+- Final checks passed: 28 suites, 502 tests and one skipped, plus typecheck/lint/build. Re-running the local mock harness in a fresh process reused the same analysis ID with unchanged zero usage. No client files changed, no live approvals were created, and no real API requests were made.
 
 ### October 31, 2026 - WordPress saved evidence, Muse pipeline and public verification
 
@@ -197,7 +214,7 @@ Implementation decisions:
 
 ## Objective
 
-Build a Node.js and TypeScript backend using NestJS with its Express adapter for SEO Spy, an evidence-based website and social-media business audit application. Add PostgreSQL after the initial API and website audit work end to end.
+Build a Node.js and TypeScript backend using NestJS with its Express adapter for SEO Spy, an evidence-based website and social-media business audit application. SQLite is the selected durable database; the previous PostgreSQL direction is superseded.
 
 The product workflow is:
 
@@ -237,7 +254,7 @@ React client
 NestJS controllers and validation pipes (Express adapter)
     ↓
 Business and audit services
-    ├── Repositories → in-memory storage initially → PostgreSQL later
+    ├── Repositories → SQLite application database
     ├── Website collector → public website evidence
     ├── Deterministic checks and scoring
     └── Provider adapters → Facebook and AI later
@@ -245,8 +262,8 @@ Business and audit services
 
 - Keep controllers small; injectable services own application behavior and feature modules declare their dependencies.
 - Define repository interfaces around actual operations, such as creating an audit or reading its findings.
-- Use asynchronous repository interfaces from the start so PostgreSQL can replace memory storage without changing service callers.
-- Register repository implementations through explicit injection tokens: TypeScript interfaces do not exist at runtime. Use singleton memory repositories shared across requests and swap providers for PostgreSQL later.
+- Preserve asynchronous repository interfaces so persistence changes do not alter service contracts.
+- Register singleton SQLite repository implementations through explicit injection tokens. Memory repositories remain controlled fixtures only.
 - Keep domain records separate from dashboard response formatting.
 - Keep provider-specific response shapes behind adapters.
 - Use Nest exception filters for the consistent API error envelope, pipes for request validation, and guards for authorization when accounts are introduced.
@@ -290,7 +307,7 @@ server/
       persistence.module.ts    # Registers and exports repository providers
       repositories/            # Interfaces and injection tokens
       memory/
-      postgres/                # Later
+      sqlite/                  # Primary database, migrations and repositories
     integrations/
       website/
       providers/               # Later
@@ -298,7 +315,7 @@ server/
     fixtures/
   tests/
     fixtures/
-  migrations/                  # Added with PostgreSQL
+  # SQLite schema migrations currently live with the database implementation.
 ```
 
 Keep `client/` and `server/` independently runnable at first. A root workspace or shared contracts package can be added when useful; the browser must not import backend implementation code.
@@ -323,8 +340,8 @@ Foundation tools are now installed in `server/package.json` with resolved versio
 | Helmet                                                                | Baseline HTTP response headers                                                         | Foundation; configure for an API                                                                                 |
 | `@nestjs/testing` + Jest + Supertest                                  | Isolated provider tests and HTTP integration tests                                     | Foundation; override repository/provider dependencies and apply the same global app configuration as runtime     |
 | Cheerio                                                               | Parse fetched HTML into structured evidence                                            | First website audit                                                                                              |
-| PostgreSQL                                                            | Durable records, relationships, and audit history                                      | Persistence milestone                                                                                            |
-| PostgreSQL driver/query builder or ORM                                | Database access and migrations                                                         | Choose with persistence; evaluate `pg`, Drizzle, or Prisma and select one approach                               |
+| SQLite                                                               | Durable records, relationships, audit history and suggestions                           | Selected and implemented; separate protected AI credit ledger retained                                           |
+| Node 24 `node:sqlite`                                                  | Native prepared statements, transactions and schema migrations                         | Implemented; no PostgreSQL driver or ORM required                                                                 |
 | Meta Graph API / Facebook Login                                       | Authorized Facebook Page identity and available audit data                             | Later; confirm permissions, app review, metric availability, and reporting windows                               |
 | Meta-compatible model API                                             | Structured AI analysis and recommendations                                             | Later; confirm actual provider, model, hosting, pricing, and data handling before integration                    |
 | Baseten                                                               | Possible model hosting/provider integration                                            | Candidate only; do not assume it is required                                                                     |
@@ -420,7 +437,7 @@ Proposed stages:
 
 Facebook collection, cross-channel comparison, and AI analysis are later stages. A provider failure should preserve usable results and yield partial completion where appropriate.
 
-In-memory records and in-process jobs are local-development conveniences: restarting the server loses them. Document this behavior. Durable execution/recovery is required when PostgreSQL and shared deployment are introduced.
+Records now persist in SQLite across restarts. Execution remains in-process; interrupted queued/running records require explicit operator reconciliation and never automatically replay external work. Shared deployment still needs application identity and deliberate worker coordination.
 
 ### First website checks
 
@@ -467,9 +484,9 @@ HTML collection does not execute page JavaScript or measure real browser perform
 - Remove hard-coded mock wording only for live results; retain explicit labels for demo responses.
 - Configure a Vite development API proxy or an explicit allowed client origin; public frontend configuration must contain no secrets.
 
-## PostgreSQL preparation
+## SQLite persistence
 
-Add the database after the API and first real website audit are stable.
+Implemented after the API and first website audits stabilized. SQLite replaces the old PostgreSQL plan; see [DATABASE.md](DATABASE.md) for the actual schema, additive import, backup and recovery behavior.
 
 - Design migrations for businesses, connections, audits, evidence, findings, recommendations, and score snapshots.
 - Add foreign keys, status constraints, timestamps, and indexes for business/audit lookups.
@@ -479,7 +496,7 @@ Add the database after the API and first real website audit are stable.
 - Define restart recovery for queued/running audits, retention of collected evidence, and migration/seed commands.
 - Add repository integration tests against an isolated test database.
 - Add ownership/user records with authentication before exposing multiple businesses to real users.
-- Choose deployment, backups, and connection pooling when the deployment environment is known.
+- Keep SQLite on local server storage, with prepared statements, short transactions and consistent backups. Reassess distributed/high-write deployment only if the application needs it.
 
 ## Authentication, integrations, and external changes
 
@@ -533,11 +550,12 @@ Done when a real public homepage yields repeatable evidence-backed results witho
 
 Done when multi-page audits remain bounded and accurately report unavailable or failed checks.
 
-### 5. PostgreSQL and durable execution
+### 5. SQLite persistence and explicit interrupted-job recovery
 
-- Select database access tooling and add migrations.
-- Replace memory repositories and preserve contracts.
-- Implement restart recovery and test persistent history.
+- [x] Use Node SQLite with transactional schema migrations.
+- [x] Replace production memory repositories while preserving contracts and archived history.
+- [x] Persist reports, statuses, timestamps, findings and suggestions across restarts.
+- [x] Provide explicit interrupted-run reconciliation and offline persistence tests; no automatic provider replay.
 
 Done when audits and evidence survive restarts and interrupted work has a defined recovery path.
 

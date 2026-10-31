@@ -71,6 +71,20 @@ describe("Meta Muse provider with mocked transport and persistent accounting bou
     settings.AI_MAX_OUTPUT_TOKENS = 1000;
     expect(provider.prepare(input).requestHash).not.toBe(prepared.requestHash);
   });
+  it("uses separately authorized demo limits instead of borrowing the development allocation", async () => {
+    settings.AI_MODE = "demo";
+    await generate();
+    expect(reserve).toHaveBeenCalledWith(authorization.intentId, expect.objectContaining({ mode: "demo" }), undefined);
+    await provider.estimate(input, { actor: authorization.actor, scope: authorization.scope, reason: "Final recording validation with separately authorized demo limits." });
+    expect(estimate).toHaveBeenCalledWith(expect.objectContaining({ mode: "demo" }), undefined);
+  });
+  it("passes reduced development budgets into cost previews before approval", async () => {
+    settings.AI_DEV_BUDGET_MICROS = 100000;
+    settings.AI_DEV_DAILY_MICROS = 25000;
+    settings.AI_DEV_MAX_CALLS = 2;
+    await provider.estimate(input, { actor: authorization.actor, scope: authorization.scope, reason: "Only validate one proof-of-concept request." });
+    expect(estimate).toHaveBeenCalledWith(expect.objectContaining({ mode: "poc" }), { budgetMicros: 100000, dailyMicros: 25000, maxCalls: 2 });
+  });
   it("reserves persistent budget before one payload-bound low-reasoning dispatch and saves usage before returning", async () => {
     const result = await generate();
     expect(result).toEqual({ output: { summary: "Review the evidence" }, model: "muse-spark-1.3", usage: { inputTokens: 30, outputTokens: 20 }, requestId: "req_safe123", attemptId: "79f73b5d-9c92-484f-99ef-70b609abc177" });
@@ -126,7 +140,7 @@ describe("Meta Muse provider with mocked transport and persistent accounting bou
     send.mockResolvedValue(response({ error: { message: "private-model-key" } }, status));
     await expect(generate()).rejects.toMatchObject({ code });
     expect(send).toHaveBeenCalledTimes(1);
-    expect(settle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: "failed", errorCode: code }));
+    expect(settle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: status >= 500 || status >= 300 && status < 400 ? "unknown" : "failed", errorCode: code }));
   });
   it.each([
     [{ ...completed(), status: "incomplete" }, "AI_TRUNCATED"],

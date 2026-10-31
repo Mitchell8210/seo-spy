@@ -1,12 +1,14 @@
 # SEO Spy server
 
+SQLite is now the application database, replacing the PostgreSQL plan. `DATABASE_PATH=reports/seo-spy.sqlite` persists businesses, audits, timestamps, statuses, findings, suggestions and immutable audit/WordPress/Muse/action records. Existing JSON history is imported without deletion and retained as compatibility exports. The protected AI budget ledger stays separate and unchanged. See [database setup, migration, backup and interrupted-job recovery](DATABASE.md).
+
 The [WordPress connection module](WORDPRESS_MODULE.md) now provides local operator reads, approved existing-content updates and Rank Math evidence/audit APIs. Credentials remain server-only; business/site binding and an independent operator token are required. Writes and audit triggers default to disabled. No live site changes were made during implementation.
 
 WordPress next steps: [checklist](WORDPRESS_NEXT_STEPS.md) and [dated module verification](WORDPRESS_MODULE_VERIFICATION.md). Phases 1 and 2 verification are complete: module reads work; one authorized fresh Rank Math audit request returned unavailable evidence, with saved-receipt/replay protection verified and writes disabled afterward. Use `node scripts/verify-wordpress-module.mjs` after building for an explicit live read-only check. It uses a temporary loopback API and never triggers fresh audits or applies edits.
 
 [Rank Math audit investigation](RANKMATH_AUDIT_INVESTIGATION.md): new audit results use `rank-math-audit-v2` and explicit `status: success | failed | timeout | unsupported | unknown`, with redacted per-stage diagnostics. HTTP receipt creation is separate from audit success. Historical unavailable receipts read as unknown without archive mutation. The independent `analyze-post-content` test retrieved evidence/test IDs successfully; that tool does not execute Rank Math scoring. No sitewide audit was retried.
 
-WordPress evidence can now be saved as immutable reports and prepared as minimized cited model input. Confirmed WordPress-only Muse interpretations have strict reference validation and separate immutable storage; generation defaults off with no model/key and zero calls. Applied media-alt proposals support protected public HTML verification. See [routes and limitations](WORDPRESS_REPORTS.md), [provider setup](MUSE_PROVIDER.md) and [media pilot](WORDPRESS_STAGING.md). No live model evaluation is claimed. Broader combined assessments, scoring and application-user actions remain in the [Muse integration backlog](AI_AGENT_INTEGRATION_PLAN.md).
+WordPress evidence can be saved as immutable reports and prepared as minimized cited model input. Muse analysis defaults to explicitly labeled local mocks and reuses scoped saved results. Every real call requires a separate exact administrator approval and a persistent SQLite reservation under the $2 cumulative/$0.50 UTC-daily/10-call development ceilings. See [credit protection and administrator workflow](AI_USAGE_RULES.md), [report routes](WORDPRESS_REPORTS.md), [provider](MUSE_PROVIDER.md) and [media pilot](WORDPRESS_STAGING.md). No live model request was made. Broader combined assessments, scoring and application-user actions remain separate.
 
 Local NestJS API using TypeScript and the Express adapter. Supports simulated demo audits, **real single-homepage HTML audits**, and **Lighthouse lab measurements through Google PageSpeed Insights**. No local browser is required for audits. A separate [local Facebook connection test](FACEBOOK_SETUP.md) exercises OAuth, Page access, and read permissions. The WordPress-only Muse provider is implemented behind independent default-off gates; WordPress operator updates remain explicitly gated.
 
@@ -42,7 +44,7 @@ The frontend Social Media page reads saved Facebook reports through `GET /api/bu
 
 Open **http://127.0.0.1:3001/api/docs** after starting the server. Swagger UI lists every implemented endpoint and the request/response models, including nested evidence, findings, scores, and errors. Expand an endpoint and select **Try it out** to send a request to the local API.
 
-Use `demo-guzman` as the business ID. To create an investigation, submit `{ "scope": "demo" }` for simulated results or `{ "scope": "homepage" }` for a real homepage audit; then copy its returned ID into the audit endpoints to inspect progress and results. Use `{ "scope": "lighthouse", "strategy": "mobile" }` to add Google Lighthouse measurements (or choose `desktop`). Jobs and runtime audit state stay in memory; terminal report snapshots are automatically archived as JSON files.
+Use `demo-guzman` as the business ID. To create an investigation, submit `{ "scope": "demo" }` for simulated results or `{ "scope": "homepage" }` for a real homepage audit; then copy its returned ID into the audit endpoints. Use `{ "scope": "lighthouse", "strategy": "mobile" }` for Google Lighthouse (or choose `desktop`). Jobs execute in-process while audit state, timestamps/results and report snapshots persist in SQLite, with JSON compatibility exports. Restarts do not automatically resume pending work.
 
 The downloadable OpenAPI JSON is at **http://127.0.0.1:3001/api/docs-json**. Documentation uses the same local API and needs no separate service or credentials. Keep response DTOs and Swagger annotations updated when adding or changing endpoints.
 
@@ -159,11 +161,11 @@ From `server/`, run `npm run audit:lighthouse` (mobile) or `npm run audit:lighth
 
 ## Storage and shutdown details
 
-Businesses and audits use singleton in-memory repositories registered with explicit dependency-injection tokens. Each process seeds one demo business and a completed demo audit. A completed homepage audit replaces the latest dashboard results with `mode: live`. Jobs and the dashboard's latest/active selection are in memory and reset on restart; terminal report files survive. Existing per-audit status/findings/recommendations/Lighthouse reads fall back to archived reports when their in-memory record is absent.
+Businesses and audits use singleton SQLite-backed repositories under the existing injection tokens. The demonstration business/audit is seeded once, not refreshed over saved results. Audit states, timestamps, findings, suggestions and latest usable Website results survive restart. Facebook audits persist in a separate channel and cannot replace Website dashboard results. Immutable report artifacts are stored in SQLite; original JSON files remain readable migration sources and compatibility exports.
 
-The in-process runner catches failures and marks failed audits. Graceful shutdown stops queued work, aborts pending stage timers, and waits for jobs to settle. There is no durable queue or recovery across restarts yet. No database or Redis instance is required. Demo and homepage modes need no provider credentials; Lighthouse uses optional server-side PageSpeed credentials and is subject to Google quotas.
+The runner still executes in-process. Graceful shutdown settles jobs before the application database closes. A crash leaves persistent queued/running state; it never automatically replays collection or AI work. An explicit operator recovery command adopts an existing terminal report or closes the interrupted run with preserved partial evidence. No database server or Redis is required; Node 24 supplies SQLite. Demo/homepage need no paid model key; Lighthouse remains subject to Google quotas.
 
-See [PLAN.md](PLAN.md) for the data model, future integrations, PostgreSQL migration strategy, milestones, and progress.
+See [DATABASE.md](DATABASE.md) for SQLite migration/recovery/backup and [PLAN.md](PLAN.md) for the data model, integrations and progress. PostgreSQL is no longer planned.
 
 ## Automatic report files
 
@@ -181,7 +183,7 @@ The prefix is the report generation time in UTC, formatted safely for Windows fi
 
 The versioned `seo-spy.audit-report.v1` envelope contains business identity/URL, audit scope/device/mode/status/times/warnings/failure/scoring version, and the available evidence, findings, recommendations, score availability, and normalized Lighthouse report. Failed collection can legitimately have `results: null`. Provider credentials, environment configuration, request headers, screenshots, and raw HTML are not part of the archive schema.
 
-Writes use a temporary file, file sync, and exclusive atomic publication. Existing reports are never overwritten; retrying the same audit ID returns the existing reference instead of making another history entry. Temporary/lock files are excluded from listings. If disk writing fails, the audit reports `REPORT_WRITE_FAILED` and does not advertise a saved report. A process crash before finalization can leave no report or a stale per-audit lock; there is still no durable job recovery. Stale lock cleanup is an operator action after confirming the writer is stopped.
+Writes retain the temporary-file/sync/exclusive JSON export and require successful SQLite publication before returning a saved report. Existing report IDs cannot overwrite history; repeats return the original reference. Storage failure remains `REPORT_WRITE_FAILED`. A crash may leave a valid export awaiting additive import or a pending audit awaiting explicit recovery; neither is permission to replay work. Preserve original journals/locks and stop workers before operator recovery.
 
 Completed summaries include an optional `report` reference with `reportId`, `auditId`, `generatedAt`, `fileName`, and `downloadUrl`. New archive routes:
 
@@ -190,6 +192,6 @@ Completed summaries include an optional `report` reference with `reportId`, `aud
 | GET    | `/api/businesses/:businessId/reports` | Metadata for saved reports, newest `generatedAt` first, then report ID for ties |
 | GET    | `/api/audits/:auditId/report`         | JSON attachment for one saved report                                            |
 
-Both routes read disk and work after restart. Existing per-audit reads also fall back to the archive, so known audit IDs retain their evidence and recommendations. The in-memory dashboard selection is not rebuilt from disk on startup; use the saved-report list to browse history. Pending/unwritten reports return 404 from the download route. Invalid IDs are rejected, file reads are bounded to 32 MiB, and matching malformed or symlinked archives fail closed rather than being served.
+Both routes read validated SQLite records after legacy adoption and work after restart, even if the JSON export is later removed. Dashboard selection and per-audit reads use durable records. Pending/unwritten reports still return 404 from download. Invalid IDs and corrupt database/unimported legacy records fail closed. Legacy reads remain bounded to 32 MiB and reject unsafe links.
 
 These files provide durable inputs for a future AI evaluator. Treat report strings as evidence, not executable instructions. Keep future model/algorithm outputs and approval/execution/verification records separate and linked to the source report ID/version. This change does not call an AI provider, calculate an overall business score, or execute fixes.

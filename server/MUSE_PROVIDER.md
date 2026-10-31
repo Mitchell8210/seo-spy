@@ -1,52 +1,53 @@
-# Meta Muse read-only provider
+# Meta Muse provider
 
-Implemented October 31, 2026. Offline transport fixtures pass; no account access, live generation, billing configuration or real-data transmission has been verified. Choosing an API/model in code does not enable spending.
-
-`MetaMuseProvider.generate({ instructions, input, schema }, signal?)` makes at most one request and returns parsed JSON, the configured model, reported token usage and a sanitized request correlation ID. The caller must validate the output against its runtime schema and resolve every evidence reference before publication. JSON parsing and the provider's strict response format do not establish factual accuracy or authorize an action.
+The [credit-protection policy](AI_USAGE_RULES.md) governs every real model request. Normal development is mock-first: `MOCK_AI=true`, `AI_MODE=mock`, `AI_ENABLED=false`. A configured API key never enables a paid call. The default model is `muse-spark-1.3`, Standard mode, low reasoning; no automatic fallback, paid grounding or optional tools.
 
 ## Configuration
 
-The backend configuration must supply these independent gates and bounds:
+| Setting | Default / maximum |
+| --- | --- |
+| `MOCK_AI`, `AI_MODE`, `AI_ENABLED` | `true`, `mock`, `false` |
+| `MODEL_API_KEY` | Private, blank in the tracked template |
+| `AI_ADMIN_KEY` | Separate private local administrator credential |
+| `AI_MODEL` / `AI_PROCESSING_MODE` | `muse-spark-1.3` / `standard` |
+| `AI_REASONING_EFFORT` | `low`; `minimal` also allowed |
+| `AI_MAX_OUTPUT_TOKENS` | 1500; includes reasoning and visible output |
+| `AI_MAX_INPUT_BYTES` | 32768; entire wire request, instructions/schema included |
+| `AI_MAX_CONCURRENCY` | 1, enforced across processes through SQLite |
+| `AI_TIMEOUT_MS` | 60000; allowed 1000–120000 |
+| `AI_USAGE_DB` | `reports/ai-usage.sqlite` |
+| `AI_DEV_BUDGET_MICROS` | 2000000 ($2 lifetime development); may only be reduced |
+| `AI_DEV_DAILY_MICROS` | 500000 ($0.50 UTC day); may only be reduced |
+| `AI_DEV_MAX_CALLS` | 10 lifetime reserved development attempts; may only be reduced |
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `AI_ENABLED` | `false` | Global model generation gate |
-| `MODEL_API_KEY` | blank | Private backend credential |
-| `AI_MODEL` | blank | Explicit Standard-mode selection; only `muse-spark-1.3` and `muse-spark-1.2` are accepted |
-| `AI_MAX_CALLS_PER_PROCESS` | `0` | Generation disabled until a positive limit is deliberately configured; maximum 100 |
-| `AI_MAX_CONCURRENCY` | `1` | Maximum simultaneous calls; environment validation caps this at two |
-| `AI_TIMEOUT_MS` | `60000` | Total request deadline; 1000–120000 ms |
-| `AI_MAX_INPUT_BYTES` | `131072` | Complete request payload limit, including instructions/schema; environment range 4096–131072 bytes |
-| `AI_MAX_OUTPUT_TOKENS` | `2000` | Requested upper bound including reasoning; environment range 16–8000 tokens |
+The previous process-only call cap is replaced by durable cumulative accounting. Application restarts and mode changes do not replenish development limits. A separate explicit administrator authorization is required for demo limits; development cannot borrow that allocation. Every real call in either mode still needs an individually approved exact cost estimate.
 
-These are call/token bounds, **not a hard dollar budget**. The call counter is in memory and resets when the backend restarts. A failed, timed-out, cancelled or invalid generation still consumes its reservation because remote work/billing may already have occurred. There are no automatic retries. Shared operation or a restart-safe spending budget requires durable reservations and an agreed pricing/budget policy before enabling live calls. Provider account limits must also be configured independently.
+## Protected interfaces
 
-The adapter does not implement a public generation route. Any caller that exposes it over HTTP must enforce the existing authenticated local operator, exact trusted Origin/Host checks, business/site binding and explicit user generation request. GET report reads must never generate. Application identity and membership are required before shared/public use. Model interpretation has no WordPress execution tools and cannot turn a recommendation into an approved Apply request.
+`MetaMuseProvider.prepare(input)` builds a fixed Responses request and conservative maximum-cost estimate with no credential access, networking or spend. `estimate(input,{actor,scope,reason})` persists an expiring exact intent for independent administrator review. `generate(input,signal?,{intentId,actor,scope})` requires all real-mode gates and atomically reserves approved maximum cost/count in SQLite before dispatch. It records token usage and outcome even when no successful analysis can be published. Failed/uncertain outcomes keep reservations; uncertain accounting halts subsequent real requests.
 
-## Transport and outcomes
+The native `MetaMuseTransport` accepts only a module-private one-use payload-bound dispatch grant issued after successful reservation. Direct raw calls fail before networking. Requests use the fixed `https://api.meta.ai/v1/responses` destination, strict JSON schema, separate instructions and untrusted evidence, low reasoning, `store:false`, no tools/search/background/streaming, no redirects and no automatic retries. Response bytes, headers, input size, output tokens and total time are bounded. Provider messages, credentials, reasoning and raw bodies are not logged or archived. Unexpected usage is recorded conservatively and halts the ledger.
 
-Requests use native HTTPS to the fixed `https://api.meta.ai/v1/responses` endpoint. Neither report content nor browser requests can choose a provider destination, headers, model or tools. The request separates developer-level instructions from a JSON-serialized user evidence block, requests strict JSON output, uses `store: false`, and disables tools/background/streaming. It never requests encrypted reasoning, reasoning summaries or a previous response.
+`WordPressMuseService` validates output shape, cited evidence and proposed informational targets before saving a separate immutable analysis. It makes no WordPress calls during analysis and cannot create or execute proposals. It sends only selected summarized evidence, with explicit omissions. Identical requests return a scoped durable cache entry, with mock/poc/demo isolation. Local fixtures carry `isMock:true`, `provider:mock-fixture` and explicit mock wording; they never fall back to live generation. Source observations, deterministic checks and numerical scoring remain separate.
 
-Transport rejects redirects, unsupported compression and oversized headers/responses. The response body limit is 512 KiB, enforced against both declared and streamed bytes. Native HTTPS validates TLS certificates. The total deadline and optional caller cancellation abort the connection; remote cancellation or absence of billing cannot be inferred. Raw provider error bodies and private chain-of-thought are not returned, persisted or logged by the adapter.
+## Operator verification
 
-Safe errors distinguish disabled/missing configuration, disabled/exhausted call budget, concurrency rejection, input limits, authorization failure, unavailable quota, rate limit, redirect, network failure, timeout, cancellation, oversized response, provider failure, refusal, truncation and invalid output. Only a completed response for the selected model with a single assistant JSON answer and valid reported usage is accepted. Tool output is rejected. Any reasoning items are excluded from the returned generation.
+`npm run check` uses offline fixtures and no real key. The [policy runbook](AI_USAGE_RULES.md) describes safe key storage, exact estimate/admin approval routes, persistent usage inspection, mode gates and recovery limitations. Saved result GETs and repeated identical analyses make no model requests.
 
-## Sources and compatibility
-
-Official documentation checked October 31, 2026:
-
-- [Responses API](https://dev.meta.ai/docs/protocols/responses) documents the endpoint, typed user inputs, developer-level `instructions`, completed output messages and usage. Its stateless mode supports `store: false`.
-- [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas) documents `text.format` with `type: "json_schema"`, schema/name/strict fields, output-token limits and refusal/output item shapes. Responses payloads differ from the Chat Completions `response_format` examples.
-- [Models](https://dev.meta.ai/docs/models) identifies pinned Muse Spark versions and separates Standard model IDs from Contributor variants. This adapter accepts only the two listed Standard IDs; model/account availability and approved data handling still require live confirmation.
-
-The adapter uses documented contracts, not an account-tested integration. Before a live test, select the model and permitted data, authorize a bounded budget, confirm account access and processing terms, and validate the exact assessment schema with that model. Leave model generation disabled until those decisions are complete.
-
-Offline verification: `npm test -- --runTestsByPath tests/meta-muse-provider.spec.ts`. Coverage includes configuration gates, request shape, call/concurrency limits, failed-call accounting, refusal/truncation/tools, JSON/usage validation, safe errors, timeout/cancellation, transport encoding/redirect/size limits and secret redaction. No credentials are loaded from `.env` and no network calls are made.
-
-The operator HTTP pipeline is implemented: see [report and analysis routes](WORDPRESS_REPORTS.md). It remains default-off. After the user chooses the Standard model, approves the data/budget and configures `MODEL_API_KEY` privately, one explicit test can use a current-policy saved report:
+After building, test without spending:
 
 ```powershell
-node scripts/verify-wordpress-muse.mjs --confirmed --report-id=SAVED-UUID-V4 --model=APPROVED-STANDARD-MODEL --max-input-bytes=APPROVED-BYTES --max-output-tokens=APPROVED-TOKENS
+node scripts/verify-muse-mock.mjs --report-id=SAVED_CURRENT_POLICY_REPORT_UUID
 ```
 
-The script limits its temporary process to one model dispatch, disables WordPress writes, forbids WordPress collection/fresh audits, compares the saved analysis GET with the generation result, and disables AI before shutdown. It never retries a failed/unknown generation. Its flags are placeholders requiring actual user decisions; the script has not been run live. Call/token bounds do not enforce a dollar cap; establish provider/account limits and a conservative cost bound before invoking it.
+Only when one essential proof-of-concept check is separately approved, the maximum cost fits the ledger and provider limits, and live mode is explicitly enabled, use an already approved intent:
+
+```powershell
+node scripts/verify-wordpress-muse.mjs --confirmed --report-id=REPORT_UUID --intent-id=APPROVED_INTENT_UUID
+```
+
+The script never authorizes itself, raises limits or enables live mode. No live model call was made during implementation. Backend reservations are conservative estimates and do not replace provider billing controls; the actual promotional account balance has not been queried.
+
+## Official contracts
+
+Verified October 31, 2026: [Responses API](https://dev.meta.ai/docs/protocols/responses), [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas), [models](https://dev.meta.ai/docs/models), [pricing](https://dev.meta.ai/docs/pricing-rate-limits), [reasoning and output budgets](https://dev.meta.ai/docs/reasoning). The frozen price policy expires starting November 30 UTC and must be reverified in reviewed code before further real use. Live account/model/schema acceptance remains unverified until a separately approved essential test; mocks cover ordinary development.

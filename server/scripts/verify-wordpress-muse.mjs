@@ -1,5 +1,4 @@
-// One separately authorized live model call from an existing saved evidence report.
-// No WordPress collection, fresh audit or content change is permitted in this process.
+// Execute only an individually administrator-approved intent; never enable live mode here.
 import "reflect-metadata";
 import process from "node:process";
 import console from "node:console";
@@ -8,24 +7,16 @@ import { NestFactory } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
 
 const args = process.argv.slice(2);
+assert.ok(args.includes("--confirmed"), "An explicit essential proof-of-concept request is required");
+assert.ok(args.every(arg => arg === "--confirmed" || /^--(?:report-id|intent-id)=/.test(arg)), "Only an existing report and approved intent may be selected");
 const argument = name => args.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-assert.ok(args.includes("--confirmed"), "One live model call requires explicit authorization");
 const reportId = argument("report-id");
-const model = argument("model");
-const outputTokens = Number(argument("max-output-tokens"));
-const inputBytes = Number(argument("max-input-bytes"));
-assert.match(reportId ?? "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
-assert.ok(["muse-spark-1.3", "muse-spark-1.2"].includes(model), "Select an approved Standard-mode model");
-assert.ok(Number.isInteger(outputTokens) && outputTokens >= 16 && outputTokens <= 8000);
-assert.ok(Number.isInteger(inputBytes) && inputBytes >= 4096 && inputBytes <= 131072);
+const intentId = argument("intent-id");
+const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+assert.match(reportId ?? "", uuid);
+assert.match(intentId ?? "", uuid);
 process.env.LOG_LEVEL = "silent";
 process.env.WORDPRESS_WRITES_ENABLED = "false";
-process.env.AI_ENABLED = "true";
-process.env.AI_MODEL = model;
-process.env.AI_MAX_CALLS_PER_PROCESS = "1";
-process.env.AI_MAX_CONCURRENCY = "1";
-process.env.AI_MAX_OUTPUT_TOKENS = String(outputTokens);
-process.env.AI_MAX_INPUT_BYTES = String(inputBytes);
 const { AppModule } = await import("../dist/app.module.js");
 const { configureApp } = await import("../dist/configure-app.js");
 const { WordPressClient } = await import("../dist/integrations/wordpress/wordpress.client.js");
@@ -33,29 +24,29 @@ const { MetaMuseTransport } = await import("../dist/integrations/ai/meta-muse.pr
 const app = configureApp(await NestFactory.create(AppModule, { logger: false }));
 let calls = 0;
 try {
-  await app.listen(0, "127.0.0.1");
   const config = app.get(ConfigService);
+  assert.equal(config.get("MOCK_AI"), false, "An administrator must explicitly disable mock mode first");
+  assert.equal(config.get("AI_ENABLED"), true, "Real analysis must be explicitly enabled by an administrator");
+  assert.ok(["poc", "demo"].includes(config.get("AI_MODE")), "An explicit live mode is required");
+  await app.listen(0, "127.0.0.1");
   const business = config.getOrThrow("WORDPRESS_BUSINESS_ID");
   const root = `${await app.getUrl()}/api/wordpress/businesses/${encodeURIComponent(business)}/reports/${reportId}`;
   const headers = { authorization: `Bearer ${config.getOrThrow("WORDPRESS_OPERATOR_KEY")}`, "content-type": "application/json" };
-  app.get(WordPressClient).request = async () => { throw new Error("Live WordPress access is forbidden during model evaluation"); };
+  app.get(WordPressClient).request = async () => { throw new Error("WordPress collection is forbidden during model evaluation"); };
   const transport = app.get(MetaMuseTransport);
   const send = transport.post.bind(transport);
-  transport.post = async (...parameters) => { assert.equal(calls++, 0, "Only one model dispatch is authorized"); return send(...parameters); };
+  transport.post = async (...parameters) => { assert.equal(calls++, 0, "Only the approved dispatch may be attempted"); return send(...parameters); };
   const api = async (path, method = "GET", body) => {
     const response = await globalThis.fetch(root + path, { method, headers, redirect: "error", signal: globalThis.AbortSignal.timeout(150000), body: body === undefined ? undefined : JSON.stringify(body) });
-    const value = await response.json();
-    assert.equal(response.status, method === "POST" ? 201 : 200, `Live model evaluation returned ${value.error?.code ?? "unexpected status"}; no retry permitted`);
-    return value;
+    assert.equal(response.status, method === "POST" ? 201 : 200, "Approved evaluation failed; inspect the ledger without retrying");
+    return response.json();
   };
-  const evidence = await api("/muse-evidence");
-  assert.equal(calls, 0);
-  const analysis = await api("/muse-analyses", "POST", { confirmed: true });
+  const analysis = await api("/muse-analyses", "POST", { confirmed: true, intentId });
+  assert.equal(analysis.isMock, false);
   config.set("AI_ENABLED", false);
   assert.deepEqual(await api(`/muse-analyses/${analysis.id}`), analysis);
-  assert.equal(calls, 1);
-  console.log(JSON.stringify({ analysisId: analysis.id, reportId, businessId: business, model: analysis.model, usage: analysis.usage, sourceHashMatches: evidence.source.contentHash === analysis.sourceHash, savedReadMatches: true, modelDispatches: calls, writesEnabled: false, output: analysis.output, limitations: analysis.limitations }, null, 2));
+  console.log(JSON.stringify({ analysisId: analysis.id, reportId, model: analysis.model, usage: analysis.usage, usageAttemptId: analysis.usageAttemptId, generationMode: analysis.generationMode, isMock: analysis.isMock, modelDispatches: calls, cacheReused: calls === 0, savedReadMatches: true, writesEnabled: false, output: analysis.output }, null, 2));
 } catch {
-  console.error("Live Muse evaluation did not establish a saved validated analysis. No retry was attempted; inspect the saved report/analysis and provider usage before another request.");
+  console.error("Approved Muse evaluation did not establish a saved result. No retry was attempted. Inspect persistent usage, any original analysis, and provider billing before requesting another approval.");
   process.exitCode = 1;
 } finally { app.get(ConfigService).set("AI_ENABLED", false); await app.close(); }

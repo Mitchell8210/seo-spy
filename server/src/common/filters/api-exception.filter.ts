@@ -7,14 +7,34 @@ import {
   Logger,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { AppDatabaseError } from "../../persistence/sqlite/app-database.js";
 
 // Only fixed application-authored integration errors may cross the 5xx boundary.
 // Provider bodies and exception messages remain private.
 const safeIntegrationErrors: Record<string, string> = {
+  DATABASE_UNAVAILABLE: "The application database is unavailable; the request was not completed.",
   AI_DISABLED: "Model analysis is disabled.",
   AI_NOT_CONFIGURED: "Model analysis requires approved server configuration.",
   AI_BUDGET_DISABLED: "Model analysis requires an explicitly configured call limit.",
-  AI_CALL_LIMIT: "The process model call limit has been reached.",
+  AI_CALL_LIMIT: "The model request limit has been reached.",
+  AI_ADMIN_NOT_CONFIGURED: "The separate AI administrator credential is not configured.",
+  AI_MOCK_MODE: "Mock mode cannot dispatch a real model request.",
+  AI_APPROVAL_REQUIRED: "A fresh exact administrator approval is required for every real model request.",
+  AI_APPROVAL_STALE: "The administrator approval is expired or already used.",
+  AI_APPROVAL_MISMATCH: "The request no longer matches its reviewed administrator approval.",
+  AI_DEMO_APPROVAL_REQUIRED: "Demo usage requires separate explicit administrator authorization.",
+  AI_BUDGET_STORAGE_ERROR: "Persistent budget tracking is unavailable; real calls are blocked.",
+  AI_USAGE_UNAVAILABLE: "Persistent usage tracking is unavailable; real calls are blocked.",
+  AI_USAGE_HALTED: "Usage accounting requires investigation; real calls are blocked.",
+  AI_USAGE_EXCEEDED: "Reported usage exceeded its reservation; further calls are blocked.",
+  AI_REAL_REQUEST_ACTIVE: "A real request is active or uncertain; further calls are blocked.",
+  AI_RATE_LIMIT: "Only one real request per minute is permitted.",
+  AI_REQUEST_LIMIT: "The cumulative real-request limit has been reached.",
+  AI_DEVELOPMENT_BUDGET: "The request would exceed the authorized cumulative AI budget.",
+  AI_DAILY_BUDGET: "The request would exceed the authorized UTC daily AI budget.",
+  AI_ESTIMATE_INVALID: "A safe exact request estimate is required.",
+  AI_BUDGET_POLICY_INVALID: "Budget limits exceed the protected allocation.",
+  AI_PRICING_UNAVAILABLE: "A current conservative price estimate is unavailable; real calls are blocked.",
   AI_BUSY: "Model analysis capacity is currently in use.",
   AI_CANCELLED: "Model analysis was cancelled; remote completion may be unknown.",
   AI_TIMEOUT: "Model analysis timed out; remote completion is unknown.",
@@ -45,11 +65,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const response = context.getResponse<Response>();
     const request = context.getRequest<Request>();
     const status =
-      exception instanceof HttpException
+      exception instanceof AppDatabaseError ? HttpStatus.SERVICE_UNAVAILABLE : exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
     const payload =
-      exception instanceof HttpException ? exception.getResponse() : null;
+      exception instanceof AppDatabaseError ? { code: "DATABASE_UNAVAILABLE" } : exception instanceof HttpException ? exception.getResponse() : null;
     const details =
       typeof payload === "object" && payload !== null
         ? (payload as Record<string, unknown>)

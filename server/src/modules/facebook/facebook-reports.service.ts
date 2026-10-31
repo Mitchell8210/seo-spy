@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
   OnModuleDestroy,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -14,6 +15,8 @@ import { collectFacebookReport } from "../../integrations/facebook/collect.js";
 import { FacebookCollectionError } from "../../integrations/facebook/types.js";
 import {
   BUSINESS_REPOSITORY,
+  AUDIT_REPOSITORY,
+  type AuditRepository,
   type BusinessRepository,
 } from "../../persistence/repositories.js";
 import { FileReportStore } from "../../reports/file-report.store.js";
@@ -49,6 +52,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     private readonly businesses: BusinessRepository,
     private readonly graph: FacebookGraph,
     private readonly facebook: FacebookService,
+    @Optional() @Inject(AUDIT_REPOSITORY) private readonly audits?: AuditRepository,
   ) {}
 
   async status(sessionId: string | undefined, businessId: string): Promise<FacebookReportProgress> {
@@ -174,6 +178,7 @@ export class FacebookReportsService implements OnModuleDestroy {
       scoringVersion: "facebook-v1",
       results: null,
     };
+    if (this.audits && !await this.audits.createIfIdle(audit)) throw new ConflictException({ code: "AUDIT_ALREADY_ACTIVE", message: "A Facebook report is already queued or running for this business." });
     try {
       const collected = await collectFacebookReport(
         this.graph,
@@ -203,8 +208,14 @@ export class FacebookReportsService implements OnModuleDestroy {
     audit.completedAt = new Date().toISOString();
     try {
       const reference = await this.reports.write(audit, business);
+      audit.report = reference;
+      await this.audits?.save(audit);
       return { ...reference, status: audit.status, failure: audit.failure };
     } catch {
+      audit.status = "failed";
+      audit.stage = "failed";
+      audit.failure = { code: "REPORT_WRITE_FAILED", message: "The Facebook report could not be saved." };
+      await this.audits?.save(audit);
       throw new ServiceUnavailableException({
         code: "REPORT_WRITE_FAILED",
         message:

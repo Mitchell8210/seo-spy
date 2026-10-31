@@ -12,6 +12,7 @@ import { WordPressMuseStore } from "../src/modules/wordpress/wordpress-muse.stor
 import { WORDPRESS_MUSE_OUTPUT_VERSION, wordpressMuseAnalysisSchema, type WordPressMuseOutput } from "../src/modules/wordpress/wordpress-muse.types.js";
 import type { WordPressReportsService } from "../src/modules/wordpress/wordpress-reports.service.js";
 import type { WordPressEvidenceReport } from "../src/modules/wordpress/wordpress-report.types.js";
+import { AppDatabase } from "../src/persistence/sqlite/app-database.js";
 
 const timestamp = "2026-10-31T12:00:00.000Z";
 function fixture(): WordPressEvidenceReport {
@@ -304,7 +305,13 @@ describe("saved WordPress Muse interpretation with mocked provider and immutable
     const path = join(directory, `${analysis.id}.json`);
     for (const body of ["{invalid", JSON.stringify({ ...analysis, id: randomUUID() }), "x".repeat(512 * 1024 + 1)]) {
       await writeFile(path, body);
-      await expect(store.read(analysis.id)).rejects.toMatchObject({ response: { code: "WORDPRESS_MUSE_STORAGE_ERROR" } });
+      expect(await store.read(analysis.id)).toEqual(analysis);
+      // A fresh independent DB still validates corrupt legacy exports before adoption.
+      const legacyConfig = new ConfigService({ WORDPRESS_MUSE_DIR: directory, DATABASE_PATH: ":memory:", NODE_ENV: "test" });
+      const legacyDatabase = new AppDatabase(legacyConfig);
+      const legacy = new WordPressMuseStore(legacyConfig, legacyDatabase);
+      await expect(legacy.read(analysis.id)).rejects.toMatchObject({ response: { code: "WORDPRESS_MUSE_STORAGE_ERROR" } });
+      legacyDatabase.close();
     }
   });
   it("rejects a configured directory junction and unsafe file types without exposing filesystem paths", async () => {

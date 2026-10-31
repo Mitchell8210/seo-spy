@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import { ReportStorageError } from "../src/reports/report.types.js";
+import { AppDatabase } from "../src/persistence/sqlite/app-database.js";
 
 describe("demo API", () => {
   let app: INestApplication;
@@ -39,9 +40,11 @@ describe("demo API", () => {
 
   async function createApp() {
     const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(AppDatabase)
+      .useValue(new AppDatabase(new ConfigService({ DATABASE_PATH: join(reportsDir, "application.sqlite") })))
       .overrideProvider(FileReportStore)
       .useValue(
-        new FileReportStore(new ConfigService({ REPORTS_DIR: reportsDir })),
+        new FileReportStore(new ConfigService({ REPORTS_DIR: reportsDir, DATABASE_PATH: join(reportsDir, "application.sqlite") })),
       )
       .compile();
     app = configureApp(module.createNestApplication());
@@ -96,6 +99,10 @@ describe("demo API", () => {
     expect(Object.keys(spec.body.paths).sort()).toEqual(
       [
         "/api/health",
+        "/api/ai/admin/status",
+        "/api/ai/admin/intents/{intentId}",
+        "/api/ai/admin/intents/{intentId}/approve",
+        "/api/ai/admin/demo-authorizations",
         "/api/businesses/{businessId}/dashboard",
         "/api/businesses/{businessId}/audits",
         "/api/audits/{auditId}",
@@ -128,6 +135,7 @@ describe("demo API", () => {
         "/api/wordpress/businesses/{businessId}/reports",
         "/api/wordpress/businesses/{businessId}/reports/{reportId}",
         "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-evidence",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-estimates",
         "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-analyses",
         "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-analyses/{analysisId}",
         "/api/wordpress/businesses/{businessId}/proposals/{id}/verifications",

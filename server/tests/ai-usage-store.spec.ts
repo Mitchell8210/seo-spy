@@ -36,6 +36,20 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
     await store.settle(reserved.id, { status: "failed", errorCode: "AI_PROVIDER_FAILED" });
     return reserved;
   };
+  it("invalidates old demo intents when an administrator authorizes a new limit set", async () => {
+    await store.authorizeDemo("administrator", { budgetMicros: 2000000, dailyMicros: 500000, maxCalls: 10 });
+    const intent = await approved({ mode: "demo" });
+    await store.authorizeDemo("administrator", { budgetMicros: 100000, dailyMicros: 50000, maxCalls: 1 });
+    await expect(store.reserve(intent.id, auth(intent))).rejects.toMatchObject({ code: "AI_DEMO_APPROVAL_REQUIRED" });
+    expect((await store.status()).demo.calls).toBe(0);
+  });
+
+  it("rejects an unaffordable estimate under reduced caps and keeps the reduction across restart", async () => {
+    await expect(store.estimate(input(), { budgetMicros: 500, dailyMicros: 500, maxCalls: 1 })).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+    const restarted = makeStore();
+    await expect(restarted.estimate(input())).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+    expect((await restarted.status()).development).toMatchObject({ budgetMicros: 500, dailyMicros: 500, maxCalls: 1, calls: 0 });
+  });
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "seo-spy-ai-usage-"));

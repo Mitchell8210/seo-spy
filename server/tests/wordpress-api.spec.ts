@@ -14,7 +14,8 @@ import { WordPressActionsStore } from "../src/modules/wordpress/wordpress-action
 import { WordPressClient, WordPressRequestError } from "../src/integrations/wordpress/wordpress.client.js";
 import { operatorIdentity } from "../src/modules/wordpress/wordpress.guard.js";
 import { BUSINESS_REPOSITORY } from "../src/persistence/repositories.js";
-import { MetaMuseProvider } from "../src/integrations/ai/meta-muse.provider.js";
+import { MetaMuseProvider, MetaMuseTransport } from "../src/integrations/ai/meta-muse.provider.js";
+import { AiUsageStore } from "../src/integrations/ai/ai-usage.store.js";
 import { WebsiteCollector } from "../src/integrations/website/collector.js";
 
 const businessId = "demo-guzman";
@@ -48,6 +49,8 @@ describe("WordPress operator API with controlled remote fixtures", () => {
       WORDPRESS_REPORTS_DIR: join(directory, "evidence"),
       WORDPRESS_MUSE_DIR: join(directory, "muse"),
       AI_ENABLED: false,
+      AI_USAGE_DB: join(directory, "usage.sqlite"),
+      AI_ADMIN_KEY: "separate-ai-admin-fixture-at-least-32-characters",
       PORT: 3001,
     };
     remote = {
@@ -228,17 +231,24 @@ describe("WordPress operator API with controlled remote fixtures", () => {
     await post(`${prefix}/reports/${report.body.id}/muse-analyses`, {}).expect(400);
     await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: false }).expect(400);
     await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).set("Origin", "https://attacker.example").expect(403);
-    const disabled = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(503);
-    expect(disabled.body.error.code).toBe("AI_DISABLED");
+    const provider = jest.spyOn(app.get(MetaMuseProvider), "generate");
+    const local = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
+    expect(local.body).toMatchObject({ isMock: true, provider: "mock-fixture", generationMode: "mock", usage: { inputTokens: 0, outputTokens: 0 } });
+    const cached = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
+    expect(cached.body.id).toBe(local.body.id);
+    expect(provider).not.toHaveBeenCalled();
     expect(transport.mock.calls).toHaveLength(count);
   });
 
   it("publishes validated informational Muse output and reads it without another call", async () => {
+    settings.MOCK_AI = false;
+    settings.AI_MODE = "poc";
+    settings.AI_ENABLED = true;
     const report = await post(`${prefix}/reports`, {}).expect(201);
     const prepared = await get(`${prefix}/reports/${report.body.id}/muse-evidence`).expect(200);
     const ref = prepared.body.observations[0].evidenceId;
     const generate = jest.spyOn(app.get(MetaMuseProvider), "generate").mockResolvedValue({ model: "muse-spark-1.3", usage: { inputTokens: 100, outputTokens: 80 }, requestId: "fixture", output: { schemaVersion: "wordpress-muse-output-v1", summary: "A bounded content sample was collected.", summaryEvidenceIds: [ref], observations: [{ id: "sample", kind: "fact", text: "The sampled title is available.", evidenceIds: [ref] }], recommendations: [], limitations: ["The sample is limited."], seoSpyScore: null } });
-    const created = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
+    const created = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true, intentId: randomUUID() }).expect(201);
     expect(created.body.schemaVersion).toBe("seo-spy.wordpress-muse-analysis.v1");
     expect(created.body.sourceHash).toBe(prepared.body.source.contentHash);
     settings.MODEL_API_KEY = "";
@@ -248,6 +258,38 @@ describe("WordPress operator API with controlled remote fixtures", () => {
     expect(transport.mock.calls).toHaveLength(count);
     const different = await post(`${prefix}/reports`, {}).expect(201);
     await get(`${prefix}/reports/${different.body.id}/muse-analyses/${created.body.id}`).expect(404);
+  });
+
+  it("requires separate administrator approval, reserves usage once and serves the paid-mode cache without another wire request", async () => {
+    const report = await post(`${prefix}/reports`, {}).expect(201);
+    const prepared = await get(`${prefix}/reports/${report.body.id}/muse-evidence`).expect(200);
+    const ref = prepared.body.observations[0].evidenceId;
+    const output = { schemaVersion: "wordpress-muse-output-v1", summary: "A bounded sample was read.", summaryEvidenceIds: [ref], observations: [{ id: "sample", kind: "fact", text: "A sampled title was available.", evidenceIds: [ref] }], recommendations: [], limitations: ["The sample is limited."], seoSpyScore: null };
+    const wire = jest.spyOn(app.get(MetaMuseTransport), "post").mockResolvedValue({ status: 200, body: JSON.stringify({ status: "completed", model: "muse-spark-1.3", output: [{ type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: JSON.stringify(output) }] }], usage: { input_tokens: 100, output_tokens: 80 } }), requestId: "fixture-request" });
+    const estimate = await post(`${prefix}/reports/${report.body.id}/muse-estimates`, { reason: "Verify the essential structured output schema with one approved proof-of-concept request." }).expect(201);
+    expect(Number(estimate.body.maximumEstimatedCostUsd)).toBeLessThanOrEqual(0.5);
+    expect((await app.get(AiUsageStore).status()).development.calls).toBe(0);
+    expect(wire).not.toHaveBeenCalled();
+    settings.AI_ENABLED = true;
+    settings.MOCK_AI = false;
+    settings.AI_MODE = "poc";
+    settings.MODEL_API_KEY = "fixture-private-key-not-a-live-credential";
+    await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(503);
+    await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true, intentId: estimate.body.id }).expect(503);
+    expect(wire).not.toHaveBeenCalled();
+    const approvalPath = `/api/ai/admin/intents/${estimate.body.id}/approve`;
+    const approval = { confirmed: true, requestHash: estimate.body.requestHash, reserveMicros: estimate.body.reserveMicros };
+    await post(approvalPath, approval).expect(401);
+    await post(approvalPath, approval, String(settings.AI_ADMIN_KEY)).expect(201);
+    const created = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true, intentId: estimate.body.id }).expect(201);
+    expect(created.body).toMatchObject({ isMock: false, provider: "meta", generationMode: "poc" });
+    expect(wire).toHaveBeenCalledTimes(1);
+    const cached = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
+    expect(cached.body.id).toBe(created.body.id);
+    expect(wire).toHaveBeenCalledTimes(1);
+    const ledger = await app.get(AiUsageStore).status();
+    expect(ledger.development).toMatchObject({ calls: 1, chargedMicros: 465 });
+    expect(ledger.activeAttemptId).toBeNull();
   });
 
   it("verifies only applied media-alt proposals, saves public receipts, and reads them without collection", async () => {

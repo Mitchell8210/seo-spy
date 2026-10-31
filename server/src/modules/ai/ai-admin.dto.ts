@@ -10,6 +10,6 @@ export class AuthorizeAiDemoDto {
   @ApiProperty({ enum: [true] }) @Equals(true) confirmed!: true;
   @ApiProperty({ minimum: 1, maximum: 148000000, description: "Separately authorized cumulative demo budget in USD microdollars. This never resets prior demo usage." }) @IsInt() @Min(1) @Max(148000000) budgetMicros!: number;
   @ApiProperty({ minimum: 1, maximum: 148000000 }) @IsInt() @Min(1) @Max(148000000) dailyMicros!: number;
-  @ApiProperty({ minimum: 1, maximum: 10000 }) @IsInt() @Min(1) @Max(10000) maxCalls!: number;
+  @ApiProperty({ minimum: 1, maximum: 1000 }) @IsInt() @Min(1) @Max(1000) maxCalls!: number;
   @ApiProperty({ description: "Why final testing/demo usage is being authorized. Authorization does not itself make a call." }) @IsString() @MinLength(10) @MaxLength(1000) reason!: string;
 }
