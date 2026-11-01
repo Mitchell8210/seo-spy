@@ -117,11 +117,11 @@ describe("persistent Google response cache and additive schema migration", () =>
     const originalMigration = database.connection().prepare("SELECT * FROM schema_migrations WHERE version=1").get();
     const originalCounts = database.connection().prepare("SELECT (SELECT COUNT(*) FROM suggestions) suggestions,(SELECT COUNT(*) FROM findings) findings").get();
     // Reconstruct the previous schema exactly, retaining all records and its original migration date.
-    database.connection().exec("BEGIN IMMEDIATE; DROP TABLE google_reporting_cache; DELETE FROM schema_migrations WHERE version=2; PRAGMA user_version=1; COMMIT;");
+    database.connection().exec("BEGIN IMMEDIATE; DROP TABLE assessment_records; DROP TABLE google_reporting_cache; DELETE FROM schema_migrations WHERE version IN (2,3); PRAGMA user_version=1; COMMIT;");
     database.close();
     const migrated = make();
-    expect(migrated.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(2);
-    expect(migrated.connection().prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(migrated.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+    expect(migrated.connection().prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
     expect(migrated.connection().prepare("SELECT * FROM schema_migrations WHERE version=1").get()).toEqual(originalMigration);
     expect(await new SQLiteBusinessRepository(migrated).findById("demo-guzman")).toEqual(business);
     expect(await new SQLiteAuditRepository(migrated).latestCompleted("demo-guzman")).toEqual(audit);
@@ -130,7 +130,7 @@ describe("persistent Google response cache and additive schema migration", () =>
     new GoogleCacheStore(migrated).write(entry());
     migrated.close();
     const reopened = make();
-    expect(reopened.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(2);
+    expect(reopened.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(3);
     expect(new GoogleCacheStore(reopened).read(key)).toEqual(entry());
     expect(await readFile(ledgerPath, "utf8")).toBe("protected accounting state must not be opened");
   });

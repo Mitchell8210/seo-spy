@@ -12,6 +12,7 @@ import { AppDatabaseError } from "../../persistence/sqlite/app-database.js";
 // Only fixed application-authored integration errors may cross the 5xx boundary.
 // Provider bodies and exception messages remain private.
 const safeIntegrationErrors: Record<string, string> = {
+  ASSESSMENT_STORAGE_ERROR: "Saved assessments could not be accessed safely; no analysis or edit was started.",
   DATABASE_UNAVAILABLE: "The application database is unavailable; the request was not completed.",
   GOOGLE_OPERATOR_NOT_CONFIGURED: "Local Google reporting authorization is not configured.",
   GOOGLE_CACHE_UNAVAILABLE: "The Google response cache is unavailable. No automatic retry is permitted.",

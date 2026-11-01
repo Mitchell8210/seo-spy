@@ -51,13 +51,13 @@ function Category({ title, description, icon, score, source, issues, empty, chil
 }
 
 export function DashboardAssessment({ model }: { model: DashboardAssessmentModel }) {
-  const { website, websiteReport, social, socialView, socialReport, latestWebsiteAttempt, top, main, websiteResults, consistency } = model
+  const { website, websiteReport, social, socialView, socialReport, latestWebsiteAttempt, top, main, websiteResults, consistency, socialScore, scoreAssessment } = model
   const asScore = (score: typeof main.overall): Score | null => score.value === null ? null : { ...score, value: score.value }
   const websiteSource = [websiteReport ? `Saved website report · ${websiteReport.audit.completedAt ?? websiteReport.generatedAt} · Homepage coverage` : 'No saved website report is available.',
-    'SEO Spy score not available', websiteReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    websiteResults.overall.value === null ? 'SEO Spy score not available' : `SEO Spy policy v1 · ${scoreAssessment?.profile === 'baseline-desktop-v1' ? 'Desktop' : 'Mobile'} · ${scoreAssessment?.cutoff}`, websiteReport?.audit.status === 'partial' ? 'Partial coverage' : '',
     latestWebsiteAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', website.error ?? ''].filter(Boolean).join(' · ')
   const socialSource = [socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · ${socialReport?.results.facebook.collectedAt}` : 'Numeric social score not available',
-    socialView ? 'Numeric score not provided' : '', socialReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    socialView ? socialScore.value === null ? 'Numeric score not available' : `SEO Spy policy v1 · ${scoreAssessment?.cutoff}` : '', socialReport?.audit.status === 'partial' ? 'Partial coverage' : '',
     social.data?.latestAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', social.error ?? ''].filter(Boolean).join(' · ')
   return <section aria-labelledby="spy-total-title" className="min-w-0 rounded-2xl border border-blue-500/60 bg-surface p-3 shadow-lg shadow-blue-950/20 sm:p-5">
     <div className="flex items-center gap-3"><SpyLogo /><div><p className="text-xs font-semibold text-blue-300">SEO Spy</p><h2 id="spy-total-title" className="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl">Spy Total Score</h2></div></div>
@@ -65,11 +65,11 @@ export function DashboardAssessment({ model }: { model: DashboardAssessmentModel
       <section aria-label="Overall assessment" className="flex min-w-0 flex-col rounded-xl border border-blue-400/20 bg-blue-500/[0.03] p-4 md:col-span-2 xl:col-span-1">
         <ScoreCard score={main.overall} live prominent />
         <p className="mt-4 text-xs leading-5 text-secondary">SEO Spy combines your website health, social media performance, and business consistency to give you one overall view of your online presence.</p>
-        <p className="mt-2 text-[10px] leading-4 text-muted">Combined SEO Spy score not available. Channel scores and business comparisons require backend scoring.</p>
+        <p className="mt-2 text-[10px] leading-4 text-muted">{main.overall.value === null ? 'Combined SEO Spy score not available while required evidence is missing.' : `SEO Spy policy v1 · ${scoreAssessment?.cutoff}`}</p>
         <dl className="mt-auto space-y-3 border-t border-line pt-4 text-[11px]">
           {[
             { label: 'Website Health', score: asScore(websiteResults.overall), dot: 'bg-cyan-400' },
-            { label: 'Social Media Performance', score: null, dot: 'bg-blue-500' },
+            { label: 'Social Media Performance', score: asScore(socialScore), dot: 'bg-blue-500' },
             { label: 'Business Consistency', score: asScore(consistency.score), dot: 'bg-amber-400' },
           ].map(item => <div key={item.label} className="flex items-start justify-between gap-2"><dt className="flex min-w-0 items-start gap-2 text-secondary"><span className={`mt-1 size-1.5 shrink-0 rounded-full ${item.dot}`} aria-hidden="true" />{item.label}</dt><dd className="shrink-0 text-right font-semibold text-ink">{item.score ? `${item.score.value}/${item.score.maximum}` : <><span aria-hidden="true">—</span><span className="block text-[10px] font-normal text-muted">Not available</span></>}</dd></div>)}
         </dl>
@@ -77,11 +77,11 @@ export function DashboardAssessment({ model }: { model: DashboardAssessmentModel
       <Category accent="border-cyan-400/30 bg-cyan-400/15 text-cyan-300" title="Website Health" description="How your website performs for search engines and visitors." icon={<Monitor size={25} aria-hidden="true" />} score={asScore(websiteResults.overall)} source={websiteSource} issues={top.website} empty={website.loading ? 'Loading your saved website report…' : website.error ?? (websiteReport ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved website report is available. Run Investigation to collect its findings.')}>
         <Link to={`/website?businessId=${encodeURIComponent(model.businessId)}`} className={reportStyle}>Open Website Report</Link>
       </Category>
-      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={null} source={socialSource} issues={top.social} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
+      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={asScore(socialScore)} source={socialSource} issues={top.social} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
         {social.error && <button type="button" onClick={social.refresh} className={`${reportStyle} mb-3`}>Retry saved report</button>}
         <Link to={`/social-media?businessId=${encodeURIComponent(model.businessId)}`} className={reportStyle}>Open Social Media Report</Link>
       </Category>
-      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={asScore(consistency.score)} source="No saved business comparison is available." issues={top.consistency} empty="No saved business comparison is available.">
+      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={asScore(consistency.score)} source={consistency.checks.some(check => check.matches !== null) ? `Saved comparison · ${scoreAssessment?.cutoff}` : 'No saved business comparison is available.'} issues={top.consistency} empty={consistency.checks.some(check => check.matches !== null) ? 'Review the saved comparison details. Coverage may be limited.' : 'No saved business comparison is available.'}>
         <details id="consistency-details" tabIndex={-1} className="mt-auto rounded-lg border border-blue-400/40 text-xs text-blue-200"><summary className="min-h-[42px] cursor-pointer rounded-lg px-2 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-blue-300">View Consistency Details</summary><ul className="space-y-4 border-t border-line p-3">{consistency.checks.map(check => <li key={check.id} className="break-words text-xs leading-5"><p className="font-semibold text-ink">{check.label} · {check.matches === null ? 'Not available' : check.matches ? 'Matches' : 'Needs review'}</p><p>Website: {check.website}</p><p>Facebook: {check.social}</p></li>)}</ul></details>
       </Category>
     </div>

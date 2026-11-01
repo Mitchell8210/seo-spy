@@ -1,5 +1,17 @@
 # Dashboard saved-report integration
 
+## Approved scoring and saved interpretation
+
+The dashboard now accepts the backend's optional `assessment` read model from its existing business response. `seo-spy-score-v1` supplies eligible numeric values only when the policy/business and pinned report IDs match the currently displayed reports. Zero remains valid. Missing, stale, incompatible or unavailable inputs retain the existing unavailable gauges; Lighthouse SEO is never substituted directly for the weighted Website or overall score. Existing source captions identify policy/profile/cutoff. Native Lighthouse category gauges on the Website page are unchanged.
+
+The same saved assessment may carry a separately persisted interpretation. Recommendations replace only matching report/finding/evidence-linked prose; mock interpretations are explicitly prefixed `Mock AI recommendation`. Values, weights and scores never come from model prose. No generation or action request happens during page loads, polling, previews or renders. Backend generation remains an explicit operator-only mocked POST.
+
+Business consistency keeps the same four rows and uses backend observed comparison values/outcomes only when both pinned sources match. No new sections, fields, labels, controls or styling are introduced.
+
+The user explicitly deferred the compact action-review panel proposal. Its exact suggested fields/controls and required operator browser connection are recorded in [the backend plan](../server/PLAN.md) and [approved scoring/workflow runbook](../server/SCORING_POLICY.md); revisit with specific UI approval later. Fix with AI remains a read-only saved-recommendation preview.
+
+Actual saved-data verification produced Website **80/100** from policy-weighted Lighthouse categories and displayed it in the existing gauge, with a labeled mock interpretation. Social/Consistency/Overall remain unavailable for explicit missing evidence/confirmation reasons. See the backend runbook for snapshot IDs, formula and validation scope. The historical integration notes below describe the original wiring; the policy-backed fields in this section supersede their former blanket unavailable-score behavior.
+
 The current Dashboard assessment layout reads saved Website and Facebook results. Its `businessId` query parameter selects the registered business; the demonstration ID is only the default lookup key. Business identity, connections, findings and recommendations do not fall back to mock data.
 
 `useDashboardAssessment` composes `useDashboardReports`, `useWebsiteReport` and `useFacebookReport`. The existing readers validate business/audit ownership, exclude demo audits and retain usable results after refresh failures. Website reads refresh every 15 seconds, or 2.5 seconds during active work; Facebook saved reads refresh every 15 seconds and on focus. Investigation status changes refresh saved reports. Switching businesses aborts old reads and clears the old view.

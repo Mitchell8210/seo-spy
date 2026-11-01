@@ -17,6 +17,7 @@ const browserApiRequests = [];
 const savedTarget = process.argv.includes('--saved') ? process.env.WEBSITE_API_TARGET ?? 'http://127.0.0.1:3001' : null;
 const dashboardMode = process.argv.includes('--dashboard');
 let mode = 'loaded', cdp, server, artifacts;
+let savedAssessment = null;
 let rerun = null, rejectRun = false;
 let facebookJob = null, facebookLatest = null;
 const rerunId = '00000000-0000-4000-8000-000000000002';
@@ -138,7 +139,7 @@ try {
       data = rerun;
     }
     else if (req.url === '/api/audits/running') data = { ...report.audit, id: 'running', status: 'running', stage: 'running_lighthouse' };
-    else if (req.url.endsWith('/dashboard')) data = { business, connections: [], latestAudit: null, activeAudit: rerun?.status === 'queued' ? rerun : mode === 'running' ? { ...report.audit, id: 'running', status: 'running', stage: 'running_lighthouse' } : null };
+    else if (req.url.endsWith('/dashboard')) data = { business, connections: [], assessment: savedAssessment, latestAudit: null, activeAudit: rerun?.status === 'queued' ? rerun : mode === 'running' ? { ...report.audit, id: 'running', status: 'running', stage: 'running_lighthouse' } : null };
     else if (req.url.endsWith('/reports')) data = { businessId: 'demo-guzman', reports: mode === 'empty' ? [summary('demo', 'demo'), summary('facebook', 'live')] : [summary('facebook', 'live'), ...(mode === 'failed-latest' ? [{ ...summary('homepage', 'live'), auditId: 'failed', status: 'failed' }] : []), summary(report.audit.scope, 'live')] };
     else if (req.url === '/api/audits/' + report.auditId + '/website-analysis') data = {
       version: 'website-priority-v1', auditId: mode === 'analysis-mismatch' ? 'other-audit' : report.auditId,
@@ -172,6 +173,10 @@ try {
     await navigateReport(base + '/dashboard');
     await waitFor(async () => (await text()).includes(savedDashboard.business.name) && (await text()).includes(saved.audit.completedAt ?? saved.generatedAt), 'actual saved dashboard data');
     assert.equal(await evaluate('document.querySelector("#business-title").textContent'), savedDashboard.business.name);
+    const websiteScore = savedDashboard.assessment?.scores.website;
+    if (websiteScore?.availability === 'available' && savedDashboard.assessment.sources.some(source => source.provider === 'website' && source.reportId === candidate.auditId)) {
+      await waitFor(async () => await evaluate('Boolean(document.querySelector(' + JSON.stringify(`section[aria-label="Website Health"] [aria-label^="SEO Spy Website Score: ${websiteScore.value} out of 100"]`) + '))'), 'actual persisted Website score matches the existing gauge');
+    }
     for (const finding of analysis.findings.filter(item => item.source === 'website').slice(0, 3)) assert.ok((await text()).includes(finding.title), 'Saved website finding: ' + finding.id);
     assert.equal(await evaluate('document.querySelector("section[aria-labelledby=spy-total-title] [role=img]").getAttribute("aria-label")'), 'Score: not available');
     assert.equal(await evaluate('document.querySelectorAll("#consistency-details li").length'), 4);
@@ -216,6 +221,19 @@ try {
     }
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await screenshot('dashboard-mobile.png');
+    const score = value => ({ value, maximum: 100, availability: value === null ? 'unavailable' : 'available', reasons: [] });
+    savedAssessment = { id: '00000000-0000-4000-8000-000000000099', businessId: business.id, policyVersion: 'seo-spy-score-v1', policyHash: 'a'.repeat(64), profile: 'baseline-mobile-v1', cutoff: now, readAt: now,
+      sources: [{ provider: 'website', reportId: report.auditId, reportHash: 'a'.repeat(64), businessId: business.id, collectedAt: now }, { provider: 'facebook', reportId: facebookAuditId, reportHash: 'b'.repeat(64), businessId: business.id, collectedAt: now }],
+      scores: { website: score(79), social: score(null), consistency: score(null), overall: score(null) }, reasons: [], limitations: [], analysis: null };
+    await go();
+    await waitFor(async () => (await categoryText('Website Health')).includes('79'), 'backend Website policy score');
+    assert.equal(await evaluate('document.querySelector("section[aria-labelledby=spy-total-title] [role=img]").getAttribute("aria-label")'), 'Score: not available', 'Missing channels never redistribute their weights.');
+    savedAssessment.analysis = { id: 'analysis', assessmentId: savedAssessment.id, businessId: business.id, isMock: true, generationMode: 'mock', output: { recommendations: [{ id: 'review-context', reportId: report.auditId, findingId: 'fixture-finding', title: 'Mock context review', recommendation: 'Review the collected image context before proposing text.', evidenceRefs: [{ reportId: report.auditId, evidenceId: 'evidence' }] }] } };
+    await go(); await waitFor(async () => (await categoryText('Website Health')).includes('79'), 'saved analysis loaded');
+    await evaluate('document.querySelector("section[aria-label=\\"Website Health\\"] button[aria-label^=\\"Fix with AI\\"]").click()');
+    await waitFor(async () => (await categoryText('Website Health')).includes('Mock AI recommendation:'), 'explicit mocked recommendation provenance');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 0);
+    savedAssessment = null;
     mode = 'failed-latest'; await go();
     await waitFor(async () => (await text()).includes('A newer report attempt failed.') && (await text()).includes('Review fixture image alternatives'), 'failed newer attempts');
     assert.match(await text(), /Review fixture image alternatives/); assert.match(await text(), /Fixture Facebook Page/);

@@ -99,7 +99,7 @@ describe("saved WordPress Muse interpretation with mocked provider and immutable
     delete settings.AI_MODE; delete settings.MOCK_AI;
     settings.AI_ENABLED = false; settings.MODEL_API_KEY = "";
     const analysis = await service.create(report.businessId, report.id);
-    expect(analysis).toMatchObject({ generationMode: "mock", provider: "mock-fixture", isMock: true, fixtureVersion: "muse-development-fixtures-v1", usage: { inputTokens: 0, outputTokens: 0 }, requestId: null });
+    expect(analysis).toMatchObject({ generationMode: "mock", provider: "mock-fixture", isMock: true, fixtureVersion: "muse-development-fixtures-v2", usage: { inputTokens: 0, outputTokens: 0 }, requestId: null });
     expect(analysis.output.summary).toContain("Mock development fixture");
     expect(analysis.output.seoSpyScore).toBeNull();
     expect(analysis.limitations.some(value => value.includes("MOCK DATA"))).toBe(true);

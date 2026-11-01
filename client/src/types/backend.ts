@@ -118,6 +118,7 @@ export interface LighthouseReport {
   warnings: string[]
 }
 export interface Dashboard {
+  assessment?: import('./assessment').SavedAssessment | null
   mode: DataMode
   notice: string
   business: Business

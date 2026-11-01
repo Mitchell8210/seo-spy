@@ -1,7 +1,7 @@
 import type { WordPressMuseEvidenceBundle } from "../../../modules/wordpress/wordpress-muse-evidence.js";
 import type { WordPressMuseOutput } from "../../../modules/wordpress/wordpress-muse.types.js";
 
-export const MUSE_DEVELOPMENT_FIXTURES_VERSION = "muse-development-fixtures-v1";
+export const MUSE_DEVELOPMENT_FIXTURES_VERSION = "muse-development-fixtures-v2";
 
 /** Local examples only. These are never provider results or live measurements. */
 export const museDevelopmentFixtures = {
@@ -32,7 +32,10 @@ export const museDevelopmentFixtures = {
 
 /** Bind fixed local response templates to real saved references without inventing findings. */
 export function buildMockWordPressMuseOutput(bundle: WordPressMuseEvidenceBundle): WordPressMuseOutput {
-  const sources = bundle.observations.filter(item => item.contentId !== null).slice(0, 3);
+  const eligible = bundle.observations.filter(item => item.contentId !== null);
+  const sources = eligible.slice(0, 3);
+  const media = eligible.find(item => item.provider === "wordpress" && item.resource === "media" && item.values.kind === "wordpress_content");
+  if (media && !sources.includes(media)) sources.splice(Math.min(sources.length, 2), sources.length >= 3 ? 1 : 0, media);
   const selected = sources.length ? sources : bundle.observations.slice(0, 1);
   if (!selected.length) throw new Error("Mock evidence requires an existing source reference.");
   const observations: WordPressMuseOutput["observations"] = selected.map((item, index) => {
@@ -52,16 +55,17 @@ export function buildMockWordPressMuseOutput(bundle: WordPressMuseEvidenceBundle
     return { id: `sample_${index}`, kind: "fact", text, evidenceIds: [item.evidenceId] };
   });
   const target = selected[0];
-  const recommendations: WordPressMuseOutput["recommendations"] = [{
-    id: "review_sample", observationIds: [observations[0].id], resource: target.resource,
-    targetContentId: target.contentId,
-    capabilityId: target.contentId === null ? null : `wordpress.${target.resource}.propose-update`,
-    recommendation: target.resource === "media" ? "Review the sampled image in context before proposing alternative text. Keep an empty alternative when it is decorative."
+  const targets = media && selected.includes(media) && target !== media ? [target, media] : [target];
+  const recommendations: WordPressMuseOutput["recommendations"] = targets.map((item, index) => ({
+    id: index === 0 ? "review_sample" : "review_media", observationIds: [observations[selected.indexOf(item)].id], resource: item.resource,
+    targetContentId: item.contentId,
+    capabilityId: item.contentId === null ? null : `wordpress.${item.resource}.propose-update`,
+    recommendation: item.resource === "media" ? "Review the sampled image in context before proposing alternative text. Keep an empty alternative when it is decorative."
       : "Compare the sampled stored fields with the public page and SEO-plugin templates before proposing any edit.",
     rationale: "Stored fields and a bounded sample do not independently establish the public result or a defect.",
     effort: "small", risk: "low", verificationSteps: ["Inspect the exact public page and source record independently.", "If an edit is warranted, review a separate exact proposal and verify stored and rendered values afterwards."],
-    manualFallback: "Review the existing WordPress record manually; this mock fixture authorizes no change.", evidenceIds: [target.evidenceId],
-  }];
+    manualFallback: "Review the existing WordPress record manually; this mock fixture authorizes no change.", evidenceIds: [item.evidenceId],
+  }));
   return {
     schemaVersion: "wordpress-muse-output-v1",
     summary: "Mock development fixture: review the sampled WordPress evidence. No real model call or automatic edit was made.",

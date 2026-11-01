@@ -13,5 +13,5 @@ import { WordPressMuseService } from "./wordpress-muse.service.js";
 import { WordPressMuseStore } from "./wordpress-muse.store.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
 
-@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule], controllers: [WordPressController], providers: [WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService], exports: [WordPressService, WordPressReportsService] })
+@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule], controllers: [WordPressController], providers: [WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService], exports: [WordPressService, WordPressReportsService, WordPressMuseService, WordPressOperatorGuard] })
 export class WordPressModule {}

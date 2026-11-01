@@ -54,3 +54,47 @@ test('excludes resolved opportunities and recommendations without inventing repl
   assert.deepEqual(view.path, [])
   assert.equal(view.remaining.length, 1)
 })
+
+function scoredFixture() {
+  const source = fixture()
+  source.social.report.auditId = 'facebook'
+  const metric = value => ({ value, maximum: 100, availability: value === null ? 'unavailable' : 'available', reasons: [] })
+  const assessment = { id: 'assessment', businessId: source.business.id, policyVersion: 'seo-spy-score-v1', policyHash: 'a'.repeat(64), profile: 'baseline-mobile-v1', cutoff: '2026-10-30T10:00:00Z',
+    sources: [{ provider: 'website', reportId: 'website', businessId: source.business.id }, { provider: 'facebook', reportId: 'facebook', businessId: source.business.id }],
+    scores: { website: metric(79), social: metric(null), consistency: metric(null), overall: metric(null) }, analysis: null }
+  return { ...source, dashboard: { business: source.business, assessment } }
+}
+
+test('fills existing gauges only with eligible backend policy scores for the displayed reports', () => {
+  const { business, dashboard, website, social } = scoredFixture()
+  let view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(view.websiteResults.overall.value, 79)
+  assert.equal(view.main.components[0].value, 79)
+  assert.equal(view.main.overall.value, null)
+  assert.equal(view.socialScore.value, null)
+  dashboard.assessment.scores.website.value = 0
+  view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(view.websiteResults.overall.value, 0, 'Measured zero remains a score.')
+  dashboard.assessment.scores.website.availability = 'unavailable'
+  assert.equal(mapDashboardAssessment(business.id, dashboard, website, social).websiteResults.overall.value, null)
+})
+
+test('never uses another business, report or unsupported policy to populate a gauge', () => {
+  for (const change of [assessment => { assessment.businessId = 'other' }, assessment => { assessment.sources[0].reportId = 'older' }, assessment => { assessment.policyVersion = 'unknown' }]) {
+    const { business, dashboard, website, social } = scoredFixture()
+    change(dashboard.assessment)
+    assert.equal(mapDashboardAssessment(business.id, dashboard, website, social).websiteResults.overall.value, null)
+  }
+})
+
+test('uses cited mock recommendations with an explicit mock label and leaves deterministic scores alone', () => {
+  const { business, dashboard, website, social } = scoredFixture()
+  website.results.findings[0].evidenceIds = ['evidence']
+  dashboard.assessment.analysis = { id: 'analysis', assessmentId: 'assessment', businessId: business.id, isMock: true, generationMode: 'mock', output: { recommendations: [{ id: 'mock-one', reportId: 'website', findingId: 'one', title: 'Context review', recommendation: 'Inspect the saved context first.', evidenceRefs: [{ reportId: 'website', evidenceId: 'evidence' }] }] } }
+  let view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.match(view.top.website[0].recommendation.explanation, /^Mock AI recommendation:/)
+  assert.equal(view.websiteResults.overall.value, 79)
+  dashboard.assessment.analysis.output.recommendations[0].evidenceRefs[0].evidenceId = 'unrelated'
+  view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(view.top.website[0].recommendation.id, 'one-action', 'Unresolved model citations fall back to the recorded recommendation.')
+})

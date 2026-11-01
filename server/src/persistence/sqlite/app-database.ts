@@ -81,7 +81,7 @@ export class AppDatabase implements OnApplicationShutdown {
       const database = new DatabaseSync(this.path, { enableForeignKeyConstraints: true, allowExtension: false });
       try {
         const version = database.prepare("PRAGMA user_version").get()?.user_version;
-        if (existing && version !== 1 && version !== 2) throw fail();
+        if (existing && version !== 1 && version !== 2 && version !== 3) throw fail();
         database.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;");
         if (!existing) {
           database.exec(`BEGIN IMMEDIATE;
@@ -116,7 +116,20 @@ export class AppDatabase implements OnApplicationShutdown {
             PRAGMA user_version=2;
             COMMIT;`);
         }
-        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2)").get()?.count !== 2 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 2) throw fail();
+        if (!existing || version === 1 || version === 2) {
+          database.exec(`BEGIN IMMEDIATE;
+            CREATE TABLE assessment_records (
+              kind TEXT NOT NULL CHECK(kind IN ('assessment','analysis','confirmed-facts','edit-origin')),
+              id TEXT NOT NULL, business_id TEXT NOT NULL REFERENCES businesses(id), created_at TEXT NOT NULL,
+              cache_key TEXT NOT NULL, data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL,
+              PRIMARY KEY(kind,id), UNIQUE(kind,business_id,cache_key)
+            );
+            CREATE INDEX assessment_records_business ON assessment_records(kind,business_id,created_at DESC,id);
+            INSERT INTO schema_migrations(version,applied_at) VALUES(3,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            PRAGMA user_version=3;
+            COMMIT;`);
+        }
+        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2,3)").get()?.count !== 3 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 3) throw fail();
         this.database = database;
         if (!memory) {
           const info = lstatSync(this.path);

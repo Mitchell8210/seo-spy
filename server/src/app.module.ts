@@ -9,6 +9,7 @@ import { HealthDto } from "./contracts/responses.dto.js";
 import { FacebookModule } from "./modules/facebook/facebook.module.js";
 import { WordPressModule } from "./modules/wordpress/wordpress.module.js";
 import { GoogleReportingModule } from "./modules/google/google.module.js";
+import { AssessmentsModule } from "./modules/assessments/assessments.module.js";
 
 @Controller("health")
 @ApiTags("Health")
@@ -54,6 +55,7 @@ class HealthController {
     FacebookModule,
     WordPressModule,
     GoogleReportingModule,
+    AssessmentsModule,
   ],
   controllers: [HealthController],
 })

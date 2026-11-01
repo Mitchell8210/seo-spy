@@ -4,6 +4,7 @@ import {
   HttpException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleDestroy,
   Optional,
@@ -20,6 +21,7 @@ import {
   type BusinessRepository,
 } from "../../persistence/repositories.js";
 import { FileReportStore } from "../../reports/file-report.store.js";
+import { AssessmentService } from "../assessments/assessment.service.js";
 import type { ReportFileReference } from "../../reports/report.types.js";
 import {
   FacebookError,
@@ -40,6 +42,7 @@ export interface FacebookReportProgress {
 /** Local operator workflow; Page authorization does not establish business ownership. */
 @Injectable()
 export class FacebookReportsService implements OnModuleDestroy {
+  private readonly logger = new Logger(FacebookReportsService.name);
   private readonly jobs = new Map<string, Promise<FacebookBrowserReport>>();
   private readonly owners = new Map<string, { sessionId: string | undefined; pageId: string }>();
   private readonly outcomes = new Map<string, { at: number; value: FacebookReportProgress["latest"] }>();
@@ -53,6 +56,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     private readonly graph: FacebookGraph,
     private readonly facebook: FacebookService,
     @Optional() @Inject(AUDIT_REPOSITORY) private readonly audits?: AuditRepository,
+    @Optional() private readonly assessments?: AssessmentService,
   ) {}
 
   async status(sessionId: string | undefined, businessId: string): Promise<FacebookReportProgress> {
@@ -210,6 +214,10 @@ export class FacebookReportsService implements OnModuleDestroy {
       const reference = await this.reports.write(audit, business);
       audit.report = reference;
       await this.audits?.save(audit);
+      if (["completed", "partial"].includes(audit.status)) {
+        try { await this.assessments?.create(businessId, { facebookReportId: audit.id }); }
+        catch { this.logger.warn("The Facebook report is saved, but its separate score snapshot could not be published. No provider retry was started."); }
+      }
       return { ...reference, status: audit.status, failure: audit.failure };
     } catch {
       audit.status = "failed";

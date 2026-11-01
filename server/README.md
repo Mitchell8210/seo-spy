@@ -1,5 +1,7 @@
 # SEO Spy server
 
+The user-approved [SEO Spy scoring policy v1](SCORING_POLICY.md) now calculates deterministic component/overall scores from pinned saved evidence, with exact arithmetic, strict missing-data rules and immutable SQLite ledgers. Existing dashboard gauges consume compatible eligible values. Explicit assessment Muse analysis is labeled and mocked; reads never generate AI. The operator media-alt workflow links a saved cited WordPress recommendation to an exact preview, then reuses separate hash approval/apply and verification routes. The proposed frontend review panel is recorded in [PLAN.md](PLAN.md) and explicitly deferred.
+
 SQLite is now the application database, replacing the PostgreSQL plan. `DATABASE_PATH=reports/seo-spy.sqlite` persists businesses, audits, timestamps, statuses, findings, suggestions and immutable audit/WordPress/Muse/action records. Existing JSON history is imported without deletion and retained as compatibility exports. The protected AI budget ledger stays separate and unchanged. See [database setup, migration, backup and interrupted-job recovery](DATABASE.md).
 
 The [WordPress connection module](WORDPRESS_MODULE.md) now provides local operator reads, approved existing-content updates and Rank Math evidence/audit APIs. Credentials remain server-only; business/site binding and an independent operator token are required. Writes and audit triggers default to disabled. No live site changes were made during implementation.
@@ -32,7 +34,7 @@ npm run dev
 
 The environment file is optional; defaults match `.env.example`. The server listens on `http://127.0.0.1:3001/api`. `HOST` is restricted to `127.0.0.1` because authentication is not implemented. Keep this API local.
 
-The server and client run independently. The dashboard investigation action uses this API while its result cards remain illustrative. The Social Media and Website pages read saved live reports. See the client integration notes for each page.
+The server and client run independently. Dashboard, Website and Social Media read saved live reports. Dashboard gauges use eligible approved-policy score snapshots; missing channel evidence remains unavailable. See the client integration notes for each page.
 
 Website report generation includes `results.evidenceSummaries`, versioned as `programmatic-evidence-v1`. This backend step produces short evidence text from the finding's own recorded check result (including actual measured values/units), instead of repeating shared Lighthouse metadata or image payloads. It preserves raw observations, finding/evidence references, timestamps and scores. The frontend displays this text directly; it does not maintain finding-specific summaries.
 

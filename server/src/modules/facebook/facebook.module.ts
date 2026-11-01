@@ -5,9 +5,10 @@ import { FacebookCredentialsStore } from "./facebook-credentials.store.js";
 import { FacebookReportsService } from "./facebook-reports.service.js";
 import { PersistenceModule } from "../../persistence/persistence.module.js";
 import { ReportsModule } from "../../reports/reports.module.js";
+import { AssessmentCoreModule } from "../assessments/assessment-core.module.js";
 
 @Module({
-  imports: [PersistenceModule, ReportsModule],
+  imports: [PersistenceModule, ReportsModule, AssessmentCoreModule],
   controllers: [FacebookController],
   providers: [
     FacebookGraph,

@@ -99,6 +99,15 @@ describe("demo API", () => {
     expect(Object.keys(spec.body.paths).sort()).toEqual(
       [
         "/api/health",
+        "/api/scoring-policy",
+        "/api/businesses/{businessId}/assessments",
+        "/api/businesses/{businessId}/assessments/latest",
+        "/api/businesses/{businessId}/assessments/{id}",
+        "/api/businesses/{businessId}/assessments/{id}/muse-analyses",
+        "/api/businesses/{businessId}/assessments/{id}/muse-analyses/{analysisId}",
+        "/api/businesses/{businessId}/scoring-facts",
+        "/api/wordpress/businesses/{businessId}/media-alt-previews",
+        "/api/wordpress/businesses/{businessId}/media-alt-previews/{proposalId}",
         "/api/businesses/{businessId}/google/ga4",
         "/api/businesses/{businessId}/google/search-console",
         "/api/ai/admin/status",

@@ -9,9 +9,10 @@ import {
   PageSpeedTransport,
 } from "../../integrations/lighthouse/pagespeed.service.js";
 import { ReportsModule } from "../../reports/reports.module.js";
+import { AssessmentCoreModule } from "../assessments/assessment-core.module.js";
 
 @Module({
-  imports: [PersistenceModule, ReportsModule, WebsiteCollectionModule],
+  imports: [PersistenceModule, ReportsModule, WebsiteCollectionModule, AssessmentCoreModule],
   controllers: [AuditsController],
   providers: [
     AuditsService,

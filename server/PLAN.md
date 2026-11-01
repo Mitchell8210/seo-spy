@@ -8,6 +8,15 @@ Last updated: October 31, 2026.
 
 ## Progress record
 
+### October 31, 2026 - Approved scoring and mocked recommendation/edit workflow
+
+- User approved the complete scoring draft: Overall 50/30/20, Website Lighthouse 50/25/15/10, confirmed Facebook profile/publishing goal and business consistency rubrics, strict missing-data/freshness/skew rules, rational arithmetic and final half-up rounding. Baseline excludes numeric Rank Math until its separate eligibility profile is defined. See [approved policy](SCORING_POLICY.md).
+- Implemented deterministic component calculations, saved-source adapters, bounded schema.org business observations, immutable SQLite schema-3 assessments/fact revisions/analysis/edit origins, current freshness overlays, operator creation and cost-free read contracts. Existing audit archives remain unchanged. Dashboard gauges accept compatible backend policy values; model prose cannot change scores.
+- Explicit mocked Muse recommendations cite minimized pinned Website/Facebook evidence and reuse an exact cache. The exposed assessment generation path blocks live requests. Added a cited WordPress media-alt preview bridge; existing exact-hash approval, writes-off gate, preconditions, replay/unknown locks and separate public verification remain required. Offline workflow checks cover these paths without external calls or edits.
+- **Deferred by the user:** compact frontend edit-review panel in the existing Fix with AI area (target/current/proposed alt text, expiry/status, Edit, Approve & Apply, Verify). Revisit this suggestion after the backend workflow; do not add controls without specific UI approval. Local browser operator authorization is also future work. This task focuses on the operator API workflow.
+- Real business confirmations and complete compatible social/comparison evidence are still required before Social/Consistency/Overall can become eligible. Do not relax missing-data rules to fill a gauge.
+- Verification: 44 backend suites passed (789 tests, one pre-existing skip), plus typecheck/lint/build, frontend lint/build, Dashboard/Website/Settings browser checks and actual saved-data rendering. Guzman Website is 80/100 (exact 79.6) from the existing Lighthouse run after its saved homepage redirect was bound explicitly. A separate read-only process replayed the persisted snapshot exactly. Actual mocked interpretation used zero tokens/provider requests; the AI ledger was byte-unchanged and no audit or site edit was started.
+
 ### October 31, 2026 - Direct Google reporting backend
 
 - Implemented modular read-only service-account authentication, bounded fixed-endpoint Google transport and validated GA4/Search Console reporting. GA4 batches independent 7/30-day sessions, active users and page views; Search Console supports separate site totals and at most 10 top queries for 7/30 days. Final-data lag, privacy limits and metric units remain explicit.
