@@ -135,6 +135,36 @@ function savedFacebookReport() {
   } };
 }
 
+// Planner-only saved Website contracts; no production/demo findings are injected.
+const plannerWebsiteAuditId = '00000000-0000-4000-8000-000000000042';
+const plannerWebsiteSeeds = [
+  { id:'image-alt', title:'Add helpful image descriptions', severity:'medium', change:'Review recorded image descriptions and describe informative images.' },
+  { id:'meta-description', title:'Clarify your search summary', severity:'low', change:'Review the saved homepage summary and describe your services clearly.' },
+  { id:'business-hours', title:'Review recorded business hours', severity:'critical', change:'Confirm the business hours recorded on the website.' },
+  { id:'contact-phone', title:'Review recorded contact information', severity:'medium', change:'Confirm the phone number recorded on the website.' },
+];
+const plannerExpectedTasks = [
+  ...plannerWebsiteSeeds.map(item => ({id:`website:${item.id}`,title:item.title})),
+  {id:'social:facebook-fixture-finding',title:'Confirm the Facebook contact number'},
+];
+function plannerWebsiteReport() {
+  const auditId = plannerWebsiteAuditId;
+  const generatedAt = '2026-10-29T16:49:21.881Z';
+  const savedFindings = plannerWebsiteSeeds.map(item => ({id:item.id,auditId,checkId:item.id,evidenceIds:[`evidence-${item.id}`],
+    title:item.title,severity:item.severity,source:'website',explanation:`The saved website report flags ${item.id}.`,status:'needs_review'}));
+  return {schemaVersion:'seo-spy.audit-report.v1',reportId:auditId,auditId,generatedAt,
+    business:{id:businessId,name:'Fixture Tax Accounting',website:'https://example.com/',createdAt:generatedAt},
+    audit:{...summary(auditId,{scope:'homepage',mode:'live'}),completedAt:generatedAt,counts:{findings:savedFindings.length,recommendations:savedFindings.length}},
+    results:{findings:savedFindings,
+      evidence:savedFindings.map(item=>({id:item.evidenceIds[0],auditId,checkId:item.checkId,mode:'live',sourceUrl:'https://example.com/',collectedAt:generatedAt,observed:{fixture:item.id}})),
+      recommendations:plannerWebsiteSeeds.map(item=>({id:`action-${item.id}`,auditId,findingId:item.id,title:item.title,
+        explanation:'Review the saved website evidence.',recommendedChange:item.change,status:'needs_review'}))}};
+}
+function plannerWebsiteSummaries(report) {
+  return {version:'programmatic-evidence-v1',auditId:report.auditId,checks:[],
+    findings:report.results.findings.map(item=>({id:item.id,evidenceIds:item.evidenceIds,text:item.explanation,sourceLabel:'Saved homepage fixture'}))};
+}
+
 async function serveFixture(req, res) {
   apiRequests++;
   // Saved reports remain readable when the investigation service is unavailable.
@@ -146,13 +176,36 @@ async function serveFixture(req, res) {
   if (!available) return reply(res, 503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Fixture backend unavailable. Please retry.', requestId: 'fixture-request' } });
   settleJobs();
   const route = new URL(req.url, 'http://fixture').pathname;
+  if (plannerMode && req.method === 'GET') {
+    const report = plannerWebsiteReport();
+    if (route === `/api/businesses/${businessId}/reports`) return reply(res,200,{businessId,reports:[{
+      reportId:report.reportId,auditId:report.auditId,businessId,scope:report.audit.scope,mode:'live',status:'completed',generatedAt:report.generatedAt,counts:report.audit.counts}]});
+    if (route === `/api/audits/${report.auditId}/report`) return reply(res,200,report);
+    if (route === `/api/audits/${report.auditId}/evidence-summary`) return reply(res,200,plannerWebsiteSummaries(report));
+    if (route === `/api/audits/${report.auditId}/website-analysis`) return reply(res,200,{version:'website-priority-v1',auditId:report.auditId,
+      findings:report.results.findings,recommendations:report.results.recommendations,
+      priorities:report.results.findings.map(item=>({findingId:item.id,ruleId:'fixture-rule',severity:item.severity,reason:'Saved fixture priority',evidenceIds:item.evidenceIds}))});
+  }
+
+  const overall = id => {
+    const audit = jobs.get(id)?.summary;
+    if (!audit || audit.mode !== 'live') return null;
+    return { id, businessId, audit: { ...audit, scoringVersion: 'overall-investigation-v1' },
+      websiteReportId: audit.status === 'completed' ? id : null, facebookReportId: audit.status === 'completed' ? 'fixture-facebook' : null,
+      assessmentId: audit.status === 'completed' ? 'fixture-assessment' : null };
+  };
+  if (route === '/api/facebook/investigations/status') {
+    statusRequests++;
+    return reply(res, 200, { businessId, active: activeId ? overall(activeId) : null, latest: activeId ? null : overall(latestId) });
+  }
   if (route === '/api/health') return reply(res, 200, { status: 'ok', service: 'fixture', mode: 'demo' });
   if (route.endsWith('/dashboard')) return reply(res, 200, dashboard());
-  if (req.method === 'POST' && route.endsWith('/audits')) {
+  if (req.method === 'POST' && (route.endsWith('/audits') || route === '/api/facebook/investigations')) {
     if (activeId) return reply(res, 409, { error: { code: 'AUDIT_ALREADY_ACTIVE', message: 'A fixture audit is already running.', requestId: 'fixture-request' } });
     let body = '';
     for await (const chunk of req) body += chunk;
-    const input = JSON.parse(body || '{}');
+    const input = route === '/api/facebook/investigations' ? { scope: 'lighthouse', strategy: 'mobile' } : JSON.parse(body || '{}');
+    if (route === '/api/facebook/investigations') assert.deepEqual(JSON.parse(body), { businessId });
     creationCount++;
     const id = `00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`;
     const audit = summary(id, { scope: input.scope, status: 'running', stage: input.scope === 'lighthouse' ? 'running_lighthouse' : 'collecting_evidence' });
@@ -168,7 +221,7 @@ async function serveFixture(req, res) {
       res.destroy();
       return;
     }
-    return reply(res, 202, { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
+    return reply(res, 202, route === '/api/facebook/investigations' ? overall(id) : { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
   }
   const match = /^\/api\/audits\/([^/]+)(?:\/(findings|recommendations|lighthouse))?$/.exec(route);
   if (match) {
@@ -299,8 +352,8 @@ async function assertUnifiedAssessment() {
 function assertDashboardRequests(requests) {
   assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must not fetch website report details; saved Facebook reports are allowed.');
   for (const request of requests.filter(request => request.method === 'POST')) {
-    assert.equal(new URL(request.url).pathname, `/api/businesses/${businessId}/audits`);
-    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { scope: 'lighthouse', strategy: 'mobile' });
+    assert.equal(new URL(request.url).pathname, '/api/facebook/investigations');
+    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { businessId });
   }
 }
 
@@ -339,7 +392,7 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(statusRequests, polls, 'Terminal status must stop polling.');
   };
   await submit('completed');
-  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\. Dashboard results below are still illustrative\./);
+  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\./);
   assert.match(await dashboardStatus(), /[a-f0-9-]{36}/i, 'Status must identify the backend audit.');
   pass('One mobile Lighthouse POST, duplicate prevention, stage progress, and unchanged mock results');
   if (liveMode) {
@@ -363,11 +416,12 @@ async function dashboardScenario(base, backendBase) {
     await waitFor(async () => await dashboardDisabled() === true, 'reload resumes active audit');
     assert.equal(creationCount, expected);
     pass('Reload resumes an active job without another POST');
-    await navigate(`${base}/website`);
-    await waitFor(() => evaluate('location.pathname === "/website"'), 'website navigation');
+    // Website now legitimately polls the same running audit; use a page without audit polling.
+    await navigate(`${base}/settings`);
+    await waitFor(() => evaluate('location.pathname === "/settings"'), 'settings navigation');
     await delay(500); const polls = statusRequests; await delay(3000);
     assert.equal(statusRequests, polls, 'Leaving dashboard cancels polling.');
-    pass('Leaving dashboard for website cancels polling');
+    pass('Leaving dashboard for settings cancels polling');
     // Finish the detached fixture before testing API recovery.
     if (activeId) { jobs.get(activeId).created = Date.now() - stageDelayMs - 1; settleJobs(); }
     available = false;
@@ -477,27 +531,31 @@ async function plannerScenario(base) {
   }
   await navigate(`${base}/recommendations`);
   await waitFor(async () => (await pageText()).includes('Confirm the Facebook contact number'), 'shared saved Facebook planner source');
+  await waitFor(() => evaluate(`document.querySelectorAll('article[data-task-id]').length === ${plannerExpectedTasks.length}`),'all saved channel findings');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('article[data-task-id]')).map(node=>({id:node.dataset.taskId,title:node.querySelector('h3').textContent})).sort((a,b)=>a.id.localeCompare(b.id))`),[...plannerExpectedTasks].sort((a,b)=>a.id.localeCompare(b.id)));
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id^="consistency:"]').length`),0,'No unsupported demo consistency tasks');
+
   assert.equal(await evaluate('document.querySelector("h1").textContent'),'Smart Planner');
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
   assert.doesNotMatch(await pageText(),/Pending Verification|How It Works|Google Calendar|Microsoft Outlook|Trello/);
   assert.equal(await evaluate(`document.querySelector('dialog[open]') === null`),true);
-  assert.equal(await kpi('Active Tasks'),'5'); assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Plan Completion (This Week)'),'0%');
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Plan Completion (This Week)'),'0%');
   assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false');
   assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0])).size`),5);
-  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Fix with AI:"]').length`),5);
-  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Manual Fix:"]').length`),5);
+  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Fix with AI:"]').length`),plannerExpectedTasks.length);
+  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Manual Fix:"]').length`),plannerExpectedTasks.length);
   pass('Smart Planner route, exact sidebar, six KPIs, shared sources, both fix actions, business-day defaults, and no prohibited sections');
   const businessDays = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()`);
   await dragTask('website:image-alt',businessDays[2],13);
   await dragTask('website:image-alt',businessDays[3],14);
   await dragTask('website:image-alt',businessDays[1],15,true);
-  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),'5');
+  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length));
   assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),1);
   pass('Direct recommendation drops assign day/time, calendar moves reuse the same task, active status stays unchanged, and drop highlighting clears');
   await clickText('Auto Plan (AI)');
-  await waitFor(() => evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === 5`),'automatic planning');
+  await waitFor(() => evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === ${plannerExpectedTasks.length}`),'automatic planning');
   await fixTask('website:image-alt','manual');
-  assert.equal(await kpi('Done'),'1'); assert.equal(await kpi('Plan Completion (This Week)'),'20%');
+  assert.equal(await kpi('Done'),'1'); assert.equal(await kpi('Plan Completion (This Week)'),`${Math.round(100 / plannerExpectedTasks.length)}%`);
   assert.ok((await evaluate(`document.querySelector('[data-kpi="Done"]').parentElement.querySelector('span').className`)).includes('text-blue-300'));
   assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').parentElement.querySelector('span').className`)).includes('text-indigo-300'));
   assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').closest('article').querySelector('.h-full').className`)).includes('bg-indigo-400'));
@@ -518,7 +576,7 @@ async function plannerScenario(base) {
   await setField('planner-priority','Urgent');
   await clickText('Add Task',"document.querySelector('dialog')");
   await waitFor(async () => (await pageText()).includes('Review local business notes'),'custom task created');
-  assert.equal(await kpi('Active Tasks'),'6');
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
   for (const [priority,color] of [['Urgent','red'],['Medium','amber'],['Low','emerald']]) {
     const badge = await evaluate(`(() => { const row = Array.from(document.querySelectorAll('[data-task-id]')).find(node => node.querySelector('div > span:last-child')?.textContent === '${priority}'); const badge = row.querySelector('div > span:first-child'); return {classes:badge.className,iconColor:getComputedStyle(badge.querySelector('svg')).color,badgeColor:getComputedStyle(badge).color}; })()`);
     for (const token of [`border-${color}-400/40`,`bg-${color}-400/15`,`text-${color}-300`]) assert.ok(badge.classes.includes(token),`${priority} badge uses ${token}`);
@@ -592,7 +650,7 @@ async function plannerScenario(base) {
   await monthDrop('website:image-alt',weekend);
   await monthDrop('website:image-alt',businessDays[2],true);
   await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),'6');
+  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
   await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="website:image-alt"]').focus()`);
   await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'monthly keyboard editing');
   assert.equal(await evaluate(`document.getElementById('planner-day').value`),businessDays[2]);
@@ -699,14 +757,14 @@ async function plannerScenario(base) {
   // Corrupt only this planner entry; unrelated storage must survive.
   await evaluate(`localStorage.setItem('planner-test-unrelated','keep'); localStorage.setItem(${JSON.stringify(storageKey)},'{invalid json')`);
   await reloadPlanner(); await awaitSource();
-  assert.equal(await kpi('Active Tasks'),'5'); assert.equal(await kpi('Done'),'0');
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0');
   assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),0);
   assert.equal(await evaluate(`localStorage.getItem('planner-test-unrelated')`),'keep');
   const storageFailureScript = await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('Storage blocked','SecurityError')}})`});
   await reloadPlanner(); await awaitSource();
   await dragTask('website:image-alt',businessDays[2],10);
   await clickText('Auto Plan (AI)');
-  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),5);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),plannerExpectedTasks.length);
   await cdp.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:storageFailureScript.identifier});
   pass('Malformed planner storage resets safely without touching other keys; denied storage leaves scheduling and Auto Plan usable in memory');
   assert.equal(browserRequests.slice(requestStart).filter(request=>request.method==='POST').length,0,'Planner actions must not write externally or start provider scans');

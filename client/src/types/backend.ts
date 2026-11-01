@@ -30,11 +30,25 @@ export interface AuditSummary {
   completedAt: string | null
   warnings: string[]
   failure: AuditFailure | null
-  scoringVersion: 'demo-v1' | 'homepage-v1' | 'lighthouse-v1'
+  scoringVersion: 'demo-v1' | 'homepage-v1' | 'lighthouse-v1' | 'overall-investigation-v1'
   counts: { findings: number; recommendations: number }
 }
 
 export interface CreatedAudit extends AuditSummary { statusUrl: string }
+
+export interface OverallInvestigation {
+  id: string
+  businessId: string
+  audit: AuditSummary
+  websiteReportId: string | null
+  facebookReportId: string | null
+  assessmentId: string | null
+}
+export interface OverallInvestigationStatus {
+  businessId: string
+  active: OverallInvestigation | null
+  latest: OverallInvestigation | null
+}
 
 export interface Business { id: string; name: string; website: string; createdAt: string }
 export interface Connection {
@@ -118,6 +132,7 @@ export interface LighthouseReport {
   warnings: string[]
 }
 export interface Dashboard {
+  assessment?: import('./assessment').SavedAssessment | null
   mode: DataMode
   notice: string
   business: Business

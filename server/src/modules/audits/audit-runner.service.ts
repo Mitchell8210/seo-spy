@@ -19,6 +19,7 @@ import type { Audit, AuditStage } from "../../contracts/domain.js";
 import { FileReportStore } from "../../reports/file-report.store.js";
 import { ReportStorageError } from "../../reports/report.types.js";
 import { createDemoResults } from "../../fixtures/demo.js";
+import { AssessmentService } from "../assessments/assessment.service.js";
 import {
   AUDIT_REPOSITORY,
   BUSINESS_REPOSITORY,
@@ -41,6 +42,7 @@ export class AuditRunner implements OnModuleDestroy {
     private readonly reports: FileReportStore,
     @Inject(BUSINESS_REPOSITORY)
     private readonly businesses: BusinessRepository,
+    private readonly assessments: AssessmentService,
   ) {}
 
   assertAcceptingWork() {
@@ -204,6 +206,12 @@ export class AuditRunner implements OnModuleDestroy {
       );
     // Do not publish a successful terminal state until its durable snapshot exists.
     audit.report = await this.reports.write(audit, business);
+    if (audit.mode === "live" && ["homepage", "lighthouse"].includes(audit.scope) && ["completed", "partial"].includes(audit.status)) {
+      try { await this.assessments.create(audit.businessId, { websiteReportId: audit.id, profile: audit.strategy === "desktop" ? "baseline-desktop-v1" : "baseline-mobile-v1" }); }
+      catch { this.logger.warn("The audit is saved, but a separate score snapshot could not be published. No provider retry was started."); }
+    }
+    // Overall orchestration may assess this report once terminal status is visible.
+    // Finish this publication first so an older per-channel snapshot cannot supersede it.
     await this.audits.save(audit);
   }
 

@@ -76,3 +76,50 @@ const weekendsOff = reconcilePlannerState(hiddenWeekend,[],false);
 assert.equal(weekendsOff.edits['social:hidden'].schedule,null,'Disabling weekends unschedules stored assignments even while their source is unavailable');
 assert.equal(writePlannerState(business,weekendsOff,storage),true);
 assert.equal(readPlannerState(business,storage).useWeekends,false);
+
+// Saved Website snapshots are legitimate source tasks after the saved-report integration.
+for (const id of ['website:image-alt','social:report-finding','consistency:reported-check']) {
+ for (const mode of ['demo','saved']) {
+  const completedTask = {...task(id),mode,status:'Done',schedule:{day:'2026-11-04',hour:10}};
+  const roundTrip = {edits:{[id]:{status:'Done',schedule:completedTask.schedule}},completed:{[id]:completedTask},custom:[customTask],useWeekends:false};
+  assert.equal(writePlannerState(business,roundTrip,storage),true,`${id} accepts ${mode}`);
+  assert.deepEqual(readPlannerState(business,storage),roundTrip,`${id} restores ${mode}, Done, schedule, and custom tasks`);
+ }
+}
+for (const mode of ['unknown','live','custom','__proto__','toString',null,42,['saved']]) {
+ const snapshot = {...task('website:image-alt'),mode,status:'Done'};
+ const invalid = {edits:{},completed:{[snapshot.id]:snapshot},custom:[],useWeekends:false};
+ assert.equal(writePlannerState(business,invalid,storage),false,'Invalid or custom modes cannot enter source history');
+ entries.set(key,JSON.stringify({version:1,businessId:business,...invalid}));
+ assert.deepEqual(readPlannerState(business,storage),emptyPlannerState(),'Invalid source modes safely reset on read');
+}
+for (const mode of ['unknown','demo','saved']) {
+ const invalid = {...persisted,custom:[{...customTask,mode}]};
+ assert.equal(writePlannerState(business,invalid,storage),false,'Custom tasks must retain custom mode');
+ entries.set(key,JSON.stringify({version:1,businessId:business,...invalid}));
+ assert.deepEqual(readPlannerState(business,storage),emptyPlannerState());
+}
+console.log('PASS: saved Website completion round-trip, typed source modes, custom-only task modes, and rejection of unknown/malformed modes on read/write');
+
+const websiteSaved = {...task('website:image-alt'),mode:'saved'};
+const websiteChoices = {edits:{[websiteSaved.id]:{schedule:{day:'2026-11-04',hour:10}},'social:waiting':{schedule:{day:'2026-11-05',hour:11}}},completed:{},custom:[customTask],useWeekends:false};
+assert.equal(writePlannerState(business,websiteChoices,storage),true);
+const restoredWebsite = readPlannerState(business,storage);
+for (const phase of ['loading','error','unavailable']) {
+ const waiting = reconcilePlannerState(restoredWebsite,[],false,false);
+ assert.deepEqual(waiting.edits[websiteSaved.id].schedule,websiteChoices.edits[websiteSaved.id].schedule,`${phase} keeps Website assignment`);
+ assert.deepEqual(waiting.edits['social:waiting'],websiteChoices.edits['social:waiting'],'Social loading protection unchanged');
+ assert.deepEqual(waiting.custom,[customTask],'Custom tasks independent of source readiness');
+ assert.equal(writePlannerState(business,waiting,storage),true);
+ assert.deepEqual(readPlannerState(business,storage).edits[websiteSaved.id],websiteChoices.edits[websiteSaved.id]);
+}
+const websiteLoaded = reconcilePlannerState(restoredWebsite,[websiteSaved],false,true);
+assert.deepEqual(websiteLoaded.edits[websiteSaved.id].schedule,websiteChoices.edits[websiteSaved.id].schedule,'Successful read retains matching assignment');
+const websiteGone = reconcilePlannerState(websiteLoaded,[],false,true);
+assert.equal(websiteGone.edits[websiteSaved.id],undefined,'Authoritative absent finding prunes stale active state');
+assert.deepEqual(websiteGone.edits['social:waiting'],websiteChoices.edits['social:waiting']);
+assert.deepEqual(websiteGone.custom,[customTask]);
+const pendingCompletion = {...websiteChoices,edits:{[websiteSaved.id]:{status:'Done',schedule:websiteChoices.edits[websiteSaved.id].schedule}},completed:{[websiteSaved.id]:{...websiteSaved,status:'Done'}}};
+assert.deepEqual(reconcilePlannerState(pendingCompletion,[],true,false),pendingCompletion,'Pending Website read preserves status, schedule, and completion snapshot');
+assert.deepEqual(reconcilePlannerState(pendingCompletion,[],true,true),pendingCompletion,'Completed history remains after authoritative source absence');
+console.log('PASS: Website loading/error/unavailable protects persisted schedule/status/history, successful reads retain matches and prune stale active state, Social/custom behavior unchanged');

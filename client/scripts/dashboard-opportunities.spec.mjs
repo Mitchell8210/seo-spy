@@ -28,7 +28,7 @@ assert.equal(result.remaining.length, 1);
 assert.equal(result.path.length, 0, 'No invented recommendation when the source has none.');
 result = select([issue('a'), issue('b'), issue('c'), { ...issue('action-done', 'website', 'Low'), recommendation: { ...issue('x').recommendation, status: 'resolved' } }]);
 assert.equal(result.path.length, 0, 'Resolved actions are not recommended again.');
-assert.equal(destination('website', 'business'), '/website');
+assert.equal(destination('website', 'business'), '/website?businessId=business');
 assert.equal(destination('social', 'business'), '/social-media?businessId=business');
 assert.equal(destination('consistency', 'business'), '/dashboard#consistency-details');
 assert.deepEqual(select([]).remaining, []);

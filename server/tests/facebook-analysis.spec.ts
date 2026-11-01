@@ -90,6 +90,31 @@ function report(): FacebookReport {
 }
 
 describe("Derived Facebook report analysis", () => {
+  it("generates concise readable evidence for every review without dumping raw observations", () => {
+    const source = report();
+    const original = structuredClone(source);
+    const observations = evidence.map(item => ({ ...item, observed: { raw: '{"privateDebug":"do not display"}' } }));
+    const analysis = analyzeFacebook(source, auditId, observations);
+    expect(analysis.evidenceSummaries.version).toBe("programmatic-evidence-v1");
+    expect(analysis.evidenceSummaries.auditId).toBe(auditId);
+    expect(analysis.evidenceSummaries.findings).toHaveLength(analysis.findings.length);
+    for (const summary of analysis.evidenceSummaries.findings) {
+      const finding = analysis.findings.find(item => item.id === summary.id)!;
+      expect(summary.evidenceIds).toEqual(finding.evidenceIds);
+      expect(summary.text.length).toBeLessThanOrEqual(280);
+      expect(summary.text).not.toMatch(/privateDebug|facebook:|123_456/);
+      expect(summary.sourceLabel).toContain(at);
+    }
+    const text = analysis.evidenceSummaries.findings.map(item => item.text).join(" ");
+    expect(text).toContain("business hours");
+    expect(text).toContain("does not establish whether it is absent");
+    expect(text).toContain("70 days before collection");
+    expect(text).toContain("limited sample");
+    expect(text).toContain("(702) 340-6758 and (725) 340-6758");
+    expect(text).toContain("different service lines");
+    expect(source).toEqual(original);
+    expect(observations[0]!.observed.raw).toContain("privateDebug");
+  });
   it("identifies old collected posts even when history is truncated and creates stable evidence-linked reviews", () => {
     const source = report();
     const original = JSON.stringify(source);
@@ -126,7 +151,7 @@ describe("Derived Facebook report analysis", () => {
     expect(phone?.evidenceIds).toEqual(["evidence-0", "evidence-1"]);
     expect(phone?.explanation).toContain("(702) 340-6758");
     expect(phone?.explanation).toContain("(725) 340-6758");
-    expect(phone?.explanation).toContain("123_456 (2026-08-19)");
+    expect(phone?.explanation).toContain("a post dated 2026-08-19");
     expect(phone?.explanation).toContain(
       "does not determine which number is correct",
     );

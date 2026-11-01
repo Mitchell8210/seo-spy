@@ -18,6 +18,8 @@ import {
   type FacebookCredential,
 } from "../src/modules/facebook/facebook-credentials.store.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
+import { FacebookReportsService } from "../src/modules/facebook/facebook-reports.service.js";
+import { OverallInvestigationService } from "../src/modules/facebook/overall-investigation.service.js";
 
 const ORIGIN = "http://localhost:3001";
 const USER_TOKEN = "private-user-token";
@@ -399,6 +401,33 @@ describe("Facebook local HTTP boundary", () => {
   const graph = graphMock();
   let store: ReturnType<typeof credentialMock>;
 
+  it("protects explicit overall start with the existing origin/session boundary and validated business body", async () => {
+    const session = "a".repeat(64);
+    const start = jest.spyOn(app.get(OverallInvestigationService), "start").mockResolvedValue({ id: "overall", businessId: "demo-guzman" } as Awaited<ReturnType<OverallInvestigationService["start"]>>);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", "http://localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${session}`).send({ businessId: "demo-guzman" }).expect(202);
+    expect(start).toHaveBeenCalledWith(session, "demo-guzman");
+    start.mockClear();
+    for (const origin of ["http://attacker.invalid", "null"]) await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", origin).send({ businessId: "demo-guzman" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").send({ businessId: "demo-guzman" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", "http://localhost:5173").send({ businessId: "demo-guzman", pageId: "unapproved" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:3001").set("Origin", ORIGIN).type("form").send({ businessId: "demo-guzman" }).expect(400);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("keeps overall status local, authenticated, no-store and protected against foreign origins", async () => {
+    const response = await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").expect(400);
+    expect(response.body.error.code).toBe("FACEBOOK_RECONNECT_REQUIRED");
+    expect(graph.request).not.toHaveBeenCalled();
+    const status = jest.spyOn(app.get(OverallInvestigationService), "status").mockResolvedValue({ businessId: "demo-guzman", active: null, latest: null });
+    const saved = await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").expect(200);
+    expect(saved.headers["cache-control"]).toBe("no-store");
+    expect(saved.body).toEqual({ businessId: "demo-guzman", active: null, latest: null });
+    status.mockClear();
+    await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").set("Origin", "http://attacker.invalid").expect(400);
+    expect(status).not.toHaveBeenCalled(); expect(graph.request).not.toHaveBeenCalled();
+  });
+
   beforeEach(async () => {
     store = credentialMock();
     graph.request.mockReset();
@@ -487,6 +516,37 @@ describe("Facebook local HTTP boundary", () => {
       .expect(400);
   });
 
+  it("protects explicit metric probes with confirmation, backend Host, session and selected Page access", async () => {
+    const route = "/api/facebook/connection-metrics";
+    await request(app.getHttpServer()).get(route).query({ pageId: "99" }).set("Host", "localhost:3001").expect(400);
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" }).set("Host", "localhost:5173").expect(400);
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" }).set("Host", "localhost:3001").expect(400);
+    expect(graph.request).not.toHaveBeenCalled();
+    const sessionId = "a".repeat(64);
+    await store.save(sessionId, { token: USER_TOKEN, expiresAt: Date.now() + 86400000, createdAt: new Date().toISOString() });
+    graph.request.mockImplementation(async path => {
+      if (path === "me/permissions") return permissions();
+      if (path === "me/accounts") return { data: [{ id: "88", access_token: PAGE_TOKEN }] };
+      throw new Error("Unselected Page must not be probed");
+    });
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" })
+      .set("Host", "localhost:3001").set("Cookie", `seo_spy_facebook_test=${sessionId}`).expect(400);
+    expect(graph.request).toHaveBeenCalledTimes(2);
+    graph.request.mockClear();
+    graph.request.mockImplementation(async (path, token) => {
+      if (path === "me/permissions") { expect(token).toBe(USER_TOKEN); return permissions(); }
+      if (path === "me/accounts") { expect(token).toBe(USER_TOKEN); return { data: [{ id: "99", access_token: PAGE_TOKEN }] }; }
+      expect(token).toBe(PAGE_TOKEN);
+      return { data: [] };
+    });
+    const result = await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" })
+      .set("Host", "localhost:3001").set("Cookie", `seo_spy_facebook_test=${sessionId}`).expect(200);
+    expect(result.body).toMatchObject({ pageId: "99", readOnly: true, writesEnabled: false });
+    expect(result.body.probes.length).toBeGreaterThan(10);
+    expect(result.text).not.toContain(USER_TOKEN);
+    expect(result.text).not.toContain(PAGE_TOKEN);
+  });
+
   it("rejects an untrusted Host and cross-origin or originless mutations", async () => {
     const home = await request(app.getHttpServer())
       .get("/api/facebook")
@@ -551,6 +611,63 @@ describe("Facebook local HTTP boundary", () => {
     expect(status.headers["content-security-policy"]).not.toContain(
       "facebook.com",
     );
+    expect(graph.request).not.toHaveBeenCalled();
+  });
+
+  it("permits JSON reports only through the configured frontend Host and Origin while keeping OAuth backend-only", async () => {
+    const id = "c".repeat(64);
+    const create = jest.spyOn(app.get(FacebookReportsService), "create").mockResolvedValue({
+      reportId: "saved", auditId: "saved", generatedAt: new Date().toISOString(), fileName: "saved.json",
+      downloadUrl: "/api/audits/saved/report", status: "completed", failure: null,
+    });
+    try {
+      const response = await request(app.getHttpServer()).post("/api/facebook/reports")
+        .set("Host", "localhost:5173").set("Origin", "http://localhost:5173")
+        .set("Cookie", `seo_spy_facebook_test=${id}`).send({ businessId: "demo-guzman", pageId: "99" }).expect(201);
+      expect(response.body.status).toBe("completed");
+      expect(create).toHaveBeenCalledWith(id, "demo-guzman", "99");
+      for (const [host, origin] of [
+        ["localhost:5173", "https://attacker.invalid"], ["localhost:5174", "http://localhost:5174"],
+        ["localhost:3001", "http://localhost:5173"], ["127.0.0.1:5173", "http://127.0.0.1:5173"],
+        ["localhost:5173", "null"],
+      ]) {
+        await request(app.getHttpServer()).post("/api/facebook/reports")
+          .set("Host", host!).set("Origin", origin!).send({ businessId: "demo-guzman", pageId: "99" }).expect(400);
+      }
+      await request(app.getHttpServer()).post("/api/facebook/connect")
+        .set("Host", "localhost:5173").set("Origin", "http://localhost:5173").expect(400);
+      await request(app.getHttpServer()).post("/api/facebook/reports")
+        .set("Host", "localhost:5173").set("Origin", "http://localhost:5173")
+        .type("form").send({ businessId: "demo-guzman", pageId: "99" }).expect(400);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(graph.request).not.toHaveBeenCalled();
+    } finally { create.mockRestore(); }
+    await request(app.getHttpServer()).post("/api/facebook/reports")
+      .set("Host", "localhost:5173").set("Origin", "http://localhost:5173")
+      .send({ businessId: "demo-guzman", pageId: "99" }).expect(400);
+    expect(graph.request).not.toHaveBeenCalled();
+  });
+
+  it("reads session-scoped report progress through the frontend proxy without provider calls", async () => {
+    const id = "d".repeat(64);
+    await store.save(id, { token: "private-browser-token", expiresAt: Date.now() + 60000, createdAt: new Date().toISOString() });
+    const response = await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(200);
+    expect(response.body).toEqual({ businessId: "demo-guzman", active: null, latest: null });
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.text).not.toContain("private-browser-token");
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173").expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173")
+      .set("Origin", "https://attacker.invalid").set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "demo-guzman" }).set("Host", "localhost:5174")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    await request(app.getHttpServer()).get("/api/facebook/reports/status")
+      .query({ businessId: "../invalid" }).set("Host", "localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
     expect(graph.request).not.toHaveBeenCalled();
   });
 

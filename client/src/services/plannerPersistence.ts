@@ -8,6 +8,7 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
 const sourceId = (id: string) => /^(website|social|consistency):.+/.test(id)
 const customId = (id: string) => /^custom:[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id)
 const status = (value: unknown) => value === 'Needs Action' || value === 'Done'
+const taskModes: Record<PlannerTask['mode'], 'source' | 'custom'> = { demo: 'source', saved: 'source', custom: 'custom' }
 function schedule(value: unknown): value is TaskSchedule {
   if (!record(value) || typeof value.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.day)) return false
   const date = new Date(`${value.day}T12:00:00`)
@@ -20,7 +21,9 @@ function task(value: unknown, custom: boolean): value is PlannerTask {
     && typeof value.explanation === 'string' && typeof value.guidance === 'string' && typeof value.source === 'string'
     && typeof value.priority === 'string' && ['Urgent', 'Medium', 'Low'].includes(value.priority)
     && typeof value.category === 'string' && ['Admin', 'Content', 'Social', 'Search', 'Review'].includes(value.category)
-    && status(value.status) && (custom ? value.mode === 'custom' : value.status === 'Done' && value.mode === (value.id.startsWith('social:') ? 'saved' : 'demo'))
+    && status(value.status) && (custom || value.status === 'Done')
+    && typeof value.mode === 'string' && Object.hasOwn(taskModes, value.mode)
+    && taskModes[value.mode as PlannerTask['mode']] === (custom ? 'custom' : 'source')
     && (value.schedule === undefined || schedule(value.schedule)) && (value.notes === undefined || typeof value.notes === 'string')
     && (value.destination === undefined || typeof value.destination === 'string' && value.destination.startsWith('/') && !value.destination.startsWith('//'))
 }
@@ -74,8 +77,8 @@ export function writePlannerState(businessId: string, state: PlannerLocalState, 
     return true
   } catch { return false }
 }
-// Never treat a pending/failed Facebook read as evidence that saved findings disappeared.
-export function reconcilePlannerState(state: PlannerLocalState, source: PlannerTask[], facebookReady: boolean): PlannerLocalState {
+// Pending/failed source reads are not evidence that saved findings disappeared.
+export function reconcilePlannerState(state: PlannerLocalState, source: PlannerTask[], facebookReady: boolean, websiteReady = true): PlannerLocalState {
   const active = new Set(source.map(item => item.id))
   const custom = new Set(state.custom.map(item => item.id))
   let changed = false
@@ -91,6 +94,7 @@ export function reconcilePlannerState(state: PlannerLocalState, source: PlannerT
   }
   for (const id of new Set([...Object.keys(edits), ...Object.keys(completed)])) {
     if (active.has(id) || custom.has(id) || id.startsWith('social:') && !facebookReady) continue
+    if (id.startsWith('website:') && !websiteReady) continue
     const done = (edits[id]?.status ?? completed[id]?.status) === 'Done'
     if (done && completed[id]) continue // Preserve completed history, not an active source recommendation.
     delete edits[id]; delete completed[id]; changed = true

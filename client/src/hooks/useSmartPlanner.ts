@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { mockBusiness } from '../data/mockBusiness'
 import { readPlannerState, reconcilePlannerState, writePlannerState } from '../services/plannerPersistence'
 import { useDashboardAssessment } from './useDashboardAssessment'
@@ -6,26 +7,29 @@ import { autoSchedule, isWeekend, reconcileRescan, tasksFromIssues, visibleTasks
 import type { PlannerLocalState, PlannerTask, TaskSchedule } from '../types/planner'
 
 export function useSmartPlanner() {
-  const assessment = useDashboardAssessment()
+  const [search] = useSearchParams()
+  const businessId = search.get('businessId')?.trim() || mockBusiness.id
+  const assessment = useDashboardAssessment(businessId)
   const source = tasksFromIssues([...Object.values(assessment.top).flat(), ...assessment.remaining])
-  const [local, setLocal] = useState<PlannerLocalState>(() => readPlannerState(mockBusiness.id))
+  const [local, setLocal] = useState<PlannerLocalState>(() => readPlannerState(businessId))
   const [message, setMessage] = useState('')
   const scanning = useRef(false)
+  const websiteReady = !assessment.website.loading && !assessment.website.error && Boolean(assessment.website.dashboard || assessment.website.report)
   const facebookReady = !assessment.social.loading && !assessment.social.error && Boolean(assessment.social.data?.report)
-  const reconciled = reconcilePlannerState(local, source, facebookReady)
+  const reconciled = reconcilePlannerState(local, source, facebookReady, websiteReady)
   const tasks = visibleTasks(source, reconciled)
-  useEffect(() => { writePlannerState(mockBusiness.id, reconciled) }, [reconciled])
+  useEffect(() => { writePlannerState(businessId, reconciled) }, [businessId, reconciled])
   useEffect(() => {
     if ((!scanning.current || assessment.social.loading) && reconciled === local) return
     // Source updates and planner reconciliation happen together after the read settles.
     const timer = setTimeout(() => {
       const rescanFinished = scanning.current && !assessment.social.loading
       if (rescanFinished) scanning.current = false
-      setLocal(current => reconcilePlannerState(rescanFinished ? reconcileRescan(current, source, !assessment.social.error) : current, source, facebookReady))
+      setLocal(current => reconcilePlannerState(rescanFinished ? reconcileRescan(current, source, !assessment.social.error) : current, source, facebookReady, websiteReady))
       if (rescanFinished) setMessage(assessment.social.error ? 'Saved Facebook findings could not be refreshed. Their completion state was kept. Demo findings were reviewed locally.' : 'Current saved findings refreshed. Completed tasks still reported as active are back in Needs Action. Website and consistency remain demo data; no provider scan was started.')
     }, 0)
     return () => clearTimeout(timer)
-  }, [assessment.social.loading, assessment.social.error, source, facebookReady, reconciled, local])
+  }, [assessment.social.loading, assessment.social.error, source, facebookReady, websiteReady, reconciled, local])
 
   function complete(task: PlannerTask) {
     setLocal(current => ({ ...current, edits: { ...current.edits, [task.id]: { ...current.edits[task.id], status: 'Done' } },

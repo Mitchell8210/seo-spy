@@ -184,6 +184,8 @@ export class RecommendationsResponseDto {
 }
 
 export class DashboardDto {
+  @ApiProperty({ type: "object", nullable: true, additionalProperties: true, description: "Latest saved seo-spy-score-v1 assessment read model: id, policy hash, profile, cutoff, readAt, pinned sources, component scores/eligibility/ledger and limitations. Null before an explicit assessment or completed live audit. Original audit scores/archives are unchanged. No collection or AI on reads." })
+  assessment!: object | null;
   @ApiProperty({
     type: () => LighthouseReportDto,
     nullable: true,
