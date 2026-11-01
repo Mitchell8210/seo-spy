@@ -13,6 +13,9 @@ Decision: SQLite is SEO Spy's application database, replacing the earlier Postgr
 | `audits` | Audit IDs/business/scope, queued/running/terminal status, stage, UTC timestamps, revision, report reference and full results |
 | `findings`, `suggestions` | Business/audit-linked findings and recommendations, statuses, timestamps and content |
 | `artifacts` | Immutable audit/WordPress/Muse reports and WordPress proposal/start/outcome/verification receipts, with business/date indexes and payload checksums |
+| `google_reporting_cache` | Mutable business/provider-scoped Google response envelopes, expiry/update times and payload checksums; no credentials or access tokens |
+
+Schema version 2 adds `google_reporting_cache` through an atomic v1-to-v2 migration, preserving existing rows and migration history. This mutable provider cache is separate from immutable report/action artifacts and the protected AI ledger. Successes and empty results expire after the configured normal TTL; failures use a shorter TTL and can retain prior data with its original date. Cache keys include business, provider, asset, query/window and authorization identity. Missing/corrupt cache storage fails closed; there is no automatic reset or cleanup. See [Google reporting](GOOGLE_REPORTING.md).
 
 Structured fields used for history/status lookup are indexed relational columns. Versioned provider/evidence/report bodies remain JSON payloads within SQLite so existing contracts and original observations survive without reshaping their meaning. Suggestions are also normalized for future queries. Viewing a record never runs collection or a model call.
 

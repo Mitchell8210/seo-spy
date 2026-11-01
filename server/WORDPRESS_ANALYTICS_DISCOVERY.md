@@ -1,5 +1,7 @@
 # WordPress analytics availability
 
+Later October 31 update: the user authorized a separate direct Google service-account integration. Both Google APIs now pass live read checks through the backend, independently of the Site Kit user authorization described below. See [Google reporting](GOOGLE_REPORTING.md). The historical Site Kit failures remain accurate; no Site Kit reconnect or WordPress setup change was needed.
+
 Checked October 31, 2026 UTC against the registered `demo-guzman` installation at `https://guzmantaxaccounting.com`. Used existing server-only application-password credentials and the protected Node WordPress client. All requests were GET; no tracking configuration, Google connection, content, audit, sync or import was changed. Writes remained disabled. No frontend or API contract changes were made.
 
 ## Confirmed sources

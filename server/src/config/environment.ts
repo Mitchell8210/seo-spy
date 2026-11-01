@@ -20,6 +20,21 @@ const environmentSchema = z.object({
     .default(120000),
   REPORTS_DIR: z.string().trim().min(1).max(4096).default("reports/audits"),
   DATABASE_PATH: z.string().trim().min(1).max(4096).default("reports/seo-spy.sqlite"),
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().trim().max(4096).default(""),
+  GA4_PROPERTY_ID: z.string().regex(/^(?:[1-9]\d{0,19})?$/).default(""),
+  GSC_SITE_URL: z.string().max(2048).refine(value => {
+    if (!value) return true;
+    if (/^sc-domain:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(value)) return true;
+    try { const site = new URL(value); return ["http:", "https:"].includes(site.protocol) && !site.username && !site.password && !site.port && !site.search && !site.hash; } catch { return false; }
+  }).default(""),
+  GOOGLE_BUSINESS_ID: z.string().regex(/^[a-zA-Z0-9_-]*$/).max(128).default(""),
+  GOOGLE_OPERATOR_KEY: z.string().refine(value => value === "" || value.length >= 32).max(256).default(""),
+  GOOGLE_FRONTEND_ORIGIN: z.string().refine(value => {
+    try { const origin = new URL(value); return origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname) && origin.origin === value; } catch { return false; }
+  }).default("http://localhost:5173"),
+  GOOGLE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(15000),
+  GOOGLE_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
+  GOOGLE_ERROR_CACHE_TTL_SECONDS: z.coerce.number().int().min(30).max(300).default(60),
   WORDPRESS_BUSINESS_ID: z.string().regex(/^[a-zA-Z0-9_-]*$/).max(128).default(""),
   WORDPRESS_SITE_URL: z.string().refine(value => {
     if (!value) return true;

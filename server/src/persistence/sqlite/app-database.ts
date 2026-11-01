@@ -81,7 +81,7 @@ export class AppDatabase implements OnApplicationShutdown {
       const database = new DatabaseSync(this.path, { enableForeignKeyConstraints: true, allowExtension: false });
       try {
         const version = database.prepare("PRAGMA user_version").get()?.user_version;
-        if (existing && version !== 1) throw fail();
+        if (existing && version !== 1 && version !== 2) throw fail();
         database.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;");
         if (!existing) {
           database.exec(`BEGIN IMMEDIATE;
@@ -100,7 +100,23 @@ export class AppDatabase implements OnApplicationShutdown {
             PRAGMA user_version=1;
             COMMIT;`);
         }
-        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version=1").get()?.count !== 1) throw fail();
+        if (!existing || version === 1) {
+          database.exec(`BEGIN IMMEDIATE;
+            CREATE TABLE google_reporting_cache (
+              key TEXT PRIMARY KEY,
+              business_id TEXT NOT NULL,
+              provider TEXT NOT NULL CHECK(provider IN ('ga4','search-console')),
+              expires_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              data_json TEXT NOT NULL CHECK(json_valid(data_json)),
+              checksum TEXT NOT NULL
+            );
+            CREATE INDEX google_reporting_cache_business ON google_reporting_cache(business_id,provider,expires_at);
+            INSERT INTO schema_migrations(version,applied_at) VALUES(2,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            PRAGMA user_version=2;
+            COMMIT;`);
+        }
+        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2)").get()?.count !== 2 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 2) throw fail();
         this.database = database;
         if (!memory) {
           const info = lstatSync(this.path);

@@ -2,6 +2,14 @@ import { validateEnvironment } from "../src/config/environment.js";
 import { readFileSync } from "node:fs";
 
 describe("environment configuration", () => {
+  it("keeps Google credentials server-only and bounds read-only reporting configuration", () => {
+    expect(validateEnvironment({})).toMatchObject({ GOOGLE_APPLICATION_CREDENTIALS: "", GA4_PROPERTY_ID: "", GSC_SITE_URL: "", GOOGLE_OPERATOR_KEY: "", GOOGLE_CACHE_TTL_SECONDS: 900, GOOGLE_ERROR_CACHE_TTL_SECONDS: 60, GOOGLE_TIMEOUT_MS: 15000 });
+    expect(validateEnvironment({ GA4_PROPERTY_ID: "12345", GSC_SITE_URL: "sc-domain:example.com" })).toMatchObject({ GA4_PROPERTY_ID: "12345", GSC_SITE_URL: "sc-domain:example.com" });
+    for (const input of [{ GA4_PROPERTY_ID: "properties/123" }, { GSC_SITE_URL: "https://user:secret@example.com/" }, { GSC_SITE_URL: "https://example.com/?secret=x" }, { GOOGLE_OPERATOR_KEY: "short" }, { GOOGLE_FRONTEND_ORIGIN: "https://external.example" }, { GOOGLE_TIMEOUT_MS: 30001 }, { GOOGLE_CACHE_TTL_SECONDS: 0 }, { GOOGLE_ERROR_CACHE_TTL_SECONDS: 0 }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+    const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+    for (const name of ["GOOGLE_APPLICATION_CREDENTIALS", "GA4_PROPERTY_ID", "GSC_SITE_URL", "GOOGLE_OPERATOR_KEY"]) expect(example.split(/\r?\n/)).toContain(`${name}=`);
+    expect(readFileSync(new URL("../../.gitignore", import.meta.url), "utf8").split(/\r?\n/)).toContain("/server/secrets/");
+  });
   it("defaults Muse to cost-free mocks and rejects settings beyond development safeguards", () => {
     expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, MOCK_AI: true, AI_MODE: "mock", AI_MODEL: "muse-spark-1.3", AI_PROCESSING_MODE: "standard", AI_REASONING_EFFORT: "low", MODEL_API_KEY: "", AI_MAX_OUTPUT_TOKENS: 1500, AI_MAX_INPUT_BYTES: 32768, AI_MAX_CONCURRENCY: 1, AI_DEV_BUDGET_MICROS: 2000000, AI_DEV_DAILY_MICROS: 500000, AI_DEV_MAX_CALLS: 10 });
     for (const input of [{ AI_ENABLED: "yes" }, { MOCK_AI: "yes" }, { AI_MODE: "automatic" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MODEL: "muse-wonder-1.0" }, { AI_PROCESSING_MODE: "contributor" }, { AI_REASONING_EFFORT: "high" }, { AI_MAX_OUTPUT_TOKENS: 1501 }, { AI_MAX_INPUT_BYTES: 32769 }, { AI_MAX_CONCURRENCY: 2 }, { AI_TIMEOUT_MS: 120001 }, { AI_DEV_BUDGET_MICROS: 2000001 }, { AI_DEV_DAILY_MICROS: 500001 }, { AI_DEV_MAX_CALLS: 11 }, { AI_INPUT_PRICE_MICROS_PER_MILLION: 1 }, { AI_ADMIN_KEY: "short" }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");

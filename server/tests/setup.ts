@@ -12,3 +12,8 @@ process.env.MOCK_AI = "true";
 process.env.AI_MODE = "mock";
 // Each test app gets an isolated DB unless a test selects a durable temp path.
 process.env.DATABASE_PATH = ":memory:";
+// Offline tests must never load the configured Google service-account file.
+process.env.GOOGLE_APPLICATION_CREDENTIALS = "";
+process.env.GA4_PROPERTY_ID = "";
+process.env.GSC_SITE_URL = "";
+process.env.GOOGLE_BUSINESS_ID = "";

@@ -13,6 +13,8 @@ import { AppDatabaseError } from "../../persistence/sqlite/app-database.js";
 // Provider bodies and exception messages remain private.
 const safeIntegrationErrors: Record<string, string> = {
   DATABASE_UNAVAILABLE: "The application database is unavailable; the request was not completed.",
+  GOOGLE_OPERATOR_NOT_CONFIGURED: "Local Google reporting authorization is not configured.",
+  GOOGLE_CACHE_UNAVAILABLE: "The Google response cache is unavailable. No automatic retry is permitted.",
   AI_DISABLED: "Model analysis is disabled.",
   AI_NOT_CONFIGURED: "Model analysis requires approved server configuration.",
   AI_BUDGET_DISABLED: "Model analysis requires an explicitly configured call limit.",

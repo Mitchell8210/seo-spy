@@ -8,6 +8,12 @@ Last updated: October 31, 2026.
 
 ## Progress record
 
+### October 31, 2026 - Direct Google reporting backend
+
+- Implemented modular read-only service-account authentication, bounded fixed-endpoint Google transport and validated GA4/Search Console reporting. GA4 batches independent 7/30-day sessions, active users and page views; Search Console supports separate site totals and at most 10 top queries for 7/30 days. Final-data lag, privacy limits and metric units remain explicit.
+- Added local operator/business-bound `/api/businesses/:businessId/google/ga4` and `/search-console` endpoints, sanitized permission/API/empty results, persistent scoped response caching and stale-data preservation after failed refreshes. Transactional schema v2 preserves application history; the separate AI ledger remains untouched. No Meta/Muse call, WordPress edit, frontend change or customer OAuth is introduced.
+- Offline fixtures and isolated SQLite tests cover parsing, authorization, HTTP/cache contracts and migration preservation. Live connectivity succeeded October 31 Pacific time: one GA4 batch returned both windows, one 30-day Search Console query request returned 10 rows with all four metrics, and repeated local reads hit cache without upstream calls. One shared token exchange, zero Meta calls and a byte-unchanged AI ledger were verified. Site-wide summary behavior is fixture-tested and never inferred from query rows. See [setup and validation scope](GOOGLE_REPORTING.md).
+
 ### October 31, 2026 - SQLite selected and application persistence adopted
 
 - User selected SQLite as the application's database instead of PostgreSQL. Added a primary `reports/seo-spy.sqlite` with transactional migrations, foreign keys, indexed businesses/audits, durable statuses/timestamps, findings/suggestions and immutable report/action artifacts. Repository tokens/API contracts are preserved; frontend presentation is unchanged.
