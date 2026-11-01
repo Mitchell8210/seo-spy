@@ -20,5 +20,6 @@ import { AssessmentCoreModule } from "../assessments/assessment-core.module.js";
     PageSpeedService,
     PageSpeedTransport,
   ],
+  exports: [AuditsService],
 })
 export class AuditsModule {}

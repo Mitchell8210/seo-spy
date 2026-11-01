@@ -4,6 +4,7 @@ import type { WebsiteReport } from '../types/websiteApi'
 import { mapDashboardReports } from './dashboardMapping.ts'
 import { opportunityDestination, selectDashboardOpportunities, type DashboardIssue } from './dashboardOpportunities.ts'
 import { knownAssessment } from './savedScore.ts'
+import { socialScoreDetails } from './socialScoreDetails.ts'
 
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 
@@ -14,8 +15,10 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
   const knownPolicy = knownAssessment(assessment, businessId)
   const websiteMatch = knownPolicy && !!website && assessment.sources.some(source => source.provider === 'website' && source.businessId === businessId && source.reportId === website.auditId)
   const socialMatch = knownPolicy && !!social?.report && assessment.sources.some(source => source.provider === 'facebook' && source.businessId === businessId && source.reportId === social.report!.auditId)
+  const socialAssessment = socialMatch ? socialScoreDetails(assessment, businessId, social) : null
   const scoreValue = (category: 'website' | 'social' | 'consistency' | 'overall', matches: boolean) => {
     const score = knownPolicy ? assessment.scores[category] : null
+    if (knownPolicy && assessment.policyVersion === 'seo-spy-score-v1.4' && ['social', 'overall'].includes(category) && socialAssessment?.status !== 'definitive') return null
     return matches && score?.availability === 'available' && score.maximum === 100 && typeof score.value === 'number' && Number.isInteger(score.value) && score.value >= 0 && score.value <= 100 ? score.value : null
   }
   const websiteScore = { ...view.websiteResults.overall, value: scoreValue('website', !!websiteMatch) }
@@ -53,7 +56,7 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
       })
     }
   }
-  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore,
+  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment,
     websiteResults: { ...view.websiteResults, overall: websiteScore }, consistency: { ...view.consistency, score: consistencyScore, checks },
     main: { ...view.main, overall: overallScore, components: [websiteScore, socialScore, consistencyScore] },
     ...selectDashboardOpportunities(issues) }

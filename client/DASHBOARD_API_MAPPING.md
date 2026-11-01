@@ -1,5 +1,25 @@
 # Dashboard saved-report integration
 
+## Approved Social scoring breakdown v1.4 - November 1, 2026
+
+The user explicitly requested category scores, evidence coverage, freshness, missing metrics and actionable recommendations on the Dashboard. The existing Social Media Performance card now includes a compact backend-supplied breakdown with six weighted category rows (15/20/25/15/15/10), evidence/explanation disclosures, dated freshness, missing metrics and category recommendations. Existing category headers, gauges, findings, report links and surrounding layout retain their presentation. No action/edit controls were added.
+
+`assessment.socialAssessment` is separately typed and validated for `social-performance-v1`, v1.4 policy, business/Page identity and the displayed Facebook report. Available criterion citations must resolve to that report's actual saved evidence. The client neither scores criteria nor derives missing values. Backend `earned` category points and independently recorded `evidencedWeight` are displayed without normalizing incomplete categories in the browser. Verified zero remains zero; unknown points remain Not available.
+
+Only a fresh `definitive` Social result can populate the existing Social and Spy Total gauges. A `provisional` value appears explicitly labeled in the breakdown and cannot silently contribute to the overall score. Insufficient or stale evidence has no numeric headline. The client defensively suppresses expired breakdown scores using the backend read timestamp/expiry; it never refreshes a provider or requests AI to fill a gap. Historical v1-v1.3 assessments retain their existing rendering without a fabricated breakdown.
+
+Offline verification: `node --test scripts/social-score-details.test.mjs scripts/dashboard-assessment.test.mjs scripts/saved-score.test.mjs` exercises complete/provisional/stale/missing values, exact source/citation matching, legacy rendering and safe component text rendering. The component render test is local server rendering, not an authenticated browser/provider test.
+
+## Overall investigation refresh - November 1, 2026
+
+The existing Dashboard Run Investigation control now starts one explicit overall job through `POST /api/facebook/investigations` with only the selected `businessId`. The server selects and authorizes the saved Facebook Page, refreshes Facebook and the website, and publishes a deterministic assessment pinned to both newly saved report IDs. No provider credential or operator key enters client code. The Website page retains its separate website-only audit action.
+
+`useOverallInvestigation` reads the session-scoped `/api/facebook/investigations/status?businessId=...` contract for recovery and progress. The existing status slots stay running until the overall job settles; a completed website audit alone does not complete this job. Failed starts, lost responses and Retry status check reconcile by GET without resubmitting provider work. Reload can recover a retained session job; unavailable jobs after restart stop polling, and an explicit status retry can clear missing progress without restarting collection. Saved reports remain visible through the existing readers.
+
+The backend's `seo-spy-score-v1.3` assessment is accepted in existing score slots with the same business, policy-shape, eligibility and exact displayed-report matching guards. Reusable confirmations are a backend responsibility; the client does not carry approvals, infer hours or calculate scores. No labels, static copy, styles, cards, controls or responsive rules changed.
+
+Offline lifecycle verification: `node --test scripts/overall-investigation.test.mjs scripts/saved-score.test.mjs scripts/dashboard-assessment.test.mjs scripts/dashboard-mapping.test.mjs`. Existing browser fixtures now serve the overall start/status contract for Dashboard and preserve website-only creation for Website/backend-lab tests.
+
 ## Approved scoring and saved interpretation
 
 The dashboard now accepts the backend's optional `assessment` read model from its existing business response. `seo-spy-score-v1` supplies eligible numeric values only when the policy/business and pinned report IDs match the currently displayed reports. Zero remains valid. Missing, stale, incompatible or unavailable inputs retain the existing unavailable gauges; Lighthouse SEO is never substituted directly for the weighted Website or overall score. Existing source captions identify policy/profile/cutoff. Native Lighthouse category gauges on the Website page are unchanged.
@@ -28,7 +48,7 @@ The current Dashboard assessment layout reads saved Website and Facebook results
 | Business Consistency | All four existing rows remain with unavailable values and comparison status; no mock differences or browser comparison/scoring |
 | More Opportunities / Recommended Path | Remaining evidence-backed Website/Facebook findings and their linked suggested changes; existing category ordering/selection logic remains |
 | Fix with AI | Existing feedback area previews the saved recommendation. It does not request AI, approve a proposal or apply an edit |
-| Run Investigation | Preserved website-only behavior: one explicit mobile Lighthouse audit. Viewing the Dashboard never starts an audit or Facebook collection |
+| Run Investigation | One explicit overall refresh: Facebook, mobile Lighthouse, then a pinned assessment. Viewing the Dashboard never starts collection |
 
 The user approved replacing only existing demo/source captions, disclosure, empty-state messages and demo feedback with truthful saved-report/unavailable wording. Labels, cards, controls, icons, classes, layout, responsive rules and section order are preserved. Existing error/retry presentation handles read failures; old results keep their collection dates.
 
@@ -51,3 +71,8 @@ The actual SQLite-backed Guzman Dashboard passed the saved-data browser check ag
 The existing score slots accept backend policy v1/v1.1/v1.2 only for the same displayed report IDs and business. New v1.2 Social values measure five profile-readiness checks, with posting activity advisory. Source-agreement comparisons populate the existing four detail rows without inventing authoritative names/hours. The policy provenance slot reads the actual saved version. No labels, styling, controls or layout changed.
 
 Actual saved SQLite assessment f4222edc-0e4f-4fde-8bc7-2a6fe70e4adb displayed Website78 / Social100 / Consistency60 / Total81 in the existing gauges. Desktop and 320/390/768/1280 widths passed; all browser API requests were saved-data GETs, zero external backend attempts, and AI ledger files were unchanged. Earlier unavailable-score validation above describes the historical v1 data.
+
+
+## Dashboard presentation follow-up ? November 1, 2026
+
+The user requested removal of the new Social scoring breakdown from the Dashboard. The section and its component were removed. Scoring, evidence coverage, category ledgers and definitive-only gauge eligibility remain in the data/backend layer. Preserve the existing dashboard gauges and presentation; do not reintroduce calculation details without explicit approval.

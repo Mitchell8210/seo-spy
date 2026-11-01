@@ -8,6 +8,7 @@ import {
 import { collectFacebookReport } from "../src/integrations/facebook/collect.js";
 import { createFacebookReportingWindow } from "../src/integrations/facebook/reporting-window.js";
 import { facebookReportSchema } from "../src/integrations/facebook/types.js";
+import { verifyFacebookSocialHistory } from "../src/integrations/facebook/social-history.js";
 
 class MockGraph extends FacebookGraph {
   override request = jest.fn<FacebookGraph["request"]>();
@@ -103,6 +104,12 @@ describe("Facebook saved report collector", () => {
     ).toMatchObject({ total: 0, status: "available" });
     expect(results.facebook?.window).toMatchObject({ requestedDays: 30, basis: "complete-provider-days", timeZone: "America/Los_Angeles" });
     expect(facebookReportSchema.parse(results.facebook)).toEqual(results.facebook);
+    const history = results.facebook!.socialHistory!, historyEvidence = results.evidence.find(item => item.checkId === "facebook:social-history")!;
+    expect(verifyFacebookSocialHistory(history, historyEvidence.observed, "123", new Date().toISOString())).toMatchObject({ complete: true, items: [] });
+    expect(history.coverage.until).not.toBe(history.coverage.since);
+    expect(Date.parse(history.coverage.until) - Date.parse(history.coverage.since)).toBe(90 * 86400000);
+    expect(results.facebook!.publishing!.coverage.version).toBe("facebook-post-coverage-v1");
+    expect(historyEvidence.observed).not.toHaveProperty("items");
     expect(results.facebook?.metrics.find(metric => metric.name === "page_post_likes")).toMatchObject({
       total: 4, status: "available", sourceMetric: "page_actions_post_reactions_total", breakdown: "like",
       coverage: { complete: true, expectedDays: 30, returnedDays: 30 },

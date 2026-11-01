@@ -19,6 +19,7 @@ import {
 } from "../src/modules/facebook/facebook-credentials.store.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import { FacebookReportsService } from "../src/modules/facebook/facebook-reports.service.js";
+import { OverallInvestigationService } from "../src/modules/facebook/overall-investigation.service.js";
 
 const ORIGIN = "http://localhost:3001";
 const USER_TOKEN = "private-user-token";
@@ -399,6 +400,33 @@ describe("Facebook local HTTP boundary", () => {
   let app: INestApplication;
   const graph = graphMock();
   let store: ReturnType<typeof credentialMock>;
+
+  it("protects explicit overall start with the existing origin/session boundary and validated business body", async () => {
+    const session = "a".repeat(64);
+    const start = jest.spyOn(app.get(OverallInvestigationService), "start").mockResolvedValue({ id: "overall", businessId: "demo-guzman" } as Awaited<ReturnType<OverallInvestigationService["start"]>>);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", "http://localhost:5173")
+      .set("Cookie", `seo_spy_facebook_test=${session}`).send({ businessId: "demo-guzman" }).expect(202);
+    expect(start).toHaveBeenCalledWith(session, "demo-guzman");
+    start.mockClear();
+    for (const origin of ["http://attacker.invalid", "null"]) await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", origin).send({ businessId: "demo-guzman" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").send({ businessId: "demo-guzman" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:5173").set("Origin", "http://localhost:5173").send({ businessId: "demo-guzman", pageId: "unapproved" }).expect(400);
+    await request(app.getHttpServer()).post("/api/facebook/investigations").set("Host", "localhost:3001").set("Origin", ORIGIN).type("form").send({ businessId: "demo-guzman" }).expect(400);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("keeps overall status local, authenticated, no-store and protected against foreign origins", async () => {
+    const response = await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").expect(400);
+    expect(response.body.error.code).toBe("FACEBOOK_RECONNECT_REQUIRED");
+    expect(graph.request).not.toHaveBeenCalled();
+    const status = jest.spyOn(app.get(OverallInvestigationService), "status").mockResolvedValue({ businessId: "demo-guzman", active: null, latest: null });
+    const saved = await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").expect(200);
+    expect(saved.headers["cache-control"]).toBe("no-store");
+    expect(saved.body).toEqual({ businessId: "demo-guzman", active: null, latest: null });
+    status.mockClear();
+    await request(app.getHttpServer()).get("/api/facebook/investigations/status?businessId=demo-guzman").set("Host", "localhost:5173").set("Origin", "http://attacker.invalid").expect(400);
+    expect(status).not.toHaveBeenCalled(); expect(graph.request).not.toHaveBeenCalled();
+  });
 
   beforeEach(async () => {
     store = credentialMock();

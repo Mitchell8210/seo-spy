@@ -1,10 +1,25 @@
-# Approved SEO Spy scoring policy v1.2
+# Approved SEO Spy scoring policy v1.4
 
 The user approved the complete [discussion draft](SCORING_POLICY_DRAFT.md) on October 31, 2026. The implementation is `src/scoring/policy.ts` and `calculator.ts`; `GET /api/scoring-policy` exposes the version and SHA256 policy hash. These product rules measure declared observations, not rankings, revenue, compliance or an entire website.
 
 ## Current approved amendments (November 1, 2026)
 
-New assessments default to `seo-spy-score-v1.2`. The original v1 and intermediate v1.1 remain registered with their original hashes and immutable snapshots. The rules below describing publishing targets and preferred facts are the historical v1 baseline; these approved amendments override them for v1.2:
+The user requested the six-category Social redesign: Profile Quality 15, Posting Consistency 20, Audience Engagement 25, Audience Reach/Growth 15, Content Quality 15, Customer Interaction 10. New assessments default to `seo-spy-score-v1.4`; historical v1/v1.1/v1.2/v1.3 hashes and replay remain unchanged. See [the complete Social policy, capability audit, thresholds and limitations](SOCIAL_SCORING.md).
+
+Social reports a category breakdown, known/applicable evidence weight, coverage, freshness, missing metrics and deterministic next steps. Definitive Social requires at least 70% applicable coverage, 10 posting points evidenced and 15 engagement points evidenced. Otherwise it is provisional or insufficient data. Only definitive scores populate the numeric Social gauge or contribute to Overall; missing evidence is never zero and Overall weights are never redistributed. Posting uses verified 90-day history; action-density measures use complete 30-day insights/comment evidence and a positive current follower denominator. Lifetime Shares, overlapping views, daily unique follows and new conversations cannot substitute for unavailable period shares, unique reach, aligned growth or response quality. Thresholds are provisional product targets, not industry standards. No paid AI is used.
+
+### Historical v1.3 amendment
+
+The user approved fixing fresh overall investigations and separating reusable business confirmations from individual report IDs. v1.3 preserved v1/v1.1/v1.2 hashes and replay. Its arithmetic and profile readiness were unchanged from v1.2; v1.4 retains its source-review reuse protections while replacing Social scoring.
+
+- Explicit Dashboard Run Investigation refreshes the browser-authorized saved business Facebook Page, then the registered website using mobile Lighthouse, then pins both newly saved report IDs for a final assessment. A failed channel is reported as a failed overall attempt; older reports remain readable but never substitute for fresh evidence in that attempt. Saved reads/polling do not collect, interpret with AI, or retry work.
+- A source-agreement review can be reused only when the original business/site/Page match and every compared source claim is unchanged (name, phone, URL, hours, including API omission status). Equality of pass/fail outcomes is insufficient. Changed or missing claims/evidence require review. No preferred name, timezone or unknown Sunday schedule is inferred.
+- Reuse stores original report hashes, compared-observation hashes, current report bindings and original confirmation/review dates in the immutable assessment input. It never creates a new human confirmation, updates its date, or rewrites an archive. The original source, confirmation and hours-review clocks must all remain within seven days, and the review's calendar scope remains enforced. Repeated reports cannot renew the review. Current reads suppress expired reuse and comparisons without changing historical snapshots.
+- Facebook Always open remains an explicitly dated manual observation when the API omits hours. Fresh matching API omission is not independent confirmation of that schedule.
+
+### Historical v1.2 amendment
+
+The original v1 and intermediate v1.1 remain registered with their original hashes and immutable snapshots. The rules below describing publishing targets and preferred facts are the historical v1 baseline; these approved amendments override them for v1.2 and v1.3:
 
 - Social is Facebook profile readiness only: business name, description/about, website link, contact route and category, each 20%. Posting activity is advisory; no publishing target is required for its numeric score. Missing fields remain unknown unless separately confirmed visibly absent.
 - Consistency supports explicitly approved `source-agreement` when no preferred name is known. Compare the two pinned sources directly with name/phone/website/hours weights 20/30/30/20. This measures agreement, not correctness. Do not invent a preferred name, aliases, timezone or Sunday hours.

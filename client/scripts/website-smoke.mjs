@@ -99,6 +99,16 @@ try {
   server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: req.url });
     let data;
+    if (req.url.startsWith('/api/facebook/investigations/status?')) {
+      if (rerun?.status === 'queued') {
+        rerun = { ...rerun, status: 'completed', stage: 'complete', completedAt: now };
+        report.auditId = rerunId; report.reportId = rerunId; report.audit = { ...rerun };
+        for (const item of [...report.results.findings, ...report.results.evidence, ...report.results.recommendations]) item.auditId = rerunId;
+        report.results.findings[0].title = 'Fresh report image alternatives';
+      }
+      const latest = rerun ? { id: rerunId, businessId: business.id, audit: { ...rerun, scoringVersion: 'overall-investigation-v1' }, websiteReportId: rerunId, facebookReportId: facebookAuditId, assessmentId: 'new-assessment' } : null;
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: business.id, active: null, latest })); return;
+    }
     if (req.url.startsWith('/api/facebook/reports/status?')) {
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: business.id, active: facebookJob, latest: facebookLatest })); return;
     }
@@ -122,12 +132,15 @@ try {
         latestAttempt: mode === 'failed-latest' ? { auditId: 'failed-facebook', status: 'failed' } : null };
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); return;
     }
-    if (req.method === 'POST' && req.url === '/api/businesses/demo-guzman/audits') {
+    if (req.method === 'POST' && ['/api/businesses/demo-guzman/audits', '/api/facebook/investigations'].includes(req.url)) {
       let body = ''; for await (const chunk of req) body += chunk;
       requests.at(-1).body = JSON.parse(body);
       if (rejectRun) { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'START_FAILED', message: 'The report could not be started.' } })); return; }
       rerun = { ...report.audit, id: rerunId, status: 'queued', stage: 'queued', completedAt: null, createdAt: now, strategy: 'mobile' };
-      setTimeout(() => { res.writeHead(202, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ...rerun, statusUrl: '/api/audits/' + rerunId })); }, 300);
+      const result = req.url === '/api/facebook/investigations'
+        ? { id: rerunId, businessId: business.id, audit: { ...rerun, scoringVersion: 'overall-investigation-v1' }, websiteReportId: null, facebookReportId: null, assessmentId: null }
+        : { ...rerun, statusUrl: '/api/audits/' + rerunId };
+      setTimeout(() => { res.writeHead(202, { 'content-type': 'application/json' }); res.end(JSON.stringify(result)); }, 300);
       return;
     }
     if (mode === 'error') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'FIXTURE_ERROR', message: 'Saved reports are temporarily unavailable.' } })); return; }
@@ -293,7 +306,8 @@ try {
     await waitFor(async () => await evaluate('!document.querySelector("[data-testid=dashboard-run-audit]").disabled'), 'investigation ready');
     await evaluate('document.querySelector("[data-testid=dashboard-run-audit]").click(); document.querySelector("[data-testid=dashboard-run-audit]").click()');
     await waitFor(async () => (await text()).includes('Investigation queued'), 'existing investigation starts');
-    assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'The existing Dashboard control starts exactly one Website audit.');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'The existing Dashboard control starts exactly one overall investigation.');
+    assert.deepEqual(requests.find(item => item.method === 'POST').body, { businessId: business.id });
     assert.match(await text(), /Review fixture image alternatives/);
     await waitFor(async () => (await text()).includes('Fresh report image alternatives'), 'investigation refreshes Dashboard results');
     assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Refresh never submits duplicate jobs.');

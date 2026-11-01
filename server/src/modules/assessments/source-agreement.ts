@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import type { Business } from "../../contracts/domain.js";
 import type { AuditReportRecord } from "../../reports/report.types.js";
 import type { ConsistencyScoreInput, ScoreCriterion, ScoreEvidenceRef } from "../../scoring/scoring.types.js";
 import type { SourceAgreementFacts } from "./confirmed-facts.js";
-import { mergeWebsiteBusinessFacts, normalizeBusinessName, sourceAgreementHoursCriterion } from "./consistency-evidence.js";
+import { mergeWebsiteBusinessFacts, normalizeBusinessName, normalizeWeeklyHours, sourceAgreementHoursCriterion } from "./consistency-evidence.js";
 
 const url = (value: unknown): string | null => { try { if (typeof value !== "string") return null; const parsed = new URL(value.trim()); return ["https:", "http:"].includes(parsed.protocol) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash ? parsed.href : null; } catch { return null; } };
 const fresh = (value: string, cutoff: string) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.parse(cutoff) && Date.parse(cutoff) - Date.parse(value) <= 7 * 86400000;
@@ -17,9 +18,7 @@ const phone = (value: unknown, country: SourceAgreementFacts["values"]["country"
   return /^[2-9]\d{2}[2-9]\d{6}$/.test(national) ? `+1${national}` : null;
 };
 
-/** Agreement compares observations; it never chooses an authoritative business name. */
-export function buildSourceAgreement(business: Business, website: AuditReportRecord, facebook: AuditReportRecord, facts: SourceAgreementFacts, cutoff: string): ConsistencyScoreInput {
-  const revision = { revision: facts.id, confirmedBy: facts.confirmedBy, confirmedAt: facts.createdAt, sourceAttestation: { websiteReportId: facts.values.websiteReportId, facebookReportId: facts.values.facebookReportId } };
+function websiteObservation(business: Business, website: AuditReportRecord, cutoff: string) {
   const allowedUrls = new Set([url(business.website)]);
   for (const item of website.results!.evidence) {
     if (item.checkId !== "collection" || !fresh(item.collectedAt, cutoff) || url(item.observed.requestedUrl) !== url(business.website) || !/^2\d\d$/.test(item.observed.status ?? "")) continue;
@@ -36,7 +35,26 @@ export function buildSourceAgreement(business: Business, website: AuditReportRec
       return parsed.success ? parsed.data.filter(value => value.url && allowedUrls.has(url(value.url))).map(value => ({ value, evidence: [{ reportId: website.reportId, evidenceId: item.id }] })) : [];
     } catch { return []; }
   });
-  const observed = mergeWebsiteBusinessFacts(candidates);
+  return mergeWebsiteBusinessFacts(candidates);
+}
+
+/** Fingerprints compare the actual source claims, including unknown hours, not just pass/fail outcomes. */
+export function sourceAgreementObservationHashes(business: Business, website: AuditReportRecord, facebook: AuditReportRecord, facts: SourceAgreementFacts, cutoff: string) {
+  const observed = websiteObservation(business, website, cutoff);
+  const profile = facebook.results!.facebook!.profile;
+  const field = (name: string) => { const item = profile[name]; return item?.status === "available" && fresh(item.collectedAt, cutoff) ? item.value : null; };
+  const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const name = (value: unknown) => typeof value === "string" ? normalizeBusinessName(value).toLocaleLowerCase("en-US") : null;
+  return {
+    website: hash({ name: name(observed?.value.name), phone: phone(observed?.value.phone, facts.values.country), url: url(observed?.value.url), hours: normalizeWeeklyHours(observed?.value.hours, "schema-org"), hoursRaw: observed?.value.hours ?? null }),
+    facebook: hash({ name: name(field("name")), phone: phone(field("phone"), facts.values.country), url: url(field("website")), hours: normalizeWeeklyHours(field("hours"), "facebook"), hoursRaw: field("hours"), hoursStatus: profile.hours?.status ?? null }),
+  };
+}
+
+/** Agreement compares observations; it never chooses an authoritative business name. */
+export function buildSourceAgreement(business: Business, website: AuditReportRecord, facebook: AuditReportRecord, facts: SourceAgreementFacts, cutoff: string): ConsistencyScoreInput {
+  const revision = { revision: facts.id, confirmedBy: facts.confirmedBy, confirmedAt: facts.createdAt, sourceAttestation: { websiteReportId: facts.values.websiteReportId, facebookReportId: facts.values.facebookReportId } };
+  const observed = websiteObservation(business, website, cutoff);
   const fb = facebook.results!.facebook!;
   const field = (name: string): string | null => { const value = fb.profile[name]; return value?.status === "available" && typeof value.value === "string" && value.value.trim() && fresh(value.collectedAt, cutoff) ? value.value : null; };
   const refs = (name: string): ScoreEvidenceRef[] => [...observed?.evidence ?? [], ...facebook.results!.evidence.filter(item => item.checkId === `facebook:profile:${name}` && fresh(item.collectedAt, cutoff)).map(item => ({ reportId: facebook.reportId, evidenceId: item.id }))];

@@ -8,7 +8,7 @@ import { mockBusiness } from '../../data/mockBusiness'
 import { DashboardAssessment } from '../../components/dashboard/DashboardAssessment'
 import { opportunityTitle } from '../../services/dashboardOpportunityCopy'
 import { useDashboardAssessment } from '../../hooks/useDashboardAssessment'
-import { useInvestigation } from '../../hooks/useInvestigation'
+import { useOverallInvestigation as useInvestigation } from '../../hooks/useOverallInvestigation'
 
 function statusLabel(status: string) {
   return status.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())

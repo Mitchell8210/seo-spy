@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SOCIAL_PERFORMANCE_POLICY } from "./social-performance.policy.js";
 
 /** Accepted deterministic baseline. Importing this policy never enables score publication. */
 export const SCORE_POLICY = Object.freeze({
@@ -42,8 +43,27 @@ export const SCORE_POLICY_V1_2 = Object.freeze({
   sourceAgreementMeaning: "agreement-of-confirmed-source-observations-not-preferred-correctness",
 });
 export const SCORE_POLICY_V1_2_HASH = createHash("sha256").update(JSON.stringify(SCORE_POLICY_V1_2)).digest("hex");
+/** Reuse unchanged, still-fresh reviewed observations without claiming a new human review. */
+export const SCORE_POLICY_V1_3 = Object.freeze({
+  ...SCORE_POLICY_V1_2,
+  version: "seo-spy-score-v1.3" as const,
+  sourceReviewReuse: "same-business-assets-and-compared-observations-original-review-clock",
+  sourceReviewMaxAgeMs: 7 * 86400000,
+});
+export const SCORE_POLICY_V1_3_HASH = createHash("sha256").update(JSON.stringify(SCORE_POLICY_V1_3)).digest("hex");
+export const SCORE_POLICY_V1_4 = Object.freeze({
+  ...SCORE_POLICY_V1_3,
+  version: "seo-spy-score-v1.4" as const,
+  socialScope: "facebook-presence-quality",
+  socialWeights: Object.freeze({ profile: 15, posting: 20, engagement: 25, "reach-growth": 15, content: 15, customer: 10 }),
+  socialPerformance: SOCIAL_PERFORMANCE_POLICY,
+  socialOverallEligibility: "definitive-only-70-percent-coverage-with-meaningful-posting-and-engagement",
+});
+export const SCORE_POLICY_V1_4_HASH = createHash("sha256").update(JSON.stringify(SCORE_POLICY_V1_4)).digest("hex");
 export const SCORE_POLICY_REGISTRY = Object.freeze({
   "seo-spy-score-v1": Object.freeze({ policy: SCORE_POLICY, hash: SCORE_POLICY_HASH }),
   "seo-spy-score-v1.1": Object.freeze({ policy: SCORE_POLICY_V1_1, hash: SCORE_POLICY_V1_1_HASH }),
   "seo-spy-score-v1.2": Object.freeze({ policy: SCORE_POLICY_V1_2, hash: SCORE_POLICY_V1_2_HASH }),
+  "seo-spy-score-v1.3": Object.freeze({ policy: SCORE_POLICY_V1_3, hash: SCORE_POLICY_V1_3_HASH }),
+  "seo-spy-score-v1.4": Object.freeze({ policy: SCORE_POLICY_V1_4, hash: SCORE_POLICY_V1_4_HASH }),
 });

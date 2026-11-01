@@ -8,6 +8,20 @@ Last updated: October 31, 2026.
 
 ## Progress record
 
+### November 1, 2026 - Evidence-based Social presence scoring
+
+- User approved six category weights (15/20/25/15/15/10) and Dashboard category/evidence presentation. Implemented reusable deterministic policy/engine, exact weighted arithmetic, profile syntax/description signals, 90-day frequency/recency/distribution/inactivity, audience-normalized 30-day LIKE/comment action density, non-unique visibility and conservative text structure/repetition proxies. Unsupported period shares, aligned follower growth, relevance review and customer-response evidence remain unavailable; no replacement with lifetime shares, conversations, daily unique flows or overlapping views.
+- Separate score/coverage with definitive >=70% plus meaningful posting/engagement evidence, provisional/insufficient status and definitive-only contribution to Total Spy. New v1.4 defaults preserve v1-v1.3 replay/hashes, prior source-review reuse, ownership/citation/freshness rules and immutable archives. Reads never collect/retry/generate AI.
+- Explicit report collection adds separately proven 90-day history (10 pages/250 posts, 2 MiB retained text, shared deadline); older 28-day proofs/truncated samples never establish new coverage. Requested Dashboard details are scoped to the existing Social card. All product thresholds and limitations are documented in [SOCIAL_SCORING.md](SOCIAL_SCORING.md); they are provisional targets, not industry benchmarks.
+- Live authenticated run verified complete 90-day history with three posts; final assessment `a0c19a0e-2be3-447e-a795-e7fdee84c0bf` pinned fresh Website/Facebook reports and produced Website80 / Social71 / Consistency60 / Total73. Social has71% coverage and50.25 known earned points; Posting0/20 reflects about73-day inactivity. Period shares/growth/relevance/response measures remain unavailable. Desktop browser confirmed values/breakdown and terminal workflow. Backend59 suites/1085 tests (one skipped), client33 tests, builds/lint/typecheck passed. Corrected an invalid ignored local budget setting to zero and safely closed an interrupted audit with existing no-replay recovery; protected AI ledger unchanged, no paid calls/WordPress writes/commits.
+
+### November 1, 2026 - Fresh overall investigations and reusable source reviews
+
+- User approved fixing Dashboard Run Investigation to refresh both Facebook and Website before calculating scores. Explicit browser-session orchestration reuses existing Facebook guards/Page selection, read-only collection/GA4 visits, mobile Lighthouse and deterministic assessment services. Status is read-only; duplicate, expired authorization, failed channel, timeout and restart behavior do not retry collection or silently substitute historical evidence.
+- New score policy v1.3 preserves v1/v1.1/v1.2 replay and all weights. Reuse source agreement only for unchanged compared claims on the same business/site/Page with original pinned provenance and review clocks. A new report never renews a human review; seven-day and calendar expiry still apply. Changed facts or unavailable evidence block Consistency/Overall. Facebook Always open remains a dated operator observation, not API-established hours.
+- Existing Dashboard button/status/gauges are reused; no presentation changes. Website page retains its website-only action. No paid model calls, WordPress writes, commits or pushes are part of implementation.
+- Validation: backend full check passed 56 suites / 1043 tests (one pre-existing skip), client lint/build and 26 mapping/workflow checks passed. A local-only assessment from the latest saved Guzman reports (`764365aa-ac94-4aca-8a85-d1fa12d10e4d`) restored Website79 / Social100 / Consistency60 / Overall81; actual frontend mapping matched all four. Source archive and protected AI ledger hashes were unchanged. No provider requests were made. Offline browser smoke stopped at CDP Page.enable timeout before product assertions; authenticated fresh dual-channel collection remains to be exercised through the user's browser.
+
 ### November 1, 2026 - Historical explicit-mention search
 
 - User had no known example URL, so searched public web results and authorized historical tagged/feed/comment sources for an existing exact Page-ID tag. Added bounded historical and feed-only diagnostics with direct positive-control verification when a candidate exists; privacy-preserving aggregate results only, no content creation.
@@ -664,3 +678,8 @@ Coordinate the first main-page integration with the frontend engineer using `../
 Implemented v1.1 separate reporting cutoff and v1.2 Social profile-only scoring (5 ?20%, activity advisory), plus explicitly approved Consistency source agreement (20/30/30/20). Persisted the user?s source review of Facebook Always open and confirmed phone without inventing preferred name or timezone. Actual saved Guzman scores: Website78 / Social100 / Consistency60 / Total81. All four existing dashboard gauges passed the actual SQLite-backed browser check, with UI classes/layout unchanged, no provider attempts and unchanged AI ledger. Historic snapshots/hashes retained. See SCORING_POLICY.md for pinned record IDs and verification detail.
 
 Follow-up remains: review which business name and hours should be authoritative before proposing a site/Page correction. A disagreement score cannot decide that. The previously deferred frontend edit-review panel still requires its own explicit presentation approval; do not add it as part of scoring.
+
+
+### November 1, 2026 - Dashboard scoring breakdown removed
+
+User requested removal of the newly added Social scoring explanation section. Removed its Dashboard mount/component and obsolete rendering test; preserved scoring, evidence validation, category data and existing gauges. Calculation details are internal; do not re-add this section without explicit approval.

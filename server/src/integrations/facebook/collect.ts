@@ -15,6 +15,7 @@ import { analyzeFacebook } from "./analyze.js";
 import { collectFacebookPostWindow } from "./post-coverage.js";
 import { aggregateFacebookDailyValues, createFacebookReportingWindow } from "./reporting-window.js";
 import { collectFacebookCommentCounts } from "./comment-counts.js";
+import { collectFacebookSocialHistory, facebookSocialHistoryEvidence } from "./social-history.js";
 
 const idSchema = z.string().regex(/^\d+$/);
 const paging = z
@@ -276,12 +277,15 @@ export async function collectFacebookReport(
     postsCollected: posts.items.length, postsWithCounts: postsWithCounts.length, collectedAt: posts.collectedAt,
   };
   evidence("facebook:lifetime-shares", { summary: JSON.stringify(lifetimeShares) });
+  const socialHistory = await collectFacebookSocialHistory((path, params) => request(path, token, params), pageId, new Date().toISOString(), stop);
+  evidence("facebook:social-history", facebookSocialHistoryEvidence(socialHistory));
+  if (!socialHistory.coverage.complete) warnings.push(`The complete 90-day social history could not be established (${socialHistory.coverage.reason}); posting/content scoring needs complete evidence.`);
   const commentCounts = await collectFacebookCommentCounts((path, params) => request(path, token, params), pageId, posts, reportingWindow);
   evidence("facebook:comment-counts", { summary: JSON.stringify(commentCounts) });
   if (!commentCounts.complete) warnings.push(`The 30-day comment total is unavailable (${commentCounts.failureCode ?? "incomplete coverage"}).`);
   const publishing = await collectFacebookPostWindow((path, params) => request(path, token, params), pageId, new Date().toISOString(), stop);
   evidence("facebook:publishing-window", { status: publishing.status, items: JSON.stringify(publishing.items), truncated: String(publishing.truncated), coverage: JSON.stringify(publishing.coverage) });
-  if (!publishing.coverage.complete) warnings.push(`The complete publishing window could not be established (${publishing.coverage.reason}); Social scoring remains unavailable.`);
+  if (!publishing.coverage.complete) warnings.push(`The four-week publishing advisory window could not be established (${publishing.coverage.reason}); its coverage is separate from the 90-day scoring history.`);
   const knownDates = posts.items
     .flatMap((post) => (post.createdTime ? [post.createdTime] : []))
     .sort();
@@ -353,6 +357,7 @@ export async function collectFacebookReport(
     commentCounts,
     metrics,
     publishing,
+    socialHistory,
     summary: {
       followersStart,
       followersEnd,
@@ -392,14 +397,15 @@ export async function collectFacebookReport(
       postsLimit: 50,
     },
     limitations: [
-      "Read-only Facebook evidence; no overall or social score is defined.",
+      "Read-only Facebook source evidence; versioned Social and Overall scores are saved separately in assessments.",
       "Cumulative metrics cover exactly 30 completed America/Los_Angeles reporting days, excluding the current partial day. Missing daily buckets make totals unavailable; no zero filling or lifetime post totals.",
       "New messaging conversations and aggregate Page actions are retained as distinct metrics, not messages or unique people contacted. Likes are the like-only daily reaction breakdown; other reactions are excluded.",
       "Shares temporarily uses lifetime counts on accessible collected posts. Omitted counts remain unknown; incomplete positive totals are lower bounds. Shares is independent of the 30-day reporting window.",
       "Comments counts accessible comments/replies created within the reporting window across all collected posts, including older posts. Hidden/deleted/inaccessible content cannot be established. Truncation or failed comment reads makes the period total unavailable.",
       "Follower change compares the first and last returned snapshots; it is not a sum or a causal growth estimate.",
       "At most 50 recent posts are collected. Visibility and missing fields do not establish completeness of the public Page.",
-      "Website consistency, visual image quality, publishing and profile edits were not evaluated.",
+      "A separately queried social history covers 90 completed UTC days only when its bounded Page-post listing is exhausted. It retains at most 250 posts and 2 MiB of message text. Omitted or unretained text remains unknown; media usefulness and private/deleted/inaccessible content are not established.",
+      "This source report does not judge visual image quality or apply profile/content edits. Deterministic scoring is recorded in a separate pinned assessment.",
     ],
   };
   if (posts.truncated)

@@ -206,11 +206,13 @@ export class AuditRunner implements OnModuleDestroy {
       );
     // Do not publish a successful terminal state until its durable snapshot exists.
     audit.report = await this.reports.write(audit, business);
-    await this.audits.save(audit);
     if (audit.mode === "live" && ["homepage", "lighthouse"].includes(audit.scope) && ["completed", "partial"].includes(audit.status)) {
       try { await this.assessments.create(audit.businessId, { websiteReportId: audit.id, profile: audit.strategy === "desktop" ? "baseline-desktop-v1" : "baseline-mobile-v1" }); }
       catch { this.logger.warn("The audit is saved, but a separate score snapshot could not be published. No provider retry was started."); }
     }
+    // Overall orchestration may assess this report once terminal status is visible.
+    // Finish this publication first so an older per-channel snapshot cannot supersede it.
+    await this.audits.save(audit);
   }
 
   async onModuleDestroy() {

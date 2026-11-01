@@ -1,6 +1,8 @@
+import type { SocialPerformanceInput, SocialPerformanceResult } from "./social-performance.types.js";
+
 export type ScoreCategory = "website" | "social" | "consistency" | "overall";
 export type ScoreProfile = "baseline-mobile-v1" | "baseline-desktop-v1";
-export type ScorePolicyVersion = "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2";
+export type ScorePolicyVersion = "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2" | "seo-spy-score-v1.3" | "seo-spy-score-v1.4";
 export type ScoreOutcome = "pass" | "fail" | "unknown";
 export interface ScoreEvidenceRef { reportId: string; evidenceId: string }
 export interface ScoreSource {
@@ -39,8 +41,16 @@ export interface ConfirmedRevision { revision: string; confirmedBy: string; conf
 export interface ConfirmedConsistencyRevision extends ConfirmedRevision {
   /** A reviewed source observation, not a preferred-value declaration. */
   sourceAttestation?: { websiteReportId: string; facebookReportId: string };
+  reviewReuse?: SourceReviewReuse;
+}
+export interface SourceReviewReuse {
+  version: "unchanged-source-observations-v1";
+  originalSources: (ScoreSource & { observationHash: string })[];
+  currentSources: { provider: "website" | "facebook"; reportId: string; reportHash: string; observationHash: string }[];
+  reviews: { observedAt: string; validFrom: string; validUntil?: string; timeZone: string | null }[];
 }
 export interface SocialScoreInput {
+  performance?: SocialPerformanceInput;
   sourceReportId: string;
   profile: ScoreCriterion[];
   goal: (ConfirmedRevision & { targetPostsPerPeriod: number }) | null;
@@ -103,7 +113,8 @@ export interface ScoreSnapshot {
   policyHash: string;
   /** v1.1 required reporting metadata; v1.2 optional advisory metadata. Never emitted for v1. */
   reportingCutoff?: string | null;
-  socialScope?: "facebook-profile-readiness";
+  socialScope?: "facebook-profile-readiness" | "facebook-presence-quality";
+  socialAssessment?: SocialPerformanceResult;
   consistencyBasis?: "preferred-values" | "source-agreement" | null;
   sources: ScoreSource[];
   confirmations: { socialGoal: SocialScoreInput["goal"]; consistencyFacts: ConfirmedConsistencyRevision | null; applicability: ConfirmedRevision | null };

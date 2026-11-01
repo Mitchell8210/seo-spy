@@ -3,15 +3,16 @@ import { z } from "zod";
 import type { Business, Evidence } from "../../contracts/domain.js";
 import type { FacebookField, FacebookReport } from "../../integrations/facebook/types.js";
 import type { AuditReportRecord } from "../../reports/report.types.js";
-import { ScoringInputError } from "../../scoring/calculator.js";
+import { calculateScoreSnapshot, ScoringInputError } from "../../scoring/calculator.js";
 import { SCORE_POLICY } from "../../scoring/policy.js";
 import { facebookPublishingWindow, verifyFacebookPostCoverage } from "../../integrations/facebook/post-coverage.js";
-import type { ConfirmedRevision, ScoreAssessmentInput, ScoreCriterion, ScoreEvidenceRef, ScoreProfile, ScoreSource, SocialScoreInput } from "../../scoring/scoring.types.js";
+import type { ConfirmedRevision, ScoreAssessmentInput, ScoreCriterion, ScoreEvidenceRef, ScorePolicyVersion, ScoreProfile, ScoreSource, SocialScoreInput } from "../../scoring/scoring.types.js";
 import { allConfirmedFactsSchema, type AnyConfirmedScoringFacts } from "./confirmed-facts.js";
-import { buildSourceAgreement } from "./source-agreement.js";
+import { buildSourceAgreement, sourceAgreementObservationHashes } from "./source-agreement.js";
 import { hoursConsistencyCriterion, mergeWebsiteBusinessFacts, normalizeBusinessName } from "./consistency-evidence.js";
+import { buildSocialPerformanceInput } from "./assessment-social-performance.js";
 
-export interface AssessmentInputSelection { business: Business; website: AuditReportRecord | null; facebook: AuditReportRecord | null; cutoff: string; profile: ScoreProfile; facts: AnyConfirmedScoringFacts | null; policyVersion?: "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2" }
+export interface AssessmentInputSelection { business: Business; website: AuditReportRecord | null; facebook: AuditReportRecord | null; cutoff: string; profile: ScoreProfile; facts: AnyConfirmedScoringFacts | null; policyVersion?: ScorePolicyVersion; reviewedSources?: { website: AuditReportRecord; facebook: AuditReportRecord } }
 const profileFields = { "business-name": ["name"], description: ["about", "description"], "website-link": ["website"], "contact-route": ["phone", "emails"], category: ["category"] } as const;
 const ids = Object.keys(profileFields) as (keyof typeof profileFields)[];
 const entitySchema = z.object({ name: z.string().max(2048).nullable(), url: z.string().max(2048).nullable(), phone: z.string().max(2048).nullable(), hours: z.array(z.record(z.string(), z.string())).max(98).nullable() });
@@ -138,7 +139,8 @@ export function buildAssessmentInput(selection: AssessmentInputSelection): Score
       publishing: publishing(fb, facebook.reportId, cutoff) } : null,
     consistency: null };
   if (selection.policyVersion) result.policyVersion = selection.policyVersion;
-  if (["seo-spy-score-v1.1", "seo-spy-score-v1.2"].includes(selection.policyVersion ?? "") && fb && facebook && result.social) {
+  if (selection.policyVersion === "seo-spy-score-v1.4" && facebook && result.social) result.social.performance = buildSocialPerformanceInput(business, facebook, cutoff, result.social.profile);
+  if (["seo-spy-score-v1.1", "seo-spy-score-v1.2", "seo-spy-score-v1.3", "seo-spy-score-v1.4"].includes(selection.policyVersion ?? "") && fb && facebook && result.social) {
     const reportingCutoff = facebookPublishingWindow(cutoff).until;
     const original = facebook.results!.evidence.filter(item => item.checkId === "facebook:publishing-window");
     const bound = original.length === 1 && original[0]!.sourceUrl === `https://www.facebook.com/${fb.pageId}`;
@@ -175,8 +177,31 @@ export function buildAssessmentInput(selection: AssessmentInputSelection): Score
       hours,
     ] };
   }
-  if (website && facebook && fb && facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v2" && selection.policyVersion === "seo-spy-score-v1.2") {
+  if (website && facebook && fb && facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v2" && ["seo-spy-score-v1.2", "seo-spy-score-v1.3", "seo-spy-score-v1.4"].includes(selection.policyVersion ?? "")) {
     result.consistency = buildSourceAgreement(business, website, facebook, facts, cutoff);
+    const previous = selection.reviewedSources;
+    if (["seo-spy-score-v1.3", "seo-spy-score-v1.4"].includes(selection.policyVersion ?? "") && previous) {
+      validateReport(previous.website, business, "website"); validateReport(previous.facebook, business, "facebook");
+      const original = buildAssessmentInput({ business, ...previous, facts, cutoff, profile, policyVersion: "seo-spy-score-v1.2" });
+      const oldHashes = sourceAgreementObservationHashes(business, previous.website, previous.facebook, facts, cutoff);
+      const newHashes = sourceAgreementObservationHashes(business, website, facebook, facts, cutoff);
+      if (previous.facebook.results!.facebook!.pageId === fb.pageId && oldHashes.website === newHashes.website && oldHashes.facebook === newHashes.facebook
+        && calculateScoreSnapshot(original).scores.consistency.availability === "available") {
+        // Adapt the dated review to corresponding current evidence; never change the stored confirmation or observation date.
+        const effective = structuredClone(facts);
+        effective.values.sourceReviews = effective.values.sourceReviews.map(review => {
+          const target = review.provider === "website" ? website : facebook;
+          return { ...review, reportId: target.reportId, evidenceIds: target.results!.evidence.filter(item => item.checkId === (review.provider === "website" ? "business-facts" : "facebook:profile:hours")).map(item => item.id) };
+        });
+        result.consistency = buildSourceAgreement(business, website, facebook, effective, cutoff);
+        result.consistency.facts!.reviewReuse = {
+          version: "unchanged-source-observations-v1",
+          originalSources: original.sources.map(source => ({ ...source, observationHash: oldHashes[source.provider] })),
+          currentSources: result.sources.map(source => ({ provider: source.provider, reportId: source.reportId, reportHash: source.reportHash, observationHash: newHashes[source.provider] })),
+          reviews: facts.values.sourceReviews.map(({ observedAt, validFrom, validUntil, timeZone }) => ({ observedAt, validFrom, ...(validUntil ? { validUntil } : {}), timeZone })),
+        };
+      }
+    }
   }
   return result;
 }

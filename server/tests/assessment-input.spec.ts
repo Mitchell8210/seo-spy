@@ -7,6 +7,7 @@ import { calculateScoreSnapshot } from "../src/scoring/calculator.js";
 import type { AuditReportRecord } from "../src/reports/report.types.js";
 import type { FacebookReport } from "../src/integrations/facebook/types.js";
 import { collectFacebookPostWindow } from "../src/integrations/facebook/post-coverage.js";
+import { sourceReviewReuseReasons } from "../src/scoring/review-reuse.js";
 
 const at = "2026-11-01T00:00:00.000Z";
 const business = { id: "business", name: "Confirmed Accounting", website: "https://example.com/", createdAt: at };
@@ -67,6 +68,70 @@ describe("approved source-agreement adapter", () => {
     expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBeNull();
     const missing = agreementFixture(); missing.facebook.results!.evidence = missing.facebook.results!.evidence.filter(item => item.checkId !== "facebook:profile:phone");
     expect(calculateScoreSnapshot(buildAssessmentInput(missing)).scores.consistency.value).toBeNull();
+  });
+});
+
+function renewedAgreement() {
+  const original = agreementFixture();
+  const renew = (report: AuditReportRecord) => JSON.parse(JSON.stringify(report).replaceAll(report.reportId, randomUUID())) as AuditReportRecord;
+  return { ...original, website: renew(original.website), facebook: renew(original.facebook), policyVersion: "seo-spy-score-v1.3" as const,
+    reviewedSources: { website: original.website, facebook: original.facebook } };
+}
+
+describe("v1.3 unchanged source review reuse", () => {
+  it("scores new exact report IDs while preserving original review identity, dates and archives", () => {
+    const selected = renewedAgreement(), before = JSON.stringify(selected);
+    const input = buildAssessmentInput(selected), scored = calculateScoreSnapshot(input);
+    expect(scored.scores.consistency.value).toBe(60);
+    expect(scored.scores.overall.value).toBe(82);
+    expect(scored.confirmations.consistencyFacts).toMatchObject({ revision: selected.facts.id, confirmedAt: at,
+      sourceAttestation: { websiteReportId: selected.reviewedSources.website.reportId, facebookReportId: selected.reviewedSources.facebook.reportId },
+      reviewReuse: { version: "unchanged-source-observations-v1", reviews: [{ observedAt: at }] } });
+    expect(scored.sources.map(item => item.reportId)).toEqual([selected.website.reportId, selected.facebook.reportId]);
+    expect(JSON.stringify(selected)).toBe(before);
+    expect(calculateScoreSnapshot(input)).toEqual(scored);
+  });
+  it.each(["name", "phone", "website", "hours"])("requires a new review when the Facebook %s claim changes", field => {
+    const selected = renewedAgreement();
+    selected.facebook.results!.facebook!.profile[field] = { status: "available", collectedAt: at,
+      value: field === "phone" ? "+17025551213" : field === "website" ? "https://changed.example/" : field === "hours" ? { mon_1_open: "09:00", mon_1_close: "17:00" } : "Different & Associates" };
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBeNull();
+  });
+  it("does not reuse a review when website hours change even if they still disagree with Always open", () => {
+    const selected = renewedAgreement();
+    selected.website.results!.evidence[0]!.observed.entities = selected.website.results!.evidence[0]!.observed.entities!.replace("18:00", "17:00");
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBeNull();
+  });
+  it("does not reuse missing current hours evidence or a different Page", () => {
+    const missing = renewedAgreement(); missing.facebook.results!.evidence = missing.facebook.results!.evidence.filter(item => item.checkId !== "facebook:profile:hours");
+    expect(calculateScoreSnapshot(buildAssessmentInput(missing)).scores.consistency.value).toBeNull();
+    const wrong = renewedAgreement(); wrong.facebook.results!.facebook!.pageId = "other";
+    expect(calculateScoreSnapshot(buildAssessmentInput(wrong)).scores.consistency.value).toBeNull();
+  });
+  it("never extends the review clock when refreshed reports remain fresh", () => {
+    const selected = renewedAgreement(), input = buildAssessmentInput(selected);
+    expect(sourceReviewReuseReasons(input, "2026-11-08T00:00:00.001Z")).toContain("SOURCE_REVIEW_EXPIRED");
+    selected.facts.createdAt = "2026-10-24T23:59:59.999Z";
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.reasons).toContain("SOURCE_REVIEW_EXPIRED");
+  });
+  it("honors calendar scope and rejects future reviews", () => {
+    const selected = renewedAgreement(), input = buildAssessmentInput(selected);
+    input.consistency!.facts!.reviewReuse!.reviews[0]!.validUntil = "2026-11-01";
+    expect(sourceReviewReuseReasons(input, "2026-11-02T00:00:00.000Z")).toContain("SOURCE_REVIEW_EXPIRED");
+    input.consistency!.facts!.reviewReuse!.reviews[0]!.observedAt = "2026-11-02T00:00:00.000Z";
+    expect(calculateScoreSnapshot(input).scores.consistency.value).toBeNull();
+  });
+  it.each(["hash", "binding", "business", "observation"])("fails closed on changed %s provenance", change => {
+    const input = buildAssessmentInput(renewedAgreement()), proof = input.consistency!.facts!.reviewReuse!;
+    if (change === "hash") proof.currentSources[0]!.reportHash = "a".repeat(64);
+    if (change === "binding") proof.originalSources[0]!.reportId = randomUUID();
+    if (change === "business") proof.originalSources[0]!.businessId = "other-business";
+    if (change === "observation") proof.originalSources[0]!.observationHash = "b".repeat(64);
+    expect(calculateScoreSnapshot(input).scores.overall.value).toBeNull();
+  });
+  it("keeps v1.2's exact-pair restriction unchanged", () => {
+    const selected = renewedAgreement();
+    expect(calculateScoreSnapshot(buildAssessmentInput({ ...selected, policyVersion: "seo-spy-score-v1.2" })).scores.consistency.reasons).toContain("UNCONFIRMED_SOURCE_ATTESTATION");
   });
 });
 

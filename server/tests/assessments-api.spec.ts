@@ -194,4 +194,56 @@ describe("assessment HTTP API with saved evidence, protected mocks and real SQLi
     expect((await get(`${prefix}/scoring-facts`)).body.facts.id).toBe(created.body.id);
     noProviders();
   });
+  it("reuses a dated review for fresh matching report pairs, then suppresses expired reviews without provider work", async () => {
+    const at = audit.completedAt!, observedAt = new Date(Date.parse(at) - 6 * 86400000).toISOString();
+    const website = structuredClone(audit); website.id = randomUUID();
+    website.results!.evidence = [{ id: "business-facts", auditId: website.id, checkId: "business-facts", mode: "live", collectedAt: at, sourceUrl: business.website,
+      observed: { entities: JSON.stringify([{ name: "Accounting & Multi Services", url: business.website, phone: "+17025551212", hours: [{ day: "Monday", opens: "09:00", closes: "18:00" }] }]) } }];
+    website.results!.findings = []; website.results!.recommendations = [];
+    const facebook: Audit = { ...structuredClone(website), id: randomUUID(), scope: "facebook", scoringVersion: "facebook-v1" }; delete facebook.strategy;
+    const fields = { name: "Accounting & Associates", phone: "+17025551212", website: business.website, about: "Business accounting", category: "Accounting" };
+    facebook.results = { scores: [], findings: [], recommendations: [], evidence: [...Object.keys(fields), "hours"].map(field => ({ id: field, auditId: facebook.id, checkId: `facebook:profile:${field}`, mode: "live", collectedAt: at, sourceUrl: "https://www.facebook.com/123", observed: { status: field === "hours" ? "missing" : "available", value: JSON.stringify(field === "hours" ? null : fields[field as keyof typeof fields]) } })), facebook: {
+      provider: "facebook-graph", version: "facebook-v1", graphVersion: "v26.0", pageId: "123", pageName: fields.name, collectedAt: at,
+      profile: { ...Object.fromEntries(Object.entries(fields).map(([field, value]) => [field, { status: "available", value, collectedAt: at }])), hours: { status: "missing", value: null, collectedAt: at } },
+      window: { since: at, until: at, requestedDays: 30 }, posts: { status: "available", items: [], truncated: false, collectedAt: at }, metrics: [],
+      summary: { followersStart: null, followersEnd: null, followersChange: null, latestPostAt: null, postsInWindow: 0, postsInWindowComplete: true },
+      coverage: { profileFieldsAvailable: 5, profileFieldsMissing: 1, profileFieldsUnavailable: 0, metricsAvailable: 0, metricsRequested: 0, postsLimit: 50 }, limitations: [],
+    } };
+    await reports.write(website, business); await reports.write(facebook, business);
+    const confirmed = await post(`${prefix}/scoring-facts`, { confirmed: true, comparisonMode: "source-agreement", country: "international", confirmedPhone: fields.phone,
+      websiteReportId: website.id, facebookReportId: facebook.id, sourceReviews: [{ provider: "facebook", reportId: facebook.id, evidenceIds: ["hours"], field: "hours", state: "always-open", timeZone: null,
+        hours: null, observedAt, validFrom: observedAt.slice(0, 10), notes: "Operator reviewed Always open on the public Facebook Page." }], notes: "Compare source agreement without inferring a preferred name." }).expect(201);
+    const originalWebsite = await reports.read(website.id), originalFacebook = await reports.read(facebook.id);
+    const renew = (value: Audit) => JSON.parse(JSON.stringify(value).replaceAll(value.id, randomUUID())) as Audit;
+    const currentWebsite = renew(website), currentFacebook = renew(facebook);
+    await reports.write(currentWebsite, business); await reports.write(currentFacebook, business);
+    const created = await post(`${prefix}/assessments`, { confirmed: true, websiteReportId: currentWebsite.id, facebookReportId: currentFacebook.id, policyVersion: "seo-spy-score-v1.3" }).expect(201);
+    expect(created.body.snapshot).toMatchObject({ policyVersion: "seo-spy-score-v1.3", scores: { website: { value: 79 }, social: { value: 100 }, consistency: { value: 60 }, overall: { value: 82 } } });
+    expect(created.body.input.consistency.facts).toMatchObject({ revision: confirmed.body.id, confirmedAt: confirmed.body.createdAt,
+      reviewReuse: { reviews: [{ observedAt }] } });
+    expect((await get(`${prefix}/dashboard`)).body.assessment.scores.overall.value).toBe(82);
+    const clock = jest.spyOn(Date, "now").mockReturnValue(Date.parse(at) + 2 * 86400000);
+    try {
+      const latest = (await get(`${prefix}/assessments/latest`).expect(200)).body.assessment;
+      expect(latest.scores.website.value).toBe(79); expect(latest.scores.social.value).toBe(100);
+      expect(latest.scores.consistency.value).toBeNull(); expect(latest.scores.overall.reasons).toContain("SOURCE_REVIEW_EXPIRED");
+      expect(latest.comparisons.every((item: { outcome: string }) => item.outcome === "unknown")).toBe(true);
+      expect((await get(`${prefix}/assessments/${created.body.id}`)).body.snapshot.scores.overall.value).toBe(82);
+    } finally { clock.mockRestore(); }
+    expect((await get(`${prefix}/scoring-facts`)).body.facts).toEqual(confirmed.body);
+    expect(await reports.read(website.id)).toEqual(originalWebsite); expect(await reports.read(facebook.id)).toEqual(originalFacebook);
+    const upgraded = await post(`${prefix}/assessments`, { confirmed: true, websiteReportId: currentWebsite.id, facebookReportId: currentFacebook.id }).expect(201);
+    expect(upgraded.body.snapshot).toMatchObject({ policyVersion: "seo-spy-score-v1.4", socialScope: "facebook-presence-quality",
+      socialAssessment: { status: "insufficient_data", value: null, coveragePercent: 15 }, scores: { social: { value: null }, overall: { value: null }, consistency: { value: 60 } } });
+    expect(upgraded.body.snapshot.socialAssessment.categories.map((item: { maximum: number }) => item.maximum)).toEqual([15, 20, 25, 15, 15, 10]);
+    expect((await get(`${prefix}/assessments/latest`)).body.assessment.socialAssessment).toEqual(upgraded.body.snapshot.socialAssessment);
+    const future = jest.spyOn(Date, "now").mockReturnValue(Date.parse(at) + 8 * 86400000);
+    try {
+      const expired = (await get(`${prefix}/assessments/latest`)).body.assessment.socialAssessment;
+      expect(expired).toMatchObject({ status: "insufficient_data", value: null, coveragePercent: 0, freshness: { status: "stale" } });
+      expect(expired.categories.every((item: { earned: number | null }) => item.earned === null)).toBe(true);
+      expect((await get(`${prefix}/assessments/${upgraded.body.id}`)).body.snapshot.socialAssessment.coveragePercent).toBe(15);
+    } finally { future.mockRestore(); }
+    noProviders();
+  });
 });

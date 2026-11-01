@@ -1,3 +1,5 @@
+import type { SocialPerformanceAssessment } from './socialAssessment'
+
 export interface AssessmentScore {
   value: number | null
   maximum: 100
@@ -7,11 +9,12 @@ export interface AssessmentScore {
 export interface SavedAssessment {
   id: string
   businessId: string
-  policyVersion: 'seo-spy-score-v1' | 'seo-spy-score-v1.1' | 'seo-spy-score-v1.2'
+  policyVersion: 'seo-spy-score-v1' | 'seo-spy-score-v1.1' | 'seo-spy-score-v1.2' | 'seo-spy-score-v1.3' | 'seo-spy-score-v1.4'
   policyHash: string
   profile: 'baseline-mobile-v1' | 'baseline-desktop-v1'
   cutoff: string
-  socialScope?: 'facebook-profile-readiness'
+  socialScope?: 'facebook-profile-readiness' | 'facebook-presence-quality'
+  socialAssessment?: SocialPerformanceAssessment | null
   consistencyBasis?: 'preferred-values' | 'source-agreement'
   reportingCutoff?: string | null
   readAt: string

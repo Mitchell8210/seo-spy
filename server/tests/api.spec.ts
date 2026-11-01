@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import request from "supertest";
 import { AppModule } from "../src/app.module.js";
+import { AssessmentService } from "../src/modules/assessments/assessment.service.js";
 import { configureApp } from "../src/configure-app.js";
 import {
   AUDIT_REPOSITORY,
@@ -134,6 +135,8 @@ describe("demo API", () => {
         "/api/facebook/connection-metrics",
         "/api/facebook/disconnect",
         "/api/facebook/reports",
+        "/api/facebook/investigations",
+        "/api/facebook/investigations/status",
         "/api/facebook/reports/status",
         "/api/businesses/{businessId}/facebook-report",
         "/api/wordpress/businesses/{businessId}/connection",
@@ -471,6 +474,28 @@ describe("demo API", () => {
         (score) => score.value === null && score.availability === "unavailable",
       ),
     ).toBe(true);
+  });
+
+  it("publishes a channel assessment before making successful terminal audit status visible", async () => {
+    jest.spyOn(app.get(WebsiteCollector), "collect").mockResolvedValue({
+      requestedUrl: "https://guzmantaxaccounting.com", finalUrl: "https://guzmantaxaccounting.com", status: 200,
+      contentType: "text/html", body: Buffer.from("<html><title>Example</title><h1>Example</h1></html>"), bytes: 62, robots: "", redirects: [], collectedAt: new Date().toISOString(),
+    });
+    const assessments = app.get(AssessmentService), original = assessments.create.bind(assessments);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const publish = jest.spyOn(assessments, "create").mockImplementation(async (...args) => { await gate; return original(...args); });
+    try {
+      const created = await request(app.getHttpServer()).post("/api/businesses/demo-guzman/audits").send({ scope: "homepage" }).expect(202);
+      for (let attempt = 0; attempt < 50 && !publish.mock.calls.length; attempt++) await delay(10);
+      const status = await request(app.getHttpServer()).get(created.body.statusUrl as string).expect(200);
+      expect({ calls: publish.mock.calls.length, failure: status.body.failure }).toEqual({ calls: 1, failure: null });
+      expect(status.body.status).toBe("running");
+      const reports = await request(app.getHttpServer()).get("/api/businesses/demo-guzman/reports").expect(200);
+      expect(reports.body.reports.find((item: { auditId: string }) => item.auditId === created.body.id).status).toBe("completed");
+      release();
+      expect((await waitForAudit(created.body.id as string)).status).toBe("completed");
+    } finally { release(); publish.mockRestore(); }
   });
 
   it("exposes safe collection failure codes and preserves the previous completed audit", async () => {

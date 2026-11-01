@@ -7,7 +7,8 @@ import { BUSINESS_REPOSITORY, type BusinessRepository } from "../../persistence/
 import { FileReportStore } from "../../reports/file-report.store.js";
 import type { AuditReportRecord } from "../../reports/report.types.js";
 import { calculateScoreSnapshot } from "../../scoring/calculator.js";
-import type { ScoreAssessmentInput, ScoreProfile, ScoreSnapshot } from "../../scoring/scoring.types.js";
+import type { ScoreAssessmentInput, ScorePolicyVersion, ScoreProfile, ScoreSnapshot } from "../../scoring/scoring.types.js";
+import { sourceReviewReuseReasons } from "../../scoring/review-reuse.js";
 import { buildAssessmentInput } from "./assessment-input.js";
 import { assessmentHash, AssessmentStore } from "./assessment.store.js";
 import { allConfirmedFactsSchema, confirmedFactsInputSchema, sourceAgreementInputSchema, type AnyConfirmedScoringFacts } from "./confirmed-facts.js";
@@ -16,7 +17,7 @@ export interface AssessmentRecord {
   schemaVersion: "seo-spy.assessment.v1"; id: string; businessId: string; createdAt: string; cacheKey: string;
   input: ScoreAssessmentInput; snapshot: ScoreSnapshot;
 }
-export interface AssessmentSelection { websiteReportId?: string; facebookReportId?: string; profile?: ScoreProfile; cutoff?: string; policyVersion?: "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2" }
+export interface AssessmentSelection { websiteReportId?: string; facebookReportId?: string; profile?: ScoreProfile; cutoff?: string; policyVersion?: ScorePolicyVersion }
 const storageFailure = () => new ServiceUnavailableException({ code: "ASSESSMENT_STORAGE_ERROR", message: "The saved assessment is invalid or cannot be replayed safely." });
 
 @Injectable()
@@ -89,7 +90,18 @@ export class AssessmentService {
     const [website, facebook] = await Promise.all([websiteId ? this.source(businessId, websiteId, "website") : null, facebookId ? this.source(businessId, facebookId, "facebook") : null]);
     const cutoff = selection.cutoff ?? new Date().toISOString();
     if (!z.string().datetime({ offset: true }).safeParse(cutoff).success || Date.parse(cutoff) > Date.now()) throw new BadRequestException({ code: "ASSESSMENT_CUTOFF_INVALID", message: "Assessment cutoff must be a valid current or historical UTC timestamp." });
-    const input = buildAssessmentInput({ business, website, facebook, cutoff, profile: selection.profile ?? "baseline-mobile-v1", facts: this.facts(businessId, cutoff), policyVersion: selection.policyVersion ?? "seo-spy-score-v1.2" });
+    const policyVersion = selection.policyVersion ?? "seo-spy-score-v1.4";
+    const facts = this.facts(businessId, cutoff);
+    let reviewedSources: { website: AuditReportRecord; facebook: AuditReportRecord } | undefined;
+    if (["seo-spy-score-v1.3", "seo-spy-score-v1.4"].includes(policyVersion) && facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v2") {
+      try {
+        const [reviewedWebsite, reviewedFacebook] = await Promise.all([
+          this.source(businessId, facts.values.websiteReportId, "website"), this.source(businessId, facts.values.facebookReportId, "facebook"),
+        ]);
+        reviewedSources = { website: reviewedWebsite, facebook: reviewedFacebook };
+      } catch (error) { if (!(error instanceof NotFoundException)) throw error; }
+    }
+    const input = buildAssessmentInput({ business, website, facebook, cutoff, profile: selection.profile ?? "baseline-mobile-v1", facts, policyVersion, reviewedSources });
     const snapshot = calculateScoreSnapshot(input);
     const cacheKey = assessmentHash({ version: "assessment-cache-v1", input, policyHash: snapshot.policyHash });
     const previous = this.store.byCacheKey("assessment", businessId, cacheKey);
@@ -143,18 +155,41 @@ export class AssessmentService {
       }
     }
     const facts = this.facts(businessId);
+    if (["seo-spy-score-v1.3", "seo-spy-score-v1.4"].includes(record.snapshot.policyVersion) && record.input.consistency?.comparisonMode === "source-agreement") {
+      const reviewReasons = sourceReviewReuseReasons(record.input, new Date(now).toISOString());
+      if (reviewReasons.length) {
+        for (const category of ["consistency", "overall"] as const) scores[category] = { ...scores[category], value: null, availability: "unavailable", exact: null, reasons: [...new Set([...scores[category].reasons, ...reviewReasons])] };
+        reasons.push(...reviewReasons);
+      }
+    }
     const confirmedIds = Object.values(record.snapshot.confirmations).filter(item => item !== null).map(item => item.revision);
     const confirmationsChanged = (facts && !confirmedIds.includes(facts.id)) || (!facts && confirmedIds.length > 0);
     if (confirmationsChanged) {
       for (const category of ["social", "consistency", "overall"] as const) scores[category] = { ...scores[category], value: null, availability: "unavailable", exact: null, reasons: [...new Set([...scores[category].reasons, "CONFIRMATIONS_CHANGED"])] };
       reasons.push("CONFIRMATIONS_CHANGED");
     }
+    const socialAssessment = record.snapshot.socialAssessment ? structuredClone(record.snapshot.socialAssessment) : null;
+    if (socialAssessment) {
+      const stale = now > Date.parse(socialAssessment.freshness.expiresAt) || now < Date.parse(socialAssessment.freshness.collectedAt) || scores.social.reasons.includes("STALE_INPUT");
+      if (stale || confirmationsChanged) {
+        const reason = stale ? "STALE_INPUT" : "CONFIRMATIONS_CHANGED";
+        socialAssessment.status = "insufficient_data"; socialAssessment.value = null; socialAssessment.exact = null;
+        socialAssessment.knownWeight = 0; socialAssessment.coveragePercent = 0;
+        if (stale) socialAssessment.freshness.status = "stale";
+        socialAssessment.categories = socialAssessment.categories.map(category => ({ ...category, earned: null, evidencedWeight: 0, status: "unavailable",
+          criteria: category.criteria.map(criterion => ({ ...criterion, earned: null, exact: null, status: "unavailable", value: null, reason })) }));
+        socialAssessment.missingMetrics = socialAssessment.categories.flatMap(category => category.criteria.map(criterion => ({ id: criterion.id, label: criterion.label, reason })));
+        for (const category of ["social", "overall"] as const) scores[category] = { ...scores[category], value: null, availability: "unavailable", exact: null, reasons: [...new Set([...scores[category].reasons, reason])] };
+        reasons.push(reason);
+      }
+    }
     return { businessId, assessment: { id: record.id, businessId, policyVersion: record.snapshot.policyVersion, policyHash: record.snapshot.policyHash, profile: record.snapshot.profile, cutoff: record.snapshot.cutoff,
       ...(record.snapshot.reportingCutoff !== undefined ? { reportingCutoff: record.snapshot.reportingCutoff } : {}),
       ...(record.snapshot.socialScope ? { socialScope: record.snapshot.socialScope } : {}),
+      ...(socialAssessment ? { socialAssessment } : {}),
       ...(record.snapshot.consistencyBasis ? { consistencyBasis: record.snapshot.consistencyBasis } : {}),
       readAt: new Date(now).toISOString(), sources: record.snapshot.sources, scores, analysis,
-      comparisons: record.input.consistency?.criteria.map(item => ({ id: item.id, outcome: confirmationsChanged || scores.consistency.reasons.includes("STALE_INPUT") ? "unknown" as const : item.outcome, applicable: item.applicable, website: item.observations?.website ?? null, facebook: item.observations?.facebook ?? null })) ?? [],
+      comparisons: record.input.consistency?.criteria.map(item => ({ id: item.id, outcome: confirmationsChanged || scores.consistency.reasons.some(reason => ["STALE_INPUT", "SOURCE_REVIEW_EXPIRED", "SOURCE_REVIEW_CHANGED_OR_UNAVAILABLE", "UNCONFIRMED_SOURCE_REUSE"].includes(reason)) ? "unknown" as const : item.outcome, applicable: item.applicable, website: item.observations?.website ?? null, facebook: item.observations?.facebook ?? null })) ?? [],
       reasons: [...new Set(reasons)], limitations: record.snapshot.limitations } };
   }
 }

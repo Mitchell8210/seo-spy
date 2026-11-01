@@ -139,13 +139,25 @@ async function serveFixture(req, res) {
   if (!available) return reply(res, 503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Fixture backend unavailable. Please retry.', requestId: 'fixture-request' } });
   settleJobs();
   const route = new URL(req.url, 'http://fixture').pathname;
+  const overall = id => {
+    const audit = jobs.get(id)?.summary;
+    if (!audit || audit.mode !== 'live') return null;
+    return { id, businessId, audit: { ...audit, scoringVersion: 'overall-investigation-v1' },
+      websiteReportId: audit.status === 'completed' ? id : null, facebookReportId: audit.status === 'completed' ? 'fixture-facebook' : null,
+      assessmentId: audit.status === 'completed' ? 'fixture-assessment' : null };
+  };
+  if (route === '/api/facebook/investigations/status') {
+    statusRequests++;
+    return reply(res, 200, { businessId, active: activeId ? overall(activeId) : null, latest: activeId ? null : overall(latestId) });
+  }
   if (route === '/api/health') return reply(res, 200, { status: 'ok', service: 'fixture', mode: 'demo' });
   if (route.endsWith('/dashboard')) return reply(res, 200, dashboard());
-  if (req.method === 'POST' && route.endsWith('/audits')) {
+  if (req.method === 'POST' && (route.endsWith('/audits') || route === '/api/facebook/investigations')) {
     if (activeId) return reply(res, 409, { error: { code: 'AUDIT_ALREADY_ACTIVE', message: 'A fixture audit is already running.', requestId: 'fixture-request' } });
     let body = '';
     for await (const chunk of req) body += chunk;
-    const input = JSON.parse(body || '{}');
+    const input = route === '/api/facebook/investigations' ? { scope: 'lighthouse', strategy: 'mobile' } : JSON.parse(body || '{}');
+    if (route === '/api/facebook/investigations') assert.deepEqual(JSON.parse(body), { businessId });
     creationCount++;
     const id = `00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`;
     const audit = summary(id, { scope: input.scope, status: 'running', stage: input.scope === 'lighthouse' ? 'running_lighthouse' : 'collecting_evidence' });
@@ -161,7 +173,7 @@ async function serveFixture(req, res) {
       res.destroy();
       return;
     }
-    return reply(res, 202, { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
+    return reply(res, 202, route === '/api/facebook/investigations' ? overall(id) : { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
   }
   const match = /^\/api\/audits\/([^/]+)(?:\/(findings|recommendations|lighthouse))?$/.exec(route);
   if (match) {
@@ -292,8 +304,8 @@ async function assertUnifiedAssessment() {
 function assertDashboardRequests(requests) {
   assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must not fetch website report details; saved Facebook reports are allowed.');
   for (const request of requests.filter(request => request.method === 'POST')) {
-    assert.equal(new URL(request.url).pathname, `/api/businesses/${businessId}/audits`);
-    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { scope: 'lighthouse', strategy: 'mobile' });
+    assert.equal(new URL(request.url).pathname, '/api/facebook/investigations');
+    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { businessId });
   }
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { facebookPostCoverageSchema, type FacebookPostWindow } from "./post-coverage.js";
+import { facebookSocialHistorySchema, type FacebookSocialHistory } from "./social-history.js";
 
 export type FacebookAvailability = "available" | "missing" | "unavailable";
 export interface FacebookField {
@@ -28,6 +29,7 @@ export interface FacebookMetric {
   coverage?: { complete: boolean; expectedDays: number; returnedDays: number };
 }
 export interface FacebookReport {
+  socialHistory?: FacebookSocialHistory;
   lifetimeShares?: {
     basis: "lifetime"; sourceField: "shares"; knownTotal: number; total: number | null;
     complete: boolean; postsCollected: number; postsWithCounts: number; collectedAt: string;
@@ -128,6 +130,7 @@ const hours = z.object(
 );
 export const facebookReportSchema = z
   .object({
+    socialHistory: facebookSocialHistorySchema.optional(),
     lifetimeShares: z.object({ basis: z.literal("lifetime"), sourceField: z.literal("shares"),
       knownTotal: z.number().int().nonnegative().safe(), total: z.number().int().nonnegative().safe().nullable(),
       complete: z.boolean(), postsCollected: z.number().int().min(0).max(50), postsWithCounts: z.number().int().min(0).max(50), collectedAt: timestamp,

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Post,
   Query,
   Req,
@@ -10,6 +11,7 @@ import {
 } from "@nestjs/common";
 import {
   ApiConsumes,
+  ApiAcceptedResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -25,6 +27,8 @@ import { ApiProperty } from "@nestjs/swagger";
 import { IsString, Matches, MaxLength } from "class-validator";
 import { ReportFileReferenceDto } from "../../reports/report-reference.dto.js";
 import { AuditFailureDto } from "../../contracts/responses.dto.js";
+import { OverallInvestigationService } from "./overall-investigation.service.js";
+import { OverallInvestigationDto, OverallInvestigationStatusDto, StartOverallInvestigationDto } from "./overall-investigation.dto.js";
 
 class CreateFacebookReportDto {
   @ApiProperty({
@@ -87,6 +91,7 @@ export class FacebookController {
     private readonly facebook: FacebookService,
     private readonly reports: FacebookReportsService,
     private readonly config: ConfigService,
+    private readonly investigations: OverallInvestigationService,
   ) {}
   private guard(req: Request, res: Response, mutation = false, frontendReport = false) {
     res.setHeader("Cache-Control", "no-store");
@@ -311,6 +316,25 @@ export class FacebookController {
   async reportStatus(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: FacebookReportProgressQueryDto): Promise<FacebookReportProgress> {
     this.guard(req, res, false, true);
     return this.reports.status(this.session(req), query.businessId);
+  }
+
+  @Post("investigations")
+  @HttpCode(202)
+  @ApiOperation({ summary: "Explicitly refresh Facebook and Website, then save a pinned overall assessment", description: "Uses this browser's Facebook connection and the Page selected by the business's latest saved Facebook report. Collection is asynchronous and never retried automatically. Channel archives and final scoring are separate immutable records; unavailable evidence remains unavailable." })
+  @ApiConsumes("application/json")
+  @ApiAcceptedResponse({ type: () => OverallInvestigationDto })
+  async startInvestigation(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: StartOverallInvestigationDto): Promise<OverallInvestigationDto> {
+    this.guard(req, res, true, true);
+    if (!req.is("application/json")) throw new BadRequestException("Overall investigations require an explicit JSON request.");
+    return this.investigations.start(this.session(req), body.businessId);
+  }
+
+  @Get("investigations/status")
+  @ApiOperation({ summary: "Read this browser's overall investigation status without provider calls", description: "Progress is session-scoped, in memory and expires after one hour; restarts do not replay collection. Saved channel reports and assessments remain durable." })
+  @ApiOkResponse({ type: () => OverallInvestigationStatusDto })
+  async investigationStatus(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: FacebookReportProgressQueryDto): Promise<OverallInvestigationStatusDto> {
+    this.guard(req, res, false, true);
+    return this.investigations.status(this.session(req), query.businessId);
   }
 
   @Post("reports")

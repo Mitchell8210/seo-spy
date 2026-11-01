@@ -16,6 +16,13 @@ test('returns saved channel scores and their scope without computing new scores'
   assert.equal(savedChannelScore(assessment, 'business', 'fb', 'social'), 0)
 })
 
+test('accepts the reusable-confirmation policy while still requiring exact assessment source IDs', () => {
+  const assessment = fixture(); assessment.policyVersion = 'seo-spy-score-v1.3'
+  assert.equal(savedChannelScore(assessment, 'business', 'web', 'website'), 78)
+  assert.match(scoreCaption(assessment, 'website'), /v1.3/)
+  assert.equal(savedChannelScore(assessment, 'business', 'previous-web', 'website'), null)
+})
+
 test('rejects unavailable, mismatched, unsupported and malformed channel scores', () => {
   const changes = [a => { a.businessId = 'other' }, a => { a.sources[1].businessId = 'other' }, a => { a.sources[1].reportId = 'old' }, a => { a.sources[1].provider = 'website' }, a => { a.policyVersion = 'unknown' }, a => { a.policyHash = 'invalid' }, a => { a.scores.social.availability = 'unavailable' }, a => { a.scores.social.value = null }, a => { a.scores.social.value = 100.5 }, a => { a.scores.social.value = 101 }, a => { a.scores.social.value = -1 }, a => { a.scores.social.maximum = 10 }]
   for (const change of changes) { const assessment = fixture(); change(assessment); assert.equal(savedChannelScore(assessment, 'business', 'fb', 'social'), null) }
