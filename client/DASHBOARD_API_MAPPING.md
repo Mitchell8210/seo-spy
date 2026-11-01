@@ -1,35 +1,35 @@
 # Dashboard saved-report integration
 
-The Dashboard uses the existing saved Website and Facebook readers for the `businessId` query parameter, defaulting to the same registered demonstration ID as the channel pages. It imports no mock scores, identities, connections, findings or recommendations; the fixture ID is only a default lookup key. No backend changes or new provider calls are required to view it.
+The current Dashboard assessment layout reads saved Website and Facebook results. Its `businessId` query parameter selects the registered business; the demonstration ID is only the default lookup key. Business identity, connections, findings and recommendations do not fall back to mock data.
 
-`src/hooks/useDashboardReports.ts` composes `useWebsiteReport` and `useFacebookReport`. They enforce the same business/audit checks and keep previous usable reports after read failures. Website reads poll every 15 seconds (2.5 seconds during active work). Facebook reads refresh every 15 seconds and on window focus. Changes in the existing investigation's ID/status refresh both readers. Business changes abort previous reads and clear data from the old business. Run Investigation starts both a mobile Lighthouse audit and a Facebook report for the saved Page. Each channel completes independently; failure or reconnection requirements in one channel do not discard the other channel's results. Facebook uses the existing browser connection, and errors appear in the existing notice area. No saved Page means Facebook cannot run until connected and initially selected through the local connection workflow.
+`useDashboardAssessment` composes `useDashboardReports`, `useWebsiteReport` and `useFacebookReport`. The existing readers validate business/audit ownership, exclude demo audits and retain usable results after refresh failures. Website reads refresh every 15 seconds, or 2.5 seconds during active work; Facebook saved reads refresh every 15 seconds and on focus. Investigation status changes refresh saved reports. Switching businesses aborts old reads and clears the old view.
 
-Dashboard and Social Media share `useFacebookReportRun`, which polls the browser-session-scoped `GET /api/facebook/reports/status?businessId=...` endpoint every 2.5 seconds during active collection and every 15 seconds otherwise. Progress is recovered after navigation/reload, and terminal outcomes refresh saved data. Polling never starts collection or contacts Meta. Progress is in memory and does not survive backend restart; archived reports remain available. Website/Social Media Run Report buttons still run only their own channel. The Dashboard button remains busy while either channel is running. The existing layout, controls and styles are unchanged.
+`dashboardAssessment.ts` maps backend evidence into the existing assessment model. It preserves backend priorities, statuses, evidence summaries and linked recommendations. Each category shows its top three active issues. More Opportunities contains the remaining issues, and Recommended Path contains only their existing active recommendations. Resolved, verified and passed items are excluded; no extra findings or actions are invented. Existing report/opportunity links retain the selected business.
 
-`src/services/dashboardMapping.ts` adapts the independently dated channel reports into the existing Dashboard slots:
-
-| Existing slot | Source / limitations |
+| Existing slot | Source and limitations |
 | --- | --- |
-| Business identity | Registered dashboard business, with saved-report identity fallback |
-| Connected assets and counts | Registered website supported by a saved Website report or live backend connection; Facebook identity from a saved usable Facebook report. Green Connected indicators are explicitly approved by the user as evidence of the established connection; this is not a new OAuth validity probe. Demo connections are excluded. |
-| Website Health gauges and counters | The same `mapWebsiteReport` values as the Website page, including null/zero distinctions and referenced binary pass counts. No report means unavailable counts, not zero issues. |
-| Main Spy Score / three component scores | Unavailable. Lighthouse SEO never substitutes for an SEO Spy combined score. No browser scoring is performed. |
-| Priority opportunities | Number of Critical/Medium findings across the usable channel reports; unavailable when neither report exists |
-| Business Consistency | All four existing rows remain; neutral labels/indicators and unavailable comparison values. No cross-channel comparison or consistency scoring is implemented by the backend. |
-| Social followers | Available `followers_count` profile value, including zero |
-| Social interactions — 30 days | Available additive `page_post_engagements.total` only when the saved report requested 30 days. Caption clarifies that returned periods may be incomplete. |
-| Reach / engagement rate | Unavailable. Views are never substituted for unique reach; no engagement rate is invented. |
-| Likes / Comments / Shares | Unavailable because these breakdowns are not collected. Existing numeric slots show an em dash to preserve the layout. |
-| Priority Findings | Up to three backend findings sorted Critical, Medium, Low across both channels, preserving source and review status |
-| Top Recommendations | Up to three evidence-linked backend recommendations, ordered by finding severity, with the actual recommended change in the existing description slot. Unmatched recommendations are excluded. |
+| Business identity | Registered backend business, with saved-report identity fallback; missing identity is Not available |
+| Connected asset counts | Live registered website connection or saved Website evidence; saved Facebook Page identity. Saved evidence does not prove current OAuth validity |
+| Spy Total Score and component gauges | Existing unavailable treatment. No combined, Website SEO Spy, social or consistency scoring policy is implemented; Lighthouse and traffic metrics are never substituted |
+| Website Health issues | Saved Website findings with backend priority and evidence summaries; collection date, homepage/partial coverage, failed newer attempts and read errors appear in the existing source caption |
+| Social Media Performance issues | Saved Facebook analysis/findings with original collection date and partial/failed-refresh limitations |
+| Business Consistency | All four existing rows remain with unavailable values and comparison status; no mock differences or browser comparison/scoring |
+| More Opportunities / Recommended Path | Remaining evidence-backed Website/Facebook findings and their linked suggested changes; existing category ordering/selection logic remains |
+| Fix with AI | Existing feedback area previews the saved recommendation. It does not request AI, approve a proposal or apply an edit |
+| Run Investigation | Preserved website-only behavior: one explicit mobile Lighthouse audit. Viewing the Dashboard never starts an audit or Facebook collection |
 
-Existing captions carry dates, homepage/sample limitations, partial coverage, failed newer attempts and read errors. Empty results are not advertised as a clean audit. Sections, metric labels, controls, layout, styles, ordering and navigation are preserved. The user approved replacing mock captions, reusing unavailable score treatments and neutralizing the unsupported consistency comparisons, with the explicit exception that connected asset checks remain green.
+The user approved replacing only existing demo/source captions, disclosure, empty-state messages and demo feedback with truthful saved-report/unavailable wording. Labels, cards, controls, icons, classes, layout, responsive rules and section order are preserved. Existing error/retry presentation handles read failures; old results keep their collection dates.
 
-Verification from `client/`:
+GA4 and Search Console backend endpoints are not called here: the current dashboard has no corresponding traffic/query fields, and Google operator/service-account credentials must not enter browser code. No Meta/Muse calls, model charges or WordPress writes are introduced. Scoring policy, cross-channel comparisons and approved AI execution remain separate tasks.
 
-- `npm run lint`
-- `npm run build`
-- `npm run test:dashboard`: offline mapping tests and local Chrome fixture tests for both channels, source ownership, unavailable/zero values, evidence-safe text, connected assets, failed attempts, refresh recovery, investigation completion and responsive layout. No Meta/Google calls.
-- `npm run test:website`: regression coverage for shared website rendering.
+## Validation
 
-The older backend-lab smoke test still checks its isolated workflow and optional investigation lifecycle fixture; its fixture has no saved archives. `npm run test:dashboard` now targets the actual integrated Dashboard contract.
+From `client/`:
+
+- `npm run lint` and `npm run build`.
+- `npm run test:dashboard`: mapping/selection tests and local browser fixtures for real-source mapping, unchanged assessment/section structure, read-only previews, empty/unavailable results, stale retention, refresh recovery, business rejection, responsive overflow and investigation refresh/duplicate protection.
+- `node scripts/website-smoke.mjs`: shared Website-reader regression coverage.
+- `npm run test:settings`: Settings navigation and controls regression coverage.
+- `node scripts/website-smoke.mjs --dashboard --saved`: explicit read-only check against a running local backend (`WEBSITE_API_TARGET`, default `http://127.0.0.1:3001`). It never creates an audit. Local-only screenshots live under ignored `node_modules/.cache/website-smoke/`.
+
+The actual SQLite-backed Guzman Dashboard passed the saved-data browser check against audit `9961da8a-4575-4f6c-a2e7-53ed72441838`, with external backend requests blocked: zero external provider attempts, no model calls, no new audits or edits. Desktop and 320/390/768/1280-pixel widths passed. No backend source or credentials changed.

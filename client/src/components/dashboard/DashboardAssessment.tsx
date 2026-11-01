@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { CircleAlert, Monitor, Store, WandSparkles } from 'lucide-react'
 import { Link } from 'react-router'
-import { mockConsistency, mockMainSpyResults, mockWebsiteResults } from '../../data/mockResults'
 import type { DashboardAssessmentModel } from '../../hooks/useDashboardAssessment'
 import type { Score } from '../../types/dashboard'
 import { FacebookMark } from '../common/FacebookMark'
@@ -10,7 +9,7 @@ import { ScoreCard } from './ScoreCard'
 import { getScoreStatus } from '../../utils/scoreStatus'
 import type { ReactNode } from 'react'
 
-interface Issue { id: string; title: string; explanation: string; severity: string }
+interface Issue { id: string; title: string; explanation: string; severity: string; recommendation?: { title: string; explanation: string } }
 const buttonStyle = 'inline-flex min-h-11 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-2 text-[11px] font-semibold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 const reportStyle = 'mt-auto inline-flex min-h-11 items-center justify-center rounded-lg border border-blue-400/40 px-2 py-2 text-center text-xs font-semibold text-blue-200 hover:bg-blue-500/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 
@@ -43,7 +42,7 @@ function Category({ title, description, icon, score, source, issues, empty, chil
       return <li key={issue.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-2 sm:flex-nowrap">
         <span title={issue.severity} className={`flex size-6 shrink-0 items-center justify-center rounded-md border ${tone}`}><CircleAlert size={14} aria-hidden="true" /><span className="sr-only">{issue.severity} · Needs review</span></span>
         <div className="min-w-0 flex-1"><h5 className="break-words text-xs font-semibold leading-4 text-ink">{issue.title}</h5><p title={issue.explanation} className="mt-1 truncate text-[10px] leading-4 text-secondary">{issue.explanation}</p></div>
-        <button type="button" aria-label={`Fix with AI: ${issue.title}`} className={`${buttonStyle} shrink-0`} onClick={() => setFeedback(`Demo preview for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" />Fix with AI</button>
+        <button type="button" aria-label={`Fix with AI: ${issue.title}`} className={`${buttonStyle} shrink-0`} onClick={() => setFeedback(issue.recommendation ? `Saved recommendation: ${issue.recommendation.title}. ${issue.recommendation.explanation} Review the full report before approving a change. No changes have been made.` : `No saved recommendation is available for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" />Fix with AI</button>
       </li>
     })}</ul> : <p className="mb-4 rounded-lg border border-line p-3 text-xs leading-5 text-secondary">{empty}</p>}
     <p role="status" aria-live="polite" className="break-words text-xs leading-5 text-blue-200">{feedback}</p>
@@ -52,31 +51,38 @@ function Category({ title, description, icon, score, source, issues, empty, chil
 }
 
 export function DashboardAssessment({ model }: { model: DashboardAssessmentModel }) {
-  const { social, socialView, top } = model
+  const { website, websiteReport, social, socialView, socialReport, latestWebsiteAttempt, top, main, websiteResults, consistency } = model
+  const asScore = (score: typeof main.overall): Score | null => score.value === null ? null : { ...score, value: score.value }
+  const websiteSource = [websiteReport ? `Saved website report · ${websiteReport.audit.completedAt ?? websiteReport.generatedAt} · Homepage coverage` : 'No saved website report is available.',
+    'SEO Spy score not available', websiteReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    latestWebsiteAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', website.error ?? ''].filter(Boolean).join(' · ')
+  const socialSource = [socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · ${socialReport?.results.facebook.collectedAt}` : 'Numeric social score not available',
+    socialView ? 'Numeric score not provided' : '', socialReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    social.data?.latestAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', social.error ?? ''].filter(Boolean).join(' · ')
   return <section aria-labelledby="spy-total-title" className="min-w-0 rounded-2xl border border-blue-500/60 bg-surface p-3 shadow-lg shadow-blue-950/20 sm:p-5">
     <div className="flex items-center gap-3"><SpyLogo /><div><p className="text-xs font-semibold text-blue-300">SEO Spy</p><h2 id="spy-total-title" className="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl">Spy Total Score</h2></div></div>
     <div className="mt-5 grid min-w-0 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-[1.08fr_1fr_1fr_1fr]">
       <section aria-label="Overall assessment" className="flex min-w-0 flex-col rounded-xl border border-blue-400/20 bg-blue-500/[0.03] p-4 md:col-span-2 xl:col-span-1">
-        <ScoreCard score={mockMainSpyResults.overall} prominent />
+        <ScoreCard score={main.overall} live prominent />
         <p className="mt-4 text-xs leading-5 text-secondary">SEO Spy combines your website health, social media performance, and business consistency to give you one overall view of your online presence.</p>
-        <p className="mt-2 text-[10px] leading-4 text-muted">Demo overall score · Not calculated from the saved Facebook report. Website and consistency scores are also demo data.</p>
+        <p className="mt-2 text-[10px] leading-4 text-muted">Combined SEO Spy score not available. Channel scores and business comparisons require backend scoring.</p>
         <dl className="mt-auto space-y-3 border-t border-line pt-4 text-[11px]">
           {[
-            { label: 'Website Health', score: mockWebsiteResults.overall, dot: 'bg-cyan-400' },
+            { label: 'Website Health', score: asScore(websiteResults.overall), dot: 'bg-cyan-400' },
             { label: 'Social Media Performance', score: null, dot: 'bg-blue-500' },
-            { label: 'Business Consistency', score: mockConsistency.score, dot: 'bg-amber-400' },
+            { label: 'Business Consistency', score: asScore(consistency.score), dot: 'bg-amber-400' },
           ].map(item => <div key={item.label} className="flex items-start justify-between gap-2"><dt className="flex min-w-0 items-start gap-2 text-secondary"><span className={`mt-1 size-1.5 shrink-0 rounded-full ${item.dot}`} aria-hidden="true" />{item.label}</dt><dd className="shrink-0 text-right font-semibold text-ink">{item.score ? `${item.score.value}/${item.score.maximum}` : <><span aria-hidden="true">—</span><span className="block text-[10px] font-normal text-muted">Not available</span></>}</dd></div>)}
         </dl>
       </section>
-      <Category accent="border-cyan-400/30 bg-cyan-400/15 text-cyan-300" title="Website Health" description="How your website performs for search engines and visitors." icon={<Monitor size={25} aria-hidden="true" />} score={mockWebsiteResults.overall} source="Demo score and findings · Not a live assessment" issues={top.website} empty="No website issues are listed in the current demo data.">
-        <Link to="/website" className={reportStyle}>Open Website Report</Link>
+      <Category accent="border-cyan-400/30 bg-cyan-400/15 text-cyan-300" title="Website Health" description="How your website performs for search engines and visitors." icon={<Monitor size={25} aria-hidden="true" />} score={asScore(websiteResults.overall)} source={websiteSource} issues={top.website} empty={website.loading ? 'Loading your saved website report…' : website.error ?? (websiteReport ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved website report is available. Run Investigation to collect its findings.')}>
+        <Link to={`/website?businessId=${encodeURIComponent(model.businessId)}`} className={reportStyle}>Open Website Report</Link>
       </Category>
-      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={null} source={socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · Numeric score not provided` : 'Numeric social score not available'} issues={top.social} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
+      <Category accent="border-blue-400/40 bg-blue-600 text-white" title="Social Media Performance" description="How your social presence and activity support your business." icon={<FacebookMark />} score={null} source={socialSource} issues={top.social} empty={social.loading ? 'Loading your saved Facebook report…' : social.error ? social.error : socialView ? 'No issues were found in the saved checks. Coverage may be limited; review the full report.' : 'No saved Facebook report is available. Connect a Page and generate a report to see its findings.'}>
         {social.error && <button type="button" onClick={social.refresh} className={`${reportStyle} mb-3`}>Retry saved report</button>}
-        <Link to="/social-media" className={reportStyle}>Open Social Media Report</Link>
+        <Link to={`/social-media?businessId=${encodeURIComponent(model.businessId)}`} className={reportStyle}>Open Social Media Report</Link>
       </Category>
-      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={mockConsistency.score} source={`Demo comparison · ${mockConsistency.channels}`} issues={top.consistency} empty="No differences are listed in the current demo comparison.">
-        <details id="consistency-details" tabIndex={-1} className="mt-auto rounded-lg border border-blue-400/40 text-xs text-blue-200"><summary className="min-h-[42px] cursor-pointer rounded-lg px-2 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-blue-300">View Consistency Details</summary><ul className="space-y-4 border-t border-line p-3">{mockConsistency.checks.map(check => <li key={check.id} className="break-words text-xs leading-5"><p className="font-semibold text-ink">{check.label} · {check.matches ? 'Matches' : 'Needs review'}</p><p>Website: {check.website}</p><p>Facebook: {check.social}</p></li>)}</ul></details>
+      <Category accent="border-amber-400/30 bg-amber-400/15 text-amber-300" title="Business Consistency" description="How consistent your business information is across connected platforms." icon={<Store size={25} aria-hidden="true" />} score={asScore(consistency.score)} source="No saved business comparison is available." issues={top.consistency} empty="No saved business comparison is available.">
+        <details id="consistency-details" tabIndex={-1} className="mt-auto rounded-lg border border-blue-400/40 text-xs text-blue-200"><summary className="min-h-[42px] cursor-pointer rounded-lg px-2 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-blue-300">View Consistency Details</summary><ul className="space-y-4 border-t border-line p-3">{consistency.checks.map(check => <li key={check.id} className="break-words text-xs leading-5"><p className="font-semibold text-ink">{check.label} · {check.matches === null ? 'Not available' : check.matches ? 'Matches' : 'Needs review'}</p><p>Website: {check.website}</p><p>Facebook: {check.social}</p></li>)}</ul></details>
       </Category>
     </div>
   </section>

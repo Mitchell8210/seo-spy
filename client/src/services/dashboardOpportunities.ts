@@ -28,6 +28,6 @@ export function selectDashboardOpportunities(issues: DashboardIssue[]) {
 }
 
 export function opportunityDestination(category: DashboardCategory, businessId: string) {
-  return category === 'website' ? '/website' : category === 'social'
+  return category === 'website' ? `/website?businessId=${encodeURIComponent(businessId)}` : category === 'social'
     ? `/social-media?businessId=${encodeURIComponent(businessId)}` : '/dashboard#consistency-details'
 }

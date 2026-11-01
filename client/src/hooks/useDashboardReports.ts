@@ -17,6 +17,8 @@ export function useDashboardReports(businessId: string, auditId?: string, auditS
     return () => { clearInterval(timer); window.removeEventListener('focus', refreshSocial) }
   }, [refreshWebsite, refreshSocial, auditId, auditStatus])
   return {
+    website,
+    social,
     ...mapDashboardReports(website.dashboard, website.report, social.data),
     loading: website.loading || social.loading,
     refreshSocial,
