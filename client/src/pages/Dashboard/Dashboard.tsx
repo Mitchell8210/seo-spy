@@ -1,14 +1,14 @@
 import { useEffect, useId, useRef } from 'react'
 import { ArrowRight, ArrowUpRight, CircleAlert, ChevronRight, Info, LoaderCircle, Play, Target } from 'lucide-react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { InvestigationStatus } from '../../components/dashboard/InvestigationStatus'
 import { findingStatuses } from '../../utils/findingStatus'
 import { StatusBadge } from '../../components/common/StatusBadge'
-import { mockBusiness, mockConnections } from '../../data/mockBusiness'
+import { mockBusiness } from '../../data/mockBusiness'
 import { DashboardAssessment } from '../../components/dashboard/DashboardAssessment'
 import { opportunityTitle } from '../../services/dashboardOpportunityCopy'
 import { useDashboardAssessment } from '../../hooks/useDashboardAssessment'
-import { useInvestigation } from '../../hooks/useInvestigation'
+import { useOverallInvestigation as useInvestigation } from '../../hooks/useOverallInvestigation'
 
 function statusLabel(status: string) {
   return status.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())
@@ -46,12 +46,20 @@ function DataDisclosure() {
 
   return <span className="inline" onPointerEnter={event => { if (event.pointerType === 'mouse') show() }} onPointerLeave={dismissAfterHover}>
     <button ref={trigger} type="button" aria-label="Important data disclosure" aria-describedby={id} onFocus={() => { if (!escapeDismissed.current) show() }} onBlur={() => { cancelDismiss(); tooltip.current?.hidePopover(); escapeDismissed.current = false }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); escapeDismissed.current = true; cancelDismiss(); tooltip.current?.hidePopover() } }} onClick={show} className="ml-1 inline-flex size-7 items-center justify-center rounded-md align-middle text-muted hover:text-blue-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"><Info size={15} aria-hidden="true" /></button>
-    <span ref={tooltip} id={id} role="tooltip" popover="auto" className="fixed inset-auto z-50 m-0 rounded-lg border border-line bg-elevated p-3 text-xs leading-5 text-secondary shadow-xl">Social findings come from saved Facebook reports. Website and Business Consistency data, the Spy Total Score, and the lower findings and recommendations are currently demo examples.</span>
+    <span ref={tooltip} id={id} role="tooltip" popover="auto" className="fixed inset-auto z-50 m-0 rounded-lg border border-line bg-elevated p-3 text-xs leading-5 text-secondary shadow-xl">Website and social findings come from saved reports. Scores and business comparisons are shown as not available when the backend has not calculated them. Viewing recommendations does not run AI or apply changes.</span>
   </span>
 }
 
 export function Dashboard() {
-  const assessment = useDashboardAssessment()
+  const [search] = useSearchParams()
+  const businessId = search.get('businessId')?.trim() || mockBusiness.id
+  const investigation = useInvestigation(businessId)
+  const assessment = useDashboardAssessment(businessId, investigation.audit?.id, investigation.audit?.status)
+  const business = assessment.business
+  const status = investigation.loading ? 'Checking investigation' : investigation.busy ? 'Investigation running'
+    : investigation.error || assessment.error ? 'Needs attention' : assessment.websiteReport || assessment.socialReport ? 'Report available' : 'Not available'
+  const reportError = assessment.error ? { message: assessment.error, code: 'REPORT_READ_FAILED' } : null
+  async function retry() { assessment.refresh(); await investigation.retry() }
   function openConsistency(category: string) {
     if (category !== 'consistency') return
     const details = document.getElementById('consistency-details') as HTMLDetailsElement | null
@@ -61,10 +69,8 @@ export function Dashboard() {
       details.scrollIntoView({ block: 'center' })
     }
   }
-  const investigation = useInvestigation(mockBusiness.id)
-
-  const websites = mockConnections.filter((connection) => connection.platform === 'website')
-  const socialAccounts = mockConnections.filter((connection) => connection.platform !== 'website')
+  const websites = assessment.connections.filter((connection) => connection.platform === 'website')
+  const socialAccounts = assessment.connections.filter((connection) => connection.platform !== 'website')
 
   return (
     <div className="space-y-8">
@@ -77,11 +83,11 @@ export function Dashboard() {
         <div className="flex flex-col justify-between gap-6 xl:flex-row xl:items-center">
           <div className="min-w-0">
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <StatusBadge label={mockBusiness.status} />
+              <StatusBadge label={status} />
             </div>
-            <h2 id="business-title" className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">{mockBusiness.name}</h2>
-            <a href={mockBusiness.website} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-sm text-sm text-blue-300 underline-offset-4 hover:underline">
-              <span className="break-all">{new URL(mockBusiness.website).hostname}</span>
+            <h2 id="business-title" className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">{business?.name ?? 'Not available'}</h2>
+            <a href={business?.website} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-sm text-sm text-blue-300 underline-offset-4 hover:underline">
+              <span className="break-all">{business ? new URL(business.website).hostname : 'Not available'}</span>
               <ArrowUpRight size={16} className="shrink-0" aria-hidden="true" />
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
@@ -94,10 +100,10 @@ export function Dashboard() {
         <div className="mt-5 border-t border-line pt-3 text-xs leading-5 text-muted">
           Run Investigation starts a website audit.<DataDisclosure />
         </div>
-        <InvestigationStatus audit={investigation.audit} loading={investigation.loading} submitting={investigation.submitting} error={investigation.error} onRetry={investigation.retry} />
+        <InvestigationStatus audit={investigation.audit} loading={investigation.loading} submitting={investigation.submitting} error={investigation.error ?? reportError} onRetry={retry} />
       </section>
 
-      <DashboardAssessment model={assessment} />
+      <DashboardAssessment key={businessId} model={assessment} />
 
       <section aria-labelledby="next-steps-title" className="overflow-hidden rounded-2xl border border-blue-500/40 bg-surface shadow-sm">
         <header className="border-b border-line px-5 py-5 sm:px-6">
@@ -115,7 +121,7 @@ export function Dashboard() {
               <div className="flex flex-wrap items-center gap-2"><StatusBadge label={finding.severity} tone={findingStatuses[finding.severity].tone} theme="dark" /><span className="text-xs font-medium text-secondary">{finding.source}</span></div>
               <h4 className="mt-2 text-sm font-semibold leading-6 text-ink">{opportunityTitle(finding.title, finding.explanation)}</h4>
               <p className="mt-1 text-sm leading-5 text-secondary">{finding.explanation}</p>
-              <p className="mt-2 text-xs font-medium text-muted">{statusLabel(finding.status)} · {finding.mode === 'demo' ? 'Demo' : 'Saved Facebook report'}</p><ChevronRight size={16} className="absolute right-1 top-5 text-muted group-hover:text-blue-300" aria-hidden="true" />
+              <p className="mt-2 text-xs font-medium text-muted">{statusLabel(finding.status)} · {finding.mode === 'demo' ? 'Demo' : finding.category === 'website' ? 'Saved website report' : 'Saved Facebook report'}</p><ChevronRight size={16} className="absolute right-1 top-5 text-muted group-hover:text-blue-300" aria-hidden="true" />
             </Link>)}{assessment.remaining.length === 0 && <p className="py-4 text-sm leading-6 text-secondary">No additional opportunities are available in the current data. Review the priority issues above first.</p>}{assessment.social.loading && <p role="status" className="py-2 text-xs text-muted">Checking saved Facebook opportunities…</p>}{assessment.social.error && <p role="alert" className="py-2 text-xs text-muted">Saved Facebook opportunities could not be refreshed. Review Social Media for details.</p>}</div>
           </section>
           <section aria-labelledby="recommendations-title" className="min-w-0 px-5 py-5 sm:px-6">

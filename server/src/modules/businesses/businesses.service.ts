@@ -9,6 +9,7 @@ import {
 } from "../../persistence/repositories.js";
 import { auditSummary } from "../audits/audits.service.js";
 import { LIGHTHOUSE_NOTICE } from "../../integrations/lighthouse/types.js";
+import { AssessmentService } from "../assessments/assessment.service.js";
 
 @Injectable()
 export class BusinessesService {
@@ -16,6 +17,7 @@ export class BusinessesService {
     @Inject(BUSINESS_REPOSITORY)
     private readonly businesses: BusinessRepository,
     @Inject(AUDIT_REPOSITORY) private readonly audits: AuditRepository,
+    private readonly assessments: AssessmentService,
   ) {}
 
   async dashboard(id: string) {
@@ -63,6 +65,7 @@ export class BusinessesService {
       findings: completed?.results?.findings ?? [],
       recommendations: completed?.results?.recommendations ?? [],
       priorityOpportunities: completed?.results?.recommendations.length ?? 0,
+      assessment: (await this.assessments.latest(id)).assessment,
     };
   }
 }

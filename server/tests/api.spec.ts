@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import request from "supertest";
 import { AppModule } from "../src/app.module.js";
+import { AssessmentService } from "../src/modules/assessments/assessment.service.js";
 import { configureApp } from "../src/configure-app.js";
 import {
   AUDIT_REPOSITORY,
@@ -32,6 +33,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import { ReportStorageError } from "../src/reports/report.types.js";
+import { AppDatabase } from "../src/persistence/sqlite/app-database.js";
 
 describe("demo API", () => {
   let app: INestApplication;
@@ -39,9 +41,11 @@ describe("demo API", () => {
 
   async function createApp() {
     const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(AppDatabase)
+      .useValue(new AppDatabase(new ConfigService({ DATABASE_PATH: join(reportsDir, "application.sqlite") })))
       .overrideProvider(FileReportStore)
       .useValue(
-        new FileReportStore(new ConfigService({ REPORTS_DIR: reportsDir })),
+        new FileReportStore(new ConfigService({ REPORTS_DIR: reportsDir, DATABASE_PATH: join(reportsDir, "application.sqlite") })),
       )
       .compile();
     app = configureApp(module.createNestApplication());
@@ -96,6 +100,22 @@ describe("demo API", () => {
     expect(Object.keys(spec.body.paths).sort()).toEqual(
       [
         "/api/health",
+        "/api/scoring-policy",
+        "/api/businesses/{businessId}/assessments",
+        "/api/businesses/{businessId}/assessments/latest",
+        "/api/businesses/{businessId}/assessments/{id}",
+        "/api/businesses/{businessId}/assessments/{id}/muse-analyses",
+        "/api/businesses/{businessId}/assessments/{id}/muse-analyses/{analysisId}",
+        "/api/businesses/{businessId}/scoring-facts",
+        "/api/wordpress/businesses/{businessId}/media-alt-previews",
+        "/api/wordpress/businesses/{businessId}/media-alt-previews/{proposalId}",
+        "/api/businesses/{businessId}/google/ga4",
+        "/api/businesses/{businessId}/google/facebook-visits",
+        "/api/businesses/{businessId}/google/search-console",
+        "/api/ai/admin/status",
+        "/api/ai/admin/intents/{intentId}",
+        "/api/ai/admin/intents/{intentId}/approve",
+        "/api/ai/admin/demo-authorizations",
         "/api/businesses/{businessId}/dashboard",
         "/api/businesses/{businessId}/audits",
         "/api/audits/{auditId}",
@@ -104,15 +124,38 @@ describe("demo API", () => {
         "/api/audits/{auditId}/lighthouse",
         "/api/businesses/{businessId}/reports",
         "/api/audits/{auditId}/report",
+        "/api/audits/{auditId}/evidence-summary",
+        "/api/audits/{auditId}/website-analysis",
         "/api/facebook",
         "/api/facebook/status",
         "/api/facebook/connect",
         "/api/facebook/test-token",
         "/api/facebook/callback",
         "/api/facebook/connection",
+        "/api/facebook/connection-metrics",
         "/api/facebook/disconnect",
         "/api/facebook/reports",
+        "/api/facebook/investigations",
+        "/api/facebook/investigations/status",
+        "/api/facebook/reports/status",
         "/api/businesses/{businessId}/facebook-report",
+        "/api/wordpress/businesses/{businessId}/connection",
+        "/api/wordpress/businesses/{businessId}/content/{resource}",
+        "/api/wordpress/businesses/{businessId}/content/{resource}/{id}",
+        "/api/wordpress/businesses/{businessId}/proposals",
+        "/api/wordpress/businesses/{businessId}/proposals/{id}",
+        "/api/wordpress/businesses/{businessId}/proposals/{id}/apply",
+        "/api/wordpress/businesses/{businessId}/rank-math/audits",
+        "/api/wordpress/businesses/{businessId}/rank-math/audits/{requestId}",
+        "/api/wordpress/businesses/{businessId}/rank-math/evidence",
+        "/api/wordpress/businesses/{businessId}/reports",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-evidence",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-estimates",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-analyses",
+        "/api/wordpress/businesses/{businessId}/reports/{reportId}/muse-analyses/{analysisId}",
+        "/api/wordpress/businesses/{businessId}/proposals/{id}/verifications",
+        "/api/wordpress/businesses/{businessId}/proposals/{id}/verifications/{verificationId}",
       ].sort(),
     );
     const create = spec.body.paths["/api/businesses/{businessId}/audits"].post;
@@ -126,6 +169,11 @@ describe("demo API", () => {
       "#/components/schemas/CreateAuditDto",
     );
     const schemas = spec.body.components.schemas;
+    expect(spec.body.paths["/api/audits/{auditId}/website-analysis"].get.responses["200"].content["application/json"].schema.$ref).toBe("#/components/schemas/WebsiteAnalysisDto");
+    expect(schemas.WebsiteAnalysisDto.properties.version.enum).toEqual(["website-priority-v1"]);
+    expect(spec.body.paths["/api/audits/{auditId}/evidence-summary"].get.responses["200"].content["application/json"].schema.$ref).toBe("#/components/schemas/EvidenceSummariesDto");
+    expect(schemas.EvidenceSummariesDto.properties.version.enum).toEqual(["programmatic-evidence-v1"]);
+    expect(schemas.EvidenceSummaryItemDto.properties.text.maxLength).toBe(280);
     expect(schemas.CreateAuditDto.properties.scope.enum).toEqual([
       "demo",
       "homepage",
@@ -426,6 +474,28 @@ describe("demo API", () => {
         (score) => score.value === null && score.availability === "unavailable",
       ),
     ).toBe(true);
+  });
+
+  it("publishes a channel assessment before making successful terminal audit status visible", async () => {
+    jest.spyOn(app.get(WebsiteCollector), "collect").mockResolvedValue({
+      requestedUrl: "https://guzmantaxaccounting.com", finalUrl: "https://guzmantaxaccounting.com", status: 200,
+      contentType: "text/html", body: Buffer.from("<html><title>Example</title><h1>Example</h1></html>"), bytes: 62, robots: "", redirects: [], collectedAt: new Date().toISOString(),
+    });
+    const assessments = app.get(AssessmentService), original = assessments.create.bind(assessments);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const publish = jest.spyOn(assessments, "create").mockImplementation(async (...args) => { await gate; return original(...args); });
+    try {
+      const created = await request(app.getHttpServer()).post("/api/businesses/demo-guzman/audits").send({ scope: "homepage" }).expect(202);
+      for (let attempt = 0; attempt < 50 && !publish.mock.calls.length; attempt++) await delay(10);
+      const status = await request(app.getHttpServer()).get(created.body.statusUrl as string).expect(200);
+      expect({ calls: publish.mock.calls.length, failure: status.body.failure }).toEqual({ calls: 1, failure: null });
+      expect(status.body.status).toBe("running");
+      const reports = await request(app.getHttpServer()).get("/api/businesses/demo-guzman/reports").expect(200);
+      expect(reports.body.reports.find((item: { auditId: string }) => item.auditId === created.body.id).status).toBe("completed");
+      release();
+      expect((await waitForAudit(created.body.id as string)).status).toBe("completed");
+    } finally { release(); publish.mockRestore(); }
   });
 
   it("exposes safe collection failure codes and preserves the previous completed audit", async () => {

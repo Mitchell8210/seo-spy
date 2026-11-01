@@ -256,7 +256,7 @@ export class WebsiteCollector {
     private readonly transport: WebsiteTransport,
   ) {}
 
-  async collect(input: string, shutdown?: AbortSignal): Promise<CollectedPage> {
+  async collect(input: string, shutdown?: AbortSignal, allowedSite?: string): Promise<CollectedPage> {
     if (this.active >= 2)
       throw new CollectionError(
         "COLLECTOR_BUSY",
@@ -271,6 +271,11 @@ export class WebsiteCollector {
       const redirects: string[] = [];
       for (;;) {
         signal.throwIfAborted();
+        if (allowedSite) {
+          const site = publicUrl(allowedSite);
+          if (url.protocol !== "https:" || url.hostname.replace(/^www\./, "") !== site.hostname.replace(/^www\./, ""))
+            throw new CollectionError("TARGET_SITE_MISMATCH", "Verification collection must stay on the registered HTTPS website.");
+        }
         const host = url.hostname.replace(/^\[|\]$/g, "");
         const addresses = isIP(host)
           ? [host]

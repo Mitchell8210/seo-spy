@@ -11,6 +11,8 @@ import {
 import type { BusinessRepository } from "../src/persistence/repositories.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import type { ReportFileReference } from "../src/reports/report.types.js";
+import { createFacebookReportingWindow } from "../src/integrations/facebook/reporting-window.js";
+import type { GoogleFacebookVisitsService } from "../src/modules/google/facebook-visits.service.js";
 
 class MockGraph extends FacebookGraph {
   override request = jest.fn<FacebookGraph["request"]>();
@@ -29,7 +31,7 @@ const reference: ReportFileReference = {
   downloadUrl: "/api/audits/saved/report",
 };
 
-function fixture() {
+function fixture(websiteVisits?: GoogleFacebookVisitsService) {
   const graph = new MockGraph(
     new ConfigService({ FACEBOOK_GRAPH_VERSION: "v26.0" }),
   );
@@ -41,13 +43,16 @@ function fixture() {
         ],
       };
     if (path === "123/posts") return { data: [] };
+    if (path.endsWith("/comments")) return { data: [] };
     if (path === "123/insights")
       return {
         data: [
           {
             name: params?.metric,
             period: "day",
-            values: [{ value: 0, end_time: "2026-10-29T07:00:00Z" }],
+            values: createFacebookReportingWindow(new Date()).dayEnds.map(end_time => ({
+              value: params?.metric === "page_actions_post_reactions_total" ? {} : 0, end_time,
+            })),
           },
         ],
       };
@@ -94,8 +99,8 @@ function fixture() {
       createdAt: new Date().toISOString(),
     });
   const requirePermissions = jest
-    .fn<(token: string) => Promise<void>>()
-    .mockResolvedValue(undefined);
+    .fn<(token: string) => Promise<string[]>>()
+    .mockResolvedValue(["pages_show_list", "pages_read_engagement", "read_insights", "pages_read_user_content", "business_management"]);
   const markReconnect = jest
     .fn<(id?: string) => Promise<void>>()
     .mockResolvedValue(undefined);
@@ -109,6 +114,9 @@ function fixture() {
     businesses,
     graph,
     facebook,
+    undefined,
+    undefined,
+    websiteVisits,
   );
   return {
     service,
@@ -122,6 +130,61 @@ function fixture() {
 }
 
 describe("Facebook reports from browser authorization", () => {
+  it("collects matching Google website visits only during explicit report generation, not status reads", async () => {
+    const collect = jest.fn<GoogleFacebookVisitsService["collect"]>().mockImplementation(async (businessId, since, until) => ({
+      businessId, provider: "ga4", metric: "sessions", attribution: "facebook-session-source-v1", since, until,
+      timeZone: "America/Los_Angeles", status: "available", total: 3, collectedAt: new Date().toISOString(), limitations: [],
+    }));
+    const f = fixture({ collect } as unknown as GoogleFacebookVisitsService);
+    expect(collect).not.toHaveBeenCalled();
+    await f.service.create("session", business.id, "123");
+    const window = f.write.mock.calls[0]![0].results!.facebook!.window;
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(collect).toHaveBeenCalledWith(business.id, window.since, window.until);
+    await f.service.status("session", business.id);
+    expect(collect).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the usable Facebook report if optional Google collection fails", async () => {
+    const collect = jest.fn<GoogleFacebookVisitsService["collect"]>().mockRejectedValue(new Error("private provider detail"));
+    const f = fixture({ collect } as unknown as GoogleFacebookVisitsService);
+    await expect(f.service.create("session", business.id, "123")).resolves.toMatchObject({ status: "completed" });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(f.write.mock.calls)).not.toContain("private provider detail");
+    expect(collect).toHaveBeenCalledTimes(1);
+  });
+  it("exposes running and terminal progress only to the initiating browser without Meta reads", async () => {
+    const f = fixture();
+    let release!: (value: ReportFileReference) => void;
+    let entered!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    f.write.mockImplementation(async () => { entered(); return new Promise(resolve => { release = resolve; }); });
+    const job = f.service.create("session", business.id, "123");
+    await writing;
+    const calls = f.graph.request.mock.calls.length;
+    expect(await f.service.status("session", business.id)).toEqual({ businessId: business.id, active: { pageId: "123", status: "running" }, latest: null });
+    expect(await f.service.status("another-session", business.id)).toEqual({ businessId: business.id, active: null, latest: null });
+    expect(f.graph.request).toHaveBeenCalledTimes(calls);
+    release(reference); await job;
+    expect(await f.service.status("session", business.id)).toMatchObject({ active: null, latest: { pageId: "123", result: { auditId: "saved", status: "completed" }, error: null } });
+    expect((await f.service.status("another-session", business.id)).latest).toBeNull();
+    expect(f.graph.request).toHaveBeenCalledTimes(calls);
+  });
+
+  it("retains safe terminal failures and clears prior outcomes when another run starts", async () => {
+    const f = fixture();
+    f.requirePermissions.mockRejectedValueOnce(new Error("private provider details"));
+    await expect(f.service.create("session", business.id, "123")).rejects.toThrow();
+    const status = await f.service.status("session", business.id);
+    expect(status).toMatchObject({ active: null, latest: { result: null, error: { code: "FACEBOOK_REPORT_FAILED" } } });
+    expect(JSON.stringify(status)).not.toContain("private provider details");
+    await f.service.create("session", business.id, "123");
+    expect((await f.service.status("session", business.id)).latest?.error).toBeNull();
+    f.credential.mockRejectedValueOnce(new Error("Reconnect required"));
+    await expect(f.service.status(undefined, business.id)).rejects.toThrow("Reconnect");
+    await expect(f.service.status("session", "../invalid")).rejects.toThrow("registered business");
+  });
+
   it("collects with the browser user token and returns only after the archive write completes", async () => {
     const f = fixture();
     let release!: (reference: ReportFileReference) => void;

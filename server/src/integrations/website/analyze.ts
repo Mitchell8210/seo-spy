@@ -8,6 +8,7 @@ import type {
   Score,
 } from "../../contracts/domain.js";
 import type { CollectedPage } from "./collector.js";
+import { extractWebsiteBusinessEntities } from "./business-facts.js";
 
 export const HOMEPAGE_NOTICE =
   "Homepage HTML audit only. JavaScript, browser performance, Facebook, and search rankings were not assessed. Scores are unavailable.";
@@ -63,6 +64,7 @@ export function analyzeHomepage(
       status: "needs_review",
     });
   }
+  record("business-facts", { version: "website-business-facts-v1", entities: JSON.stringify(extractWebsiteBusinessEntities($)), coverage: "Bounded schema.org observations from one collected page. Missing fields are unknown, not confirmed absent." });
   record("collection", {
     requestedUrl: page.requestedUrl,
     finalUrl: page.finalUrl,

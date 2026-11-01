@@ -1,15 +1,16 @@
 import { Module } from "@nestjs/common";
 import { AUDIT_REPOSITORY, BUSINESS_REPOSITORY } from "./repositories.js";
-import {
-  MemoryAuditRepository,
-  MemoryBusinessRepository,
-} from "./memory/memory.repositories.js";
+import { AppDatabaseModule } from "./sqlite/app-database.module.js";
+import { SQLiteAuditRepository, SQLiteBusinessRepository } from "./sqlite/sqlite.repositories.js";
 
 @Module({
+  imports: [AppDatabaseModule],
   providers: [
-    { provide: BUSINESS_REPOSITORY, useClass: MemoryBusinessRepository },
-    { provide: AUDIT_REPOSITORY, useClass: MemoryAuditRepository },
+    SQLiteBusinessRepository,
+    SQLiteAuditRepository,
+    { provide: BUSINESS_REPOSITORY, useExisting: SQLiteBusinessRepository },
+    { provide: AUDIT_REPOSITORY, useExisting: SQLiteAuditRepository },
   ],
-  exports: [BUSINESS_REPOSITORY, AUDIT_REPOSITORY],
+  exports: [BUSINESS_REPOSITORY, AUDIT_REPOSITORY, SQLiteBusinessRepository, SQLiteAuditRepository, AppDatabaseModule],
 })
 export class PersistenceModule {}

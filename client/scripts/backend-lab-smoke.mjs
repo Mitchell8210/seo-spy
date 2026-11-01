@@ -139,13 +139,25 @@ async function serveFixture(req, res) {
   if (!available) return reply(res, 503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Fixture backend unavailable. Please retry.', requestId: 'fixture-request' } });
   settleJobs();
   const route = new URL(req.url, 'http://fixture').pathname;
+  const overall = id => {
+    const audit = jobs.get(id)?.summary;
+    if (!audit || audit.mode !== 'live') return null;
+    return { id, businessId, audit: { ...audit, scoringVersion: 'overall-investigation-v1' },
+      websiteReportId: audit.status === 'completed' ? id : null, facebookReportId: audit.status === 'completed' ? 'fixture-facebook' : null,
+      assessmentId: audit.status === 'completed' ? 'fixture-assessment' : null };
+  };
+  if (route === '/api/facebook/investigations/status') {
+    statusRequests++;
+    return reply(res, 200, { businessId, active: activeId ? overall(activeId) : null, latest: activeId ? null : overall(latestId) });
+  }
   if (route === '/api/health') return reply(res, 200, { status: 'ok', service: 'fixture', mode: 'demo' });
   if (route.endsWith('/dashboard')) return reply(res, 200, dashboard());
-  if (req.method === 'POST' && route.endsWith('/audits')) {
+  if (req.method === 'POST' && (route.endsWith('/audits') || route === '/api/facebook/investigations')) {
     if (activeId) return reply(res, 409, { error: { code: 'AUDIT_ALREADY_ACTIVE', message: 'A fixture audit is already running.', requestId: 'fixture-request' } });
     let body = '';
     for await (const chunk of req) body += chunk;
-    const input = JSON.parse(body || '{}');
+    const input = route === '/api/facebook/investigations' ? { scope: 'lighthouse', strategy: 'mobile' } : JSON.parse(body || '{}');
+    if (route === '/api/facebook/investigations') assert.deepEqual(JSON.parse(body), { businessId });
     creationCount++;
     const id = `00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`;
     const audit = summary(id, { scope: input.scope, status: 'running', stage: input.scope === 'lighthouse' ? 'running_lighthouse' : 'collecting_evidence' });
@@ -161,7 +173,7 @@ async function serveFixture(req, res) {
       res.destroy();
       return;
     }
-    return reply(res, 202, { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
+    return reply(res, 202, route === '/api/facebook/investigations' ? overall(id) : { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
   }
   const match = /^\/api\/audits\/([^/]+)(?:\/(findings|recommendations|lighthouse))?$/.exec(route);
   if (match) {
@@ -292,8 +304,8 @@ async function assertUnifiedAssessment() {
 function assertDashboardRequests(requests) {
   assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must not fetch website report details; saved Facebook reports are allowed.');
   for (const request of requests.filter(request => request.method === 'POST')) {
-    assert.equal(new URL(request.url).pathname, `/api/businesses/${businessId}/audits`);
-    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { scope: 'lighthouse', strategy: 'mobile' });
+    assert.equal(new URL(request.url).pathname, '/api/facebook/investigations');
+    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { businessId });
   }
 }
 
@@ -332,7 +344,7 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(statusRequests, polls, 'Terminal status must stop polling.');
   };
   await submit('completed');
-  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\. Dashboard results below are still illustrative\./);
+  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\./);
   assert.match(await dashboardStatus(), /[a-f0-9-]{36}/i, 'Status must identify the backend audit.');
   pass('One mobile Lighthouse POST, duplicate prevention, stage progress, and unchanged mock results');
   if (liveMode) {
@@ -356,11 +368,12 @@ async function dashboardScenario(base, backendBase) {
     await waitFor(async () => await dashboardDisabled() === true, 'reload resumes active audit');
     assert.equal(creationCount, expected);
     pass('Reload resumes an active job without another POST');
-    await navigate(`${base}/website`);
-    await waitFor(() => evaluate('location.pathname === "/website"'), 'website navigation');
+    // Website now legitimately polls the same running audit; use a page without audit polling.
+    await navigate(`${base}/settings`);
+    await waitFor(() => evaluate('location.pathname === "/settings"'), 'settings navigation');
     await delay(500); const polls = statusRequests; await delay(3000);
     assert.equal(statusRequests, polls, 'Leaving dashboard cancels polling.');
-    pass('Leaving dashboard for website cancels polling');
+    pass('Leaving dashboard for settings cancels polling');
     // Finish the detached fixture before testing API recovery.
     if (activeId) { jobs.get(activeId).created = Date.now() - stageDelayMs - 1; settleJobs(); }
     available = false;

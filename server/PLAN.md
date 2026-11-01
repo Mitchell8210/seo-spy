@@ -1,10 +1,167 @@
 # SEO Spy backend plan
 
+Detailed next-stage backlog: [Meta Muse agent integration plan](AI_AGENT_INTEGRATION_PLAN.md). The WordPress-only read-only slice is implemented behind default-off gates; broader cross-channel scoring/actions remain planned. This backlog supersedes the generic future-AI outline for task sequencing; existing implementation history remains below.
+
 Status: foundation, homepage checks, Lighthouse integration, isolated backend-lab workflow, and durable report files implemented. Main dashboard action/status integration is available; real result-card integration and cumulative scoring remain separate tasks.
 Created: October 27, 2026.
-Last updated: October 28, 2026.
+Last updated: October 31, 2026.
 
 ## Progress record
+
+### November 1, 2026 - Evidence-based Social presence scoring
+
+- User approved six category weights (15/20/25/15/15/10) and Dashboard category/evidence presentation. Implemented reusable deterministic policy/engine, exact weighted arithmetic, profile syntax/description signals, 90-day frequency/recency/distribution/inactivity, audience-normalized 30-day LIKE/comment action density, non-unique visibility and conservative text structure/repetition proxies. Unsupported period shares, aligned follower growth, relevance review and customer-response evidence remain unavailable; no replacement with lifetime shares, conversations, daily unique flows or overlapping views.
+- Separate score/coverage with definitive >=70% plus meaningful posting/engagement evidence, provisional/insufficient status and definitive-only contribution to Total Spy. New v1.4 defaults preserve v1-v1.3 replay/hashes, prior source-review reuse, ownership/citation/freshness rules and immutable archives. Reads never collect/retry/generate AI.
+- Explicit report collection adds separately proven 90-day history (10 pages/250 posts, 2 MiB retained text, shared deadline); older 28-day proofs/truncated samples never establish new coverage. Requested Dashboard details are scoped to the existing Social card. All product thresholds and limitations are documented in [SOCIAL_SCORING.md](SOCIAL_SCORING.md); they are provisional targets, not industry benchmarks.
+- Live authenticated run verified complete 90-day history with three posts; final assessment `a0c19a0e-2be3-447e-a795-e7fdee84c0bf` pinned fresh Website/Facebook reports and produced Website80 / Social71 / Consistency60 / Total73. Social has71% coverage and50.25 known earned points; Posting0/20 reflects about73-day inactivity. Period shares/growth/relevance/response measures remain unavailable. Desktop browser confirmed values/breakdown and terminal workflow. Backend59 suites/1085 tests (one skipped), client33 tests, builds/lint/typecheck passed. Corrected an invalid ignored local budget setting to zero and safely closed an interrupted audit with existing no-replay recovery; protected AI ledger unchanged, no paid calls/WordPress writes/commits.
+
+### November 1, 2026 - Fresh overall investigations and reusable source reviews
+
+- User approved fixing Dashboard Run Investigation to refresh both Facebook and Website before calculating scores. Explicit browser-session orchestration reuses existing Facebook guards/Page selection, read-only collection/GA4 visits, mobile Lighthouse and deterministic assessment services. Status is read-only; duplicate, expired authorization, failed channel, timeout and restart behavior do not retry collection or silently substitute historical evidence.
+- New score policy v1.3 preserves v1/v1.1/v1.2 replay and all weights. Reuse source agreement only for unchanged compared claims on the same business/site/Page with original pinned provenance and review clocks. A new report never renews a human review; seven-day and calendar expiry still apply. Changed facts or unavailable evidence block Consistency/Overall. Facebook Always open remains a dated operator observation, not API-established hours.
+- Existing Dashboard button/status/gauges are reused; no presentation changes. Website page retains its website-only action. No paid model calls, WordPress writes, commits or pushes are part of implementation.
+- Validation: backend full check passed 56 suites / 1043 tests (one pre-existing skip), client lint/build and 26 mapping/workflow checks passed. A local-only assessment from the latest saved Guzman reports (`764365aa-ac94-4aca-8a85-d1fa12d10e4d`) restored Website79 / Social100 / Consistency60 / Overall81; actual frontend mapping matched all four. Source archive and protected AI ledger hashes were unchanged. No provider requests were made. Offline browser smoke stopped at CDP Page.enable timeout before product assertions; authenticated fresh dual-channel collection remains to be exercised through the user's browser.
+
+### November 1, 2026 - Historical explicit-mention search
+
+- User had no known example URL, so searched public web results and authorized historical tagged/feed/comment sources for an existing exact Page-ID tag. Added bounded historical and feed-only diagnostics with direct positive-control verification when a candidate exists; privacy-preserving aggregate results only, no content creation.
+- Live scans exhausted 76 accessible Page posts/their comment streams (one comment), empty tagged history, and subsequently all 77 accessible feed records. The feed returned tag metadata on 61 records and author IDs on 77, but none matched the business Page's ID. No existing positive-control mention was found; uniqueness/human identity and Facebook-wide coverage remain unverified. Frontend metric unchanged, no invented zero, external write or model call.
+
+### November 1, 2026 - Mention metadata and unique-people capability checked
+
+- Added an explicit browser-scoped mentions diagnostic for tagged/visitor posts, structured Page mention tags, author-ID availability, sampled comments and direct comment-node reads. Privacy-preserving counts only; no names/text/author or comment IDs retained or returned, no provider URL following, no writes or model calls.
+- Live sources were accessible but returned no tagged/visitor posts, and the one sampled in-window comment omitted mention tags/author ID in both list and direct reads. No reliable unique-people metric is established; no zero or automatic frontend population was introduced. Targeted checks passed 24 tests plus typecheck/lint/build; original frontend/scoring/report-generation behavior remains intact.
+
+### November 1, 2026 - Facebook-attributed GA4 website visits integrated
+
+- User approved Website Visits in the existing Website Clicks slot. Added sessions-only, hostname-bound, exact-period Facebook session-source reporting with strict response/date/timezone validation and no first-user/all-social substitutions. Matching sessions can include paid/organic sources and are not selected-Page clicks or unique contacts.
+- Explicit Facebook Run Report now optionally collects/caches Google visits. Saved report reads return a separately scoped cached companion without provider requests or archive/scoring mutation. Preserve identity/config guards, failure-versus-zero, negative cache, scoped concurrency, stale-source handling and failclosed storage. No frontend credentials or new card/control/layout introduced.
+- Live source returned **3** Facebook-attributed sessions for October 2–31 Pacific; source timezone matched, saved-read equality and byte-unchanged AI ledger verified. No Meta/model call or website write. Existing Google totals/Search Console behavior remains intact.
+- The user separately approved frontend **View Activity Total** (163 = media/Page/video counts, with overlap acknowledged) and **Interactions** as Likes + Comments + Conversations (6), excluding Lifetime Shares. These are display rollups, not scoring or replacements for archived native metrics. Backend full check passed 1000 tests (one skipped); client lint/build and five mapping checks passed, and real saved-data mapping showed Website Visits3 / View Activity Total163 / Interactions6.
+
+### November 1, 2026 - Shares and Comments connected to existing Social Media rows
+
+- User approved temporary lifetime Shares and explicitly required its label to remain Shares; separately chose 30-day Comments. Added saved lifetime share fields and bounded timestamp-only comment/reply enumeration across older/newer accessible posts. Preserve missing counts, coverage, cursor/deadline limits, exact date matching and source evidence; positive partial share sums display with `+`, never an invented exact total.
+- Frontend mapping alone fills the existing Shares/Comments slots; no component/label/layout/style changes. Other metrics remain at 30 completed Pacific days, and Interactions is not recomputed from mixed-period rows. Explicit report collection only; no scoring change, AI request or external write.
+- Live readback established Shares `243+` (20 known share fields among 50 recent posts). Comments required a separate bounded post-history read because the original sample was truncated; Meta then omitted nested comment fields on otherwise accessible posts. Focused live diagnostics verified direct reads and all field-expansion variants. Added direct reads for omitted edges, preserving unknown-versus-zero and a 150-request/250-post/deadline bound. No UI changes were needed for either correction.
+- Final explicit live run `8d6ae8b9-23c9-4867-bccc-248133050615` checked all 76 accessible posts and saved complete October 2–31 comment count 1. Real saved-report frontend mapping verified Comments `1` and Shares `243+`, keeping both original labels. No comment content/identity, live write or paid model call involved.
+
+### November 1, 2026 - Focused shares endpoint verification
+
+- Added `probe=shares` to the explicitly confirmed browser diagnostic, preserving Page/session scoping, bounded reads, credential/content redaction and writes-off behavior. Separately tests lifetime shares, basic sharedposts access and timestamp-field selection on five posts.
+- User-supplied live result confirmed two posts with nine lifetime shares each, but all five sharedposts reads returned empty lists. Access works; timestamped share-event coverage does not. No complete 30-day share count can be derived from this response; existing UI/scoring and saved reports remain unchanged. See [dated capability evidence](FACEBOOK_SETUP.md#explicit-interactioncontact-metric-diagnostics-november-1-2026).
+
+### November 1, 2026 - Cumulative Facebook reporting implemented
+
+- Explicit report runs collect 30 complete Pacific reporting days using independent DST-aware boundaries; sum only exact 30/30 validated daily buckets, preserving null/missing/error distinctions and source provenance. Exclude partial current-day/future buckets and reject duplicates/invalid/mismatched values. Profile/follower snapshots remain distinct.
+- Added LIKE-only daily reaction aggregation plus separately named Page-actions/new-conversation metrics. Wired eligible cumulative values into existing Social Media slots without labels/layout/components/styles changes; legacy unproven cumulative values stay unavailable until a new explicit report. Lifetime comments/shares, conversations and unique-mention samples never substitute for missing period metrics. Scoring arithmetic, immutable history, AI ledger and write gates remain unchanged.
+- User-triggered live run saved `45e6b787-93ee-4d06-94af-4e90777d0139`, October 2–31 Pacific, with all ten metric series at complete 30/30 coverage. Saved results include 5 interactions/4 likes/115 media views/36 Page views/12 video views/2 follows/0 unfollows. Separate conversation count 1 and aggregate actions 0 are not relabeled as messages/people. Backend full checks passed 929 tests (one skipped), plus client lint/build and mapping checks.
+
+### November 1, 2026 - Explicit Facebook interaction/contact capability probes
+
+- Added a confirmed, local browser-session diagnostic for individually isolated Page metrics, LIKE/comment/share counts, tagged/visitor posts and Messenger metadata. Uses existing encrypted credentials, bounded authorized Page selection, safe allowlisted output, a total deadline and no retries. No frontend presentation, saved audit/scoring, provider writes or AI calls changed.
+- Actual browser result established a reaction breakdown containing four likes and a new-conversation series containing one; lifetime comment counts are accessible, shares omitted. Click candidates rejected with Meta 100; Messenger conversations rejected with 200. These are capability observations, not permission to substitute metrics under existing UI labels. See [dated results and limitations](FACEBOOK_SETUP.md#explicit-interactioncontact-metric-diagnostics-november-1-2026).
+- Confirmed an official Meta documentation/integration MCP exists, separately configurable; not installed or authorized. Full UI data mapping remains dependent on correct period, completeness and metric semantics.
+
+### October 31, 2026 - Approved scoring and mocked recommendation/edit workflow
+
+- User approved the complete scoring draft: Overall 50/30/20, Website Lighthouse 50/25/15/10, confirmed Facebook profile/publishing goal and business consistency rubrics, strict missing-data/freshness/skew rules, rational arithmetic and final half-up rounding. Baseline excludes numeric Rank Math until its separate eligibility profile is defined. See [approved policy](SCORING_POLICY.md).
+- Implemented deterministic component calculations, saved-source adapters, bounded schema.org business observations, immutable SQLite schema-3 assessments/fact revisions/analysis/edit origins, current freshness overlays, operator creation and cost-free read contracts. Existing audit archives remain unchanged. Dashboard gauges accept compatible backend policy values; model prose cannot change scores.
+- Explicit mocked Muse recommendations cite minimized pinned Website/Facebook evidence and reuse an exact cache. The exposed assessment generation path blocks live requests. Added a cited WordPress media-alt preview bridge; existing exact-hash approval, writes-off gate, preconditions, replay/unknown locks and separate public verification remain required. Offline workflow checks cover these paths without external calls or edits.
+- **Deferred by the user:** compact frontend edit-review panel in the existing Fix with AI area (target/current/proposed alt text, expiry/status, Edit, Approve & Apply, Verify). Revisit this suggestion after the backend workflow; do not add controls without specific UI approval. Local browser operator authorization is also future work. This task focuses on the operator API workflow.
+- Real business confirmations and complete compatible social/comparison evidence are still required before Social/Consistency/Overall can become eligible. Do not relax missing-data rules to fill a gauge.
+- Verification: 44 backend suites passed (789 tests, one pre-existing skip), plus typecheck/lint/build, frontend lint/build, Dashboard/Website/Settings browser checks and actual saved-data rendering. Guzman Website is 80/100 (exact 79.6) from the existing Lighthouse run after its saved homepage redirect was bound explicitly. A separate read-only process replayed the persisted snapshot exactly. Actual mocked interpretation used zero tokens/provider requests; the AI ledger was byte-unchanged and no audit or site edit was started.
+
+### October 31, 2026 - Direct Google reporting backend
+
+- Implemented modular read-only service-account authentication, bounded fixed-endpoint Google transport and validated GA4/Search Console reporting. GA4 batches independent 7/30-day sessions, active users and page views; Search Console supports separate site totals and at most 10 top queries for 7/30 days. Final-data lag, privacy limits and metric units remain explicit.
+- Added local operator/business-bound `/api/businesses/:businessId/google/ga4` and `/search-console` endpoints, sanitized permission/API/empty results, persistent scoped response caching and stale-data preservation after failed refreshes. Transactional schema v2 preserves application history; the separate AI ledger remains untouched. No Meta/Muse call, WordPress edit, frontend change or customer OAuth is introduced.
+- Offline fixtures and isolated SQLite tests cover parsing, authorization, HTTP/cache contracts and migration preservation. Live connectivity succeeded October 31 Pacific time: one GA4 batch returned both windows, one 30-day Search Console query request returned 10 rows with all four metrics, and repeated local reads hit cache without upstream calls. One shared token exchange, zero Meta calls and a byte-unchanged AI ledger were verified. Site-wide summary behavior is fixture-tested and never inferred from query rows. See [setup and validation scope](GOOGLE_REPORTING.md).
+
+### October 31, 2026 - SQLite selected and application persistence adopted
+
+- User selected SQLite as the application's database instead of PostgreSQL. Added a primary `reports/seo-spy.sqlite` with transactional migrations, foreign keys, indexed businesses/audits, durable statuses/timestamps, findings/suggestions and immutable report/action artifacts. Repository tokens/API contracts are preserved; frontend presentation is unchanged.
+- Existing JSON archives are preserved as compatibility exports and idempotent migration sources. Actual adoption imported 12 audit reports/audits, three WordPress evidence reports, one Muse analysis and three WordPress operation records. Original creation/completion dates and report payloads were retained. Registered identities/newer runtime state are never replaced by archive snapshots.
+- Application records/history and Website latest-result selection now survive restart. Facebook audits have separate channel reservations and do not overwrite Website dashboard results. Jobs remain in-process; operator recovery can adopt a saved terminal outcome or close an interrupted run without replaying collection or spending credits.
+- The protected AI usage database remains separate and byte-unchanged by migration. WordPress target locks and encrypted credential stores remain protected. No external request, model call, WordPress change, budget reset or history deletion occurred. See [database operation, backup and recovery](DATABASE.md).
+- Verification passed: 33 suites, 550 tests and one skipped, plus typecheck/lint/build. Actual adoption rerun inserted nothing and retained all existing counts; the saved mock-analysis API reused its original ID from SQLite in a new process with zero real calls/charges. No client files changed.
+
+### October 31, 2026 - Promotional-credit preservation and mock-first AI
+
+- Implemented the user's $2 lifetime development/$0.50 UTC-daily/ten-call ceilings with transactional SQLite reservations, versioned schema migrations and persistent attempt/approval history. Process restarts and mode changes cannot reset cumulative limits; reductions remain sticky. Unknown outcomes/overruns halt usage; missing/corrupt initialized storage fails closed. No automatic retry, expiry unlock or budget reset exists.
+- All real model access now shares one protected provider and payload-bound one-use native dispatch grant. The separate local AI administrator must approve every exact scoped estimate/hash/cost before reservation. One global active/unknown attempt and 60-second spacing apply across processes. Demo requires a separate recorded authorization and cannot draw from development or reset prior usage.
+- Safe defaults are MOCK_AI=true, AI_MODE=mock, AI_ENABLED=false, Muse Spark 1.3 Standard/low reasoning, at most 1500 output tokens and 32768 input bytes. The supplied private model key was preserved; a separate ignored administrator credential was configured without exposing it. Adding either credential does not spend credits.
+- Added labeled realistic fixtures, summarized cited inputs, mode-isolated persistent cache and local end-to-end mock verification. The actual local API generated mock analysis a1283558-6b10-4c37-8120-9f3563b631b4 from the saved Guzman report, reused its cache and read it back with zero external requests. Persistent development/demo counts and charges remained zero. No live request or live approval was created.
+- See [credit protection and administrator runbook](AI_USAGE_RULES.md). Deterministic SEO/Lighthouse collection, numeric scoring and WordPress action authorization remain separate. Provider billing limits are still required; the account's actual credit balance has not been queried.
+- Final checks passed: 28 suites, 502 tests and one skipped, plus typecheck/lint/build. Re-running the local mock harness in a fresh process reused the same analysis ID with unchanged zero usage. No client files changed, no live approvals were created, and no real API requests were made.
+
+### October 31, 2026 - WordPress saved evidence, Muse pipeline and public verification
+
+- Implemented separate immutable WordPress evidence reports, saved history/reads, published non-password-protected sample selection, parent-bound media and filtered Rank Math metadata/stored scores. Null scoring/freshness and explicit per-source failures are preserved. First live report saved and read back successfully; its media mapping failure is preserved in the original archive and corrected for subsequent reports.
+- Added minimized cited Muse bundles, default-off fixed Responses transport, bounded calls/tokens/concurrency, strict output/target/reference validation and separate immutable WordPress-only interpretation records. Generation requires an explicit confirmed operator request. Live key/model/processing-mode/budget setup remains pending; no live AI calls, scores or model execution tools.
+- Added public source-HTML media-alt verification through a shared protected collector with registered-site redirect binding, independent stored/public statuses and saved receipts. Fixtures cover cache mismatch, later propagation, builder/source conflicts and failed collection.
+- Prepared the exact media-alt pilot requested by the user on the existing Guzman live site; the preview expired without approval and was not applied. A fresh preview/hash/review is required. Separate staging isolation is not established. The pilot CLI cannot retry uncertain writes or restore automatically. No frontend change was made.
+- Final live report `12897672-5152-4f1c-b727-b72cd3cdfe9c` has current visibility-policy proof, all five sources available, 20 pages/17 posts/20 media and 91 bounded Muse observations. Saved/history/preparation checks passed without model calls, writes or a fresh audit. Backend check passed: 24 suites, 429 tests plus one skipped, typecheck/lint/build.
+- See [report contracts/results](WORDPRESS_REPORTS.md), [provider setup](MUSE_PROVIDER.md), [pilot workflow](WORDPRESS_STAGING.md) and [remaining tasks](WORDPRESS_NEXT_STEPS.md). Specialized editors, application identity/shared execution, scoring and broader combined assessments remain future work.
+
+### October 31, 2026 - WordPress traffic-data discovery
+
+- Verified active Site Kit with configured/connected GA4 and Search Console. Configuration reads work, but both report reads returned 403 `missing_required_scopes`; the WordPress user behind current credentials has no Google authorization in Site Kit.
+- Read existing Rank Math analytics summaries without syncing or auditing: no usable traffic totals; explicit `n/a` is preserved, not converted to zero. Documented candidate metrics and access limitations in [analytics discovery](WORDPRESS_ANALYTICS_DISCOVERY.md). The user explicitly excluded Google authorization setup; no reconnect/OAuth/analytics setup follow-up is planned.
+- Added explicit read-only operator diagnostics only; no frontend/API changes, new analytics connection, tracking configuration change or scoring calculation. Writes remain disabled.
+
+### October 30, 2026 - stored Rank Math scoring direction
+
+- User approved using available WordPress/Rank Math metadata and stored scores in the future assessment, with stored scores contributing only a small supporting weight. Exact numeric weights remain undecided; no score calculation was implemented.
+- Recorded freshness, sample coverage, missing-data and overlap requirements in the [scoring plan](AI_AGENT_INTEGRATION_PLAN.md#accepted-direction-stored-rank-math-evidence). Evidence packaging can proceed without a fresh sitewide audit; Muse interpretation and final backend scoring remain later work.
+
+### October 30, 2026 - Rank Math execution diagnostics
+
+- Investigated the original unavailable audit without retrying it. Lost HTTP/error data prevents a conclusive historical cause; a 30-second outer deadline versus Rank Math's own 30-second remote wait is the leading timing hypothesis. Existing parser shape matches the installed audit schema.
+- Added optional redacted transport diagnostics, explicit audit execution states, standard MCP/JSON-RPC envelope parsing and read-only unknown overlays for old receipts. Kept working evidence reads, write gates, reservations and no retries.
+- Discovered both live tool schemas and independently called `analyze-post-content` once on page 5652: HTTP 200, evidence plus 22 test IDs, no executed score. Node execution requires no AI host; Muse interpretation and the final backend scoring policy remain separate. See [investigation and validation](RANKMATH_AUDIT_INVESTIGATION.md).
+
+### October 30, 2026 - WordPress next steps phases 1 and 2
+
+- Configured the ignored local business/site binding and independent operator key with writes disabled. Verified actual module HTTP reads for account capabilities, lists, representative editable records and authorization rejection through a fresh temporary loopback backend.
+- Added a repeatable live read-only module diagnostic and [credential-free verification record](WORDPRESS_MODULE_VERIFICATION.md).
+- Corrected Rank Math ability paths to match the installed REST index and serialized definition discovery to respect transport concurrency. Offline checks pass; fresh audit authorization remains separate from evidence reads.
+- Corrected ability input encoding to structured query fields after live HTTP 400 responses. Verified page/post metadata and bounded stored-score samples through the module (20 pages, 17 posts), preserving null scores.
+- Following explicit user authorization, dispatched one fresh Rank Math audit request. Its saved result is unavailable (null score, no established findings, unknown remote coverage); no successful remote scan is claimed. Verified identical same-ID replay and saved GET receipt with exactly one remote audit dispatch, then confirmed writes disabled. See the verification record for request ID, timestamps and limitations. Phase 2 verification is complete; no content edit was performed.
+
+### October 30, 2026 - WordPress local operator module and Rank Math evidence
+
+- Added business-bound WordPress reads and exact-hash approved page/post/media updates through an HTTPS/DNS-pinned bounded adapter. Writes default off; no live changes performed. Local operator authentication is separate from the WordPress application password and future customer sign-in.
+- Added persisted proposals, single-execution/target reservations, stale-target checks and distinct stored-field verification. Unknown outcomes/publication failures retain locks; remote compare-and-swap and automatic reconciliation are not implemented.
+- Added Rank Math ability discovery, stored metadata/content scores and explicitly requested audit results with durable receipts. No fresh audit runs on GET evidence. See [module setup and limitations](WORDPRESS_MODULE.md) and [Rank Math notes](RANKMATH_API_NOTES.md).
+
+### October 30, 2026 - Dashboard starts both report channels
+
+- Dashboard Run Investigation now requests a Website Lighthouse audit and a browser-authorized Facebook report independently. Both retain saved results during collection/failure.
+- Added session-scoped Facebook progress/outcome reads without provider calls; Dashboard and Social Media recover running state after navigation and refresh saved results at completion. Progress is in memory; immutable reports remain durable.
+
+### October 30, 2026 - Social Media report rerun control
+
+- Connected an approved Run Report button beside the social account selector to existing browser-authorized Facebook report generation, preserving saved results during collection and failures.
+- Added an exact local frontend origin setting for JSON report requests through the existing proxy. Retained cookie-bound credentials, permission checks, authorized Page selection, duplicate protection, immutable archives and backend-only OAuth/diagnostic routes.
+
+### October 30, 2026 - readable Social Media report evidence
+
+- Added evidence-linked programmatic summaries to the saved Facebook analysis response. Existing detail fields show clear observations, implications and recommendations without raw key/value dumps or post identifiers.
+- Preserved collection caveats, immutable archives, metric meanings, UI structure and review-only actions. Older archives gain summaries on read; older APIs without summaries use the existing unavailable treatment. AI generation remains deferred.
+
+### October 30, 2026 - evidence-based Website performance priorities
+
+- Replaced blanket low severity for known Lighthouse performance findings with `website-priority-v1`: strategy-aware metric boundaries, evidence-linked decisions and conditional diagnostic escalation. Preserved measured category scores and unavailable combined scores.
+- Generated targeted investigation/fix steps and same-device verification guidance. Unknown checks and unrelated findings retain their existing classifications; poor category scores alone never escalate findings.
+- Added saved-report analysis reads and frontend data overlays so legacy reports reflect current priorities without rewriting archives, scans, provider calls, or presentation changes. See WEBSITE_PRIORITY_RULES.md for policy boundaries and sources.
+
+### October 29, 2026 - backend-owned Website evidence summaries
+
+- Added a backend reporting step that persists versioned, concise evidence summaries in newly generated homepage/Lighthouse reports. Uses actual check observations and measured values, with no frontend finding-specific copy catalog. Raw evidence and scores are preserved.
+- Added the read-only `GET /api/audits/:auditId/evidence-summary` contract. Older archives gain derived summaries without overwrites, scans, or provider calls. Source references and summary method version remain explicit.
+- Connected the existing Website evidence slots to backend summary text and compact source captions, preserving components, headings, controls, styling and layout. Shared Lighthouse payloads, base64 image data, and internal IDs no longer fill each disclosure.
+- AI-generated reports, interpretation and weighted scoring remain future backend analysis stages. The programmatic summary version is distinct from scoring versions; no API keys or model calls are introduced here.
 
 ### October 29, 2026 - integrate the remote Social Media components
 
@@ -127,7 +284,7 @@ Implementation decisions:
 
 ## Objective
 
-Build a Node.js and TypeScript backend using NestJS with its Express adapter for SEO Spy, an evidence-based website and social-media business audit application. Add PostgreSQL after the initial API and website audit work end to end.
+Build a Node.js and TypeScript backend using NestJS with its Express adapter for SEO Spy, an evidence-based website and social-media business audit application. SQLite is the selected durable database; the previous PostgreSQL direction is superseded.
 
 The product workflow is:
 
@@ -167,7 +324,7 @@ React client
 NestJS controllers and validation pipes (Express adapter)
     ↓
 Business and audit services
-    ├── Repositories → in-memory storage initially → PostgreSQL later
+    ├── Repositories → SQLite application database
     ├── Website collector → public website evidence
     ├── Deterministic checks and scoring
     └── Provider adapters → Facebook and AI later
@@ -175,8 +332,8 @@ Business and audit services
 
 - Keep controllers small; injectable services own application behavior and feature modules declare their dependencies.
 - Define repository interfaces around actual operations, such as creating an audit or reading its findings.
-- Use asynchronous repository interfaces from the start so PostgreSQL can replace memory storage without changing service callers.
-- Register repository implementations through explicit injection tokens: TypeScript interfaces do not exist at runtime. Use singleton memory repositories shared across requests and swap providers for PostgreSQL later.
+- Preserve asynchronous repository interfaces so persistence changes do not alter service contracts.
+- Register singleton SQLite repository implementations through explicit injection tokens. Memory repositories remain controlled fixtures only.
 - Keep domain records separate from dashboard response formatting.
 - Keep provider-specific response shapes behind adapters.
 - Use Nest exception filters for the consistent API error envelope, pipes for request validation, and guards for authorization when accounts are introduced.
@@ -220,7 +377,7 @@ server/
       persistence.module.ts    # Registers and exports repository providers
       repositories/            # Interfaces and injection tokens
       memory/
-      postgres/                # Later
+      sqlite/                  # Primary database, migrations and repositories
     integrations/
       website/
       providers/               # Later
@@ -228,7 +385,7 @@ server/
     fixtures/
   tests/
     fixtures/
-  migrations/                  # Added with PostgreSQL
+  # SQLite schema migrations currently live with the database implementation.
 ```
 
 Keep `client/` and `server/` independently runnable at first. A root workspace or shared contracts package can be added when useful; the browser must not import backend implementation code.
@@ -253,8 +410,8 @@ Foundation tools are now installed in `server/package.json` with resolved versio
 | Helmet                                                                | Baseline HTTP response headers                                                         | Foundation; configure for an API                                                                                 |
 | `@nestjs/testing` + Jest + Supertest                                  | Isolated provider tests and HTTP integration tests                                     | Foundation; override repository/provider dependencies and apply the same global app configuration as runtime     |
 | Cheerio                                                               | Parse fetched HTML into structured evidence                                            | First website audit                                                                                              |
-| PostgreSQL                                                            | Durable records, relationships, and audit history                                      | Persistence milestone                                                                                            |
-| PostgreSQL driver/query builder or ORM                                | Database access and migrations                                                         | Choose with persistence; evaluate `pg`, Drizzle, or Prisma and select one approach                               |
+| SQLite                                                               | Durable records, relationships, audit history and suggestions                           | Selected and implemented; separate protected AI credit ledger retained                                           |
+| Node 24 `node:sqlite`                                                  | Native prepared statements, transactions and schema migrations                         | Implemented; no PostgreSQL driver or ORM required                                                                 |
 | Meta Graph API / Facebook Login                                       | Authorized Facebook Page identity and available audit data                             | Later; confirm permissions, app review, metric availability, and reporting windows                               |
 | Meta-compatible model API                                             | Structured AI analysis and recommendations                                             | Later; confirm actual provider, model, hosting, pricing, and data handling before integration                    |
 | Baseten                                                               | Possible model hosting/provider integration                                            | Candidate only; do not assume it is required                                                                     |
@@ -350,7 +507,7 @@ Proposed stages:
 
 Facebook collection, cross-channel comparison, and AI analysis are later stages. A provider failure should preserve usable results and yield partial completion where appropriate.
 
-In-memory records and in-process jobs are local-development conveniences: restarting the server loses them. Document this behavior. Durable execution/recovery is required when PostgreSQL and shared deployment are introduced.
+Records now persist in SQLite across restarts. Execution remains in-process; interrupted queued/running records require explicit operator reconciliation and never automatically replay external work. Shared deployment still needs application identity and deliberate worker coordination.
 
 ### First website checks
 
@@ -397,9 +554,9 @@ HTML collection does not execute page JavaScript or measure real browser perform
 - Remove hard-coded mock wording only for live results; retain explicit labels for demo responses.
 - Configure a Vite development API proxy or an explicit allowed client origin; public frontend configuration must contain no secrets.
 
-## PostgreSQL preparation
+## SQLite persistence
 
-Add the database after the API and first real website audit are stable.
+Implemented after the API and first website audits stabilized. SQLite replaces the old PostgreSQL plan; see [DATABASE.md](DATABASE.md) for the actual schema, additive import, backup and recovery behavior.
 
 - Design migrations for businesses, connections, audits, evidence, findings, recommendations, and score snapshots.
 - Add foreign keys, status constraints, timestamps, and indexes for business/audit lookups.
@@ -409,7 +566,7 @@ Add the database after the API and first real website audit are stable.
 - Define restart recovery for queued/running audits, retention of collected evidence, and migration/seed commands.
 - Add repository integration tests against an isolated test database.
 - Add ownership/user records with authentication before exposing multiple businesses to real users.
-- Choose deployment, backups, and connection pooling when the deployment environment is known.
+- Keep SQLite on local server storage, with prepared statements, short transactions and consistent backups. Reassess distributed/high-write deployment only if the application needs it.
 
 ## Authentication, integrations, and external changes
 
@@ -463,11 +620,12 @@ Done when a real public homepage yields repeatable evidence-backed results witho
 
 Done when multi-page audits remain bounded and accurately report unavailable or failed checks.
 
-### 5. PostgreSQL and durable execution
+### 5. SQLite persistence and explicit interrupted-job recovery
 
-- Select database access tooling and add migrations.
-- Replace memory repositories and preserve contracts.
-- Implement restart recovery and test persistent history.
+- [x] Use Node SQLite with transactional schema migrations.
+- [x] Replace production memory repositories while preserving contracts and archived history.
+- [x] Persist reports, statuses, timestamps, findings and suggestions across restarts.
+- [x] Provide explicit interrupted-run reconciliation and offline persistence tests; no automatic provider replay.
 
 Done when audits and evidence survive restarts and interrupted work has a defined recovery path.
 
@@ -514,3 +672,14 @@ Resolve these at their relevant milestone rather than blocking the first API on 
 ## Immediate next task
 
 Coordinate the first main-page integration with the frontend engineer using `../client/WEBSITE_API_MAPPING.md`. Agree on nullable and overall score presentation, passed-check semantics, and homepage-only coverage before adapting the Website page. Reuse the proven backend-lab service/polling behavior in a separately scoped change. Keep the existing main pages unchanged until that integration is authorized; retain in-memory execution for the hackathon demo.
+
+## Approved scoring completion ? November 1, 2026
+
+Implemented v1.1 separate reporting cutoff and v1.2 Social profile-only scoring (5 ?20%, activity advisory), plus explicitly approved Consistency source agreement (20/30/30/20). Persisted the user?s source review of Facebook Always open and confirmed phone without inventing preferred name or timezone. Actual saved Guzman scores: Website78 / Social100 / Consistency60 / Total81. All four existing dashboard gauges passed the actual SQLite-backed browser check, with UI classes/layout unchanged, no provider attempts and unchanged AI ledger. Historic snapshots/hashes retained. See SCORING_POLICY.md for pinned record IDs and verification detail.
+
+Follow-up remains: review which business name and hours should be authoritative before proposing a site/Page correction. A disagreement score cannot decide that. The previously deferred frontend edit-review panel still requires its own explicit presentation approval; do not add it as part of scoring.
+
+
+### November 1, 2026 - Dashboard scoring breakdown removed
+
+User requested removal of the newly added Social scoring explanation section. Removed its Dashboard mount/component and obsolete rendering test; preserved scoring, evidence validation, category data and existing gauges. Calculation details are internal; do not re-add this section without explicit approval.

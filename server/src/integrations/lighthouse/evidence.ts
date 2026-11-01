@@ -5,6 +5,7 @@ import type {
   Finding,
 } from "../../contracts/domain.js";
 import type { LighthouseReport } from "./types.js";
+import { analyzeWebsite } from "./prioritize.js";
 
 export function attachLighthouse(
   results: AuditResults,
@@ -83,4 +84,8 @@ export function attachLighthouse(
       status: "needs_review",
     });
   }
+  const analysis = analyzeWebsite(auditId, results);
+  results.findings = analysis.findings;
+  results.recommendations = analysis.recommendations;
+  results.websiteAnalysis = analysis;
 }

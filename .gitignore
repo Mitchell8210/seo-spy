@@ -75,6 +75,7 @@ web_modules/
 !.env.example
 
 # Local credential stores and authentication configuration
+/server/secrets/
 .aws/
 .ssh/
 .azure/

@@ -16,17 +16,22 @@ const children = [];
 const errors = [];
 const requests = [];
 let mode = 'loaded';
+let savedAssessment = null;
 let cdp;
 let server;
 let artifacts;
 const now = '2026-10-29T16:49:21.881Z';
-const auditId = '00000000-0000-4000-8000-000000000001';
+let auditId = '00000000-0000-4000-8000-000000000001';
+let runMode = 'success';
 const evidence = { id: 'evidence', auditId, checkId: 'facebook:posts', sourceUrl: 'https://www.facebook.com/123', collectedAt: now, mode: 'live', observed: { post: '<script>window.fixtureExecuted=true</script>', phone: '702-555-0101' } };
 const finding = { id: 'finding', auditId, checkId: 'facebook:posts', evidenceIds: ['evidence'], severity: 'low', source: 'facebook', title: 'Review the phone number', explanation: 'Two collected posts have different phone numbers.', status: 'needs_review' };
 const recommendation = { id: 'recommendation', auditId, findingId: 'finding', title: finding.title, explanation: finding.explanation, recommendedChange: 'Confirm the correct contact number.', purpose: 'Help customers contact the business.', status: 'needs_review' };
+const readableEvidence = 'Two phone numbers were found in collected posts. Confirm which is current. <script>window.fixtureExecuted=true</script>';
+const evidenceSummaries = () => ({ version: 'programmatic-evidence-v1', auditId: mode === 'summary-mismatch' ? 'another-audit' : auditId,
+  findings: [{ id: finding.id, evidenceIds: ['evidence'], text: readableEvidence, sourceLabel: `Saved Facebook evidence · Collected ${now}` }], checks: [] });
 const facebook = {
   provider: 'facebook-graph', version: 'facebook-v1', graphVersion: 'v26.0', pageId: '123', pageName: 'Fixture Facebook Page', collectedAt: now,
-  window: { since: '2026-09-29T16:49:21.881Z', until: now, requestedDays: 30 },
+  window: { since: '2026-09-29T07:00:00.000Z', until: '2026-10-29T07:00:00.000Z', requestedDays: 30, basis: 'complete-provider-days', timeZone: 'America/Los_Angeles' },
   profile: { followers_count: { status: 'available', value: 15, collectedAt: now }, hours: { status: 'missing', value: null, collectedAt: now } },
   posts: { status: 'available', items: [{ id: '123_456', message: '<img src=x onerror="window.fixtureExecuted=true">', createdTime: now, url: 'https://www.facebook.com/123_456' }], truncated: true, collectedAt: now },
   metrics: [
@@ -41,10 +46,11 @@ const facebook = {
   coverage: { profileFieldsAvailable: 1, profileFieldsMissing: 1, profileFieldsUnavailable: 0, metricsAvailable: 1, metricsRequested: 2, postsLimit: 50 },
   limitations: ['At most 50 recent posts are collected.'],
 };
+for (const metric of facebook.metrics) metric.coverage = { complete: true, expectedDays: 30, returnedDays: 30 };
 const report = { schemaVersion: 'seo-spy.audit-report.v1', reportId: auditId, auditId, generatedAt: now, business: { id: 'demo-guzman', name: 'Fixture Business', website: 'https://example.com/', createdAt: now },
   audit: { id: auditId, businessId: 'demo-guzman', scope: 'facebook', mode: 'live', status: 'partial', warnings: ['Recent posts are bounded.'], failure: null },
   results: { facebook, findings: [], recommendations: [], evidence: [evidence], scores: [] } };
-const payload = () => ({ businessId: 'demo-guzman', report: mode === 'empty' ? null : report, analysis: mode === 'empty' ? null : { version: 'facebook-analysis-v1', auditId, summaries: ['Follower snapshots remained at 15.'], findings: [finding], recommendations: [recommendation] },
+const payload = () => ({ businessId: 'demo-guzman', report: mode === 'empty' ? null : report, analysis: mode === 'empty' ? null : { version: 'facebook-analysis-v1', auditId, summaries: ['Follower snapshots remained at 15.'], findings: [finding], recommendations: [recommendation], ...(mode === 'legacy' ? {} : { evidenceSummaries: evidenceSummaries() }) },
   latestAttempt: mode === 'failed-latest' ? { reportId: 'failed', auditId: 'failed', generatedAt: now, fileName: 'failed.json', downloadUrl: '/api/audits/failed/report', businessId: 'demo-guzman', scope: 'facebook', mode: 'live', status: 'failed', counts: { findings: 0, recommendations: 0 } } : null });
 
 async function waitFor(test, label, timeout = 15000) {
@@ -89,8 +95,26 @@ try {
   const chrome = process.env.CHROME_PATH ?? ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
   if (!chrome) throw new Error('Set CHROME_PATH to a local Chrome executable.');
   const cache = path.join(clientDir, 'node_modules/.cache/social-media-smoke'); await mkdir(cache, { recursive: true }); artifacts = await mkdtemp(path.join(cache, 'run-'));
-  server = http.createServer((req, res) => {
-    requests.push({ method: req.method, path: req.url });
+  server = http.createServer(async (req, res) => {
+    const entry = { method: req.method, path: req.url }; requests.push(entry);
+    if (req.url === '/api/businesses/demo-guzman/assessments/latest') {
+      res.writeHead(mode === 'score-error' ? 503 : 200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: 'demo-guzman', assessment: savedAssessment })); return;
+    }
+    if (req.method === 'POST' && req.url === '/api/facebook/reports') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      entry.body = JSON.parse(body);
+      const status = runMode;
+      setTimeout(() => {
+        if (status === 'reconnect') { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'FACEBOOK_RECONNECT_REQUIRED', message: 'Reconnect Facebook before running another report.' } })); return; }
+        if (status === 'failed') { res.writeHead(201, { 'content-type': 'application/json' }); res.end(JSON.stringify({ auditId: 'failed', reportId: 'failed', status: 'failed', failure: { code: 'COLLECTION_FAILED', message: 'Facebook collection could not be completed.' } })); return; }
+        auditId = '00000000-0000-4000-8000-000000000002';
+        report.auditId = auditId; report.reportId = auditId; report.audit.id = auditId;
+        evidence.auditId = auditId; finding.auditId = auditId; recommendation.auditId = auditId;
+        facebook.profile.followers_count.value = 16;
+        res.writeHead(201, { 'content-type': 'application/json' }); res.end(JSON.stringify({ reportId: auditId, auditId, status: 'partial', failure: null }));
+      }, 600);
+      return;
+    }
     if (req.url !== '/api/businesses/demo-guzman/facebook-report') { res.writeHead(404); res.end(); return; }
     const selected = mode;
     const data = selected === 'error' ? { error: { code: 'FIXTURE_ERROR', message: 'Saved reports are temporarily unavailable.' } } : selected === 'mismatch' ? { ...payload(), businessId: 'different-business' } : payload();
@@ -108,17 +132,16 @@ try {
   await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'saved Facebook report');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), false, 'The saved account dropdown must be interactive.');
   assert.equal(await evaluate('document.querySelector("#social-account").value'), '123');
-  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+0/); assert.match(await text(), /People Reached\s+Not available/);
+  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+Not available/); assert.match(await text(), /View Activity\s+Not available/);
   assert.match(await text(), /Review the phone number/);
   assert.match(await text(), /Social Media Health Summary/); assert.match(await text(), /SEO Spy Social Media Report/);
   assert.doesNotMatch(await text(), /returned daily measurements|Newest collected post|Report coverage and business details/);
-  assert.match(await text(), /People Who Contacted You\s+Not available/);
+  assert.doesNotMatch(await text(), /People Who Contacted You/);
   const healthLabels = await evaluate(`Array.from(document.querySelectorAll('section[aria-labelledby="social-health-title"] article')).map(card => ({ title: card.querySelector('h3').textContent, labels: Array.from(card.querySelectorAll('dt')).map(row => row.lastElementChild.textContent.trim()) }))`);
   assert.deepEqual(healthLabels, [
     { title: 'Followers', labels: ['New Followers', 'Unfollowed'] },
-    { title: 'People Reached', labels: ['Media views', 'Page views', 'Video views'] },
-    { title: 'People Who Contacted You', labels: ['Website Clicks', 'Address Clicks', 'People Mentioning Your Business'] },
-    { title: 'Interactions', labels: ['Likes', 'Comments', 'Shares', 'Messages'] },
+    { title: 'View Activity', labels: ['Media views', 'Page views', 'Video views', 'Website Visits'] },
+    { title: 'Interactions', labels: ['Likes', 'Comments', 'Conversations', 'Lifetime Shares'] },
   ], 'Health tiles preserve main labels while retaining correctly labeled view metrics.');
   assert.match(await text(), /Media views\s+63/);
   assert.match(await text(), /Page views\s+3/);
@@ -137,8 +160,25 @@ try {
   assert.equal(await evaluate('document.querySelectorAll("#social-urgent-title, #social-medium-title, #social-low-title, #social-great-title").length'), 4);
   await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Fix Now'))?.click()`);
   await waitFor(async () => (await text()).includes('<script>window.fixtureExecuted=true</script>'), 'native finding evidence disclosure');
+  assert.ok((await text()).includes(readableEvidence), 'Displays the backend evidence description exactly.');
+  assert.doesNotMatch(await text(), /facebook:posts|702-555-0101|post:|phone:/, 'Raw evidence keys and values stay out of the details.');
+  assert.ok((await text()).includes(recommendation.recommendedChange));
   assert.equal(await evaluate('window.fixtureExecuted === true'), false); assert.equal(await evaluate('document.querySelector("[data-testid=social-report] script") !== null'), false);
   await screenshot('desktop.png');
+  savedAssessment = { businessId: 'demo-guzman', policyVersion: 'seo-spy-score-v1.2', policyHash: 'a'.repeat(64), socialScope: 'facebook-profile-readiness', cutoff: now,
+    sources: [{ businessId: 'demo-guzman', reportId: auditId, provider: 'facebook' }], scores: { social: { value: 100, maximum: 100, availability: 'available' } } };
+  await navigateReport(`${base}/social-media`);
+  const scoreLabel = () => evaluate('document.querySelector("#social-score-title").closest("section").querySelector("[role=img]").getAttribute("aria-label")');
+  await waitFor(async () => (await scoreLabel()).includes('100 out of 100'), 'saved Social score');
+  assert.match(await scoreLabel(), /measured score/);
+  assert.match(await text(), /Facebook profile readiness · Posting activity advisory/);
+  savedAssessment.sources[0].reportId = 'different-report';
+  await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'report mismatch score check');
+  assert.equal(await scoreLabel(), 'Score: not available');
+  savedAssessment.sources[0].reportId = auditId;
+  mode = 'score-error'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'score failure retains report');
+  assert.equal(await scoreLabel(), 'Score: not available');
+  mode = 'loaded'; savedAssessment = null;
   report.audit.status = 'completed';
   await navigateReport(`${base}/social-media`);
   await waitFor(async () => (await text()).includes('Your social media is in good shape, but a few things need attention.'), 'general health summary');
@@ -148,17 +188,43 @@ try {
   finding.severity = 'low'; report.audit.status = 'partial';
   mode = 'error'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Saved reports are temporarily unavailable'), 'API error state');
   mode = 'mismatch'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('did not match the selected business'), 'reject mismatched business');
+  mode = 'summary-mismatch'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('analysis did not match its evidence'), 'reject mismatched evidence summary');
+  mode = 'legacy'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'legacy report');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Fix Now'))?.click()`);
+  await waitFor(async () => (await text()).includes('Supporting evidence was not included in this saved report.'), 'legacy summary unavailable');
+  assert.doesNotMatch(await text(), /facebook:posts|702-555-0101/);
   mode = 'empty'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('No saved Facebook analysis is available'), 'empty state');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), true, 'No account can be selected without a saved report.');
+  assert.equal(await evaluate('document.querySelector("[data-testid=social-run-report]").disabled'), true, 'No report can run without a selected account.');
   assert.equal(await evaluate('document.querySelector("[data-testid=social-report]") === null'), true);
   mode = 'loaded'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'report loads after empty state');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), false);
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await delay(150);
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, 'Mobile must not overflow.');
   await screenshot('mobile.png'); assert.deepEqual(errors, []);
+  assert.equal(requests.every(request => request.method === 'GET'), true, 'Viewing reports performs no writes.');
+  await evaluate('document.querySelector("[data-testid=social-run-report]").click(); document.querySelector("[data-testid=social-run-report]").click()');
+  await waitFor(async () => (await text()).includes('Report running'), 'report running state');
+  assert.match(await text(), /Followers\s+15/, 'Old results remain visible while generating.');
+  assert.equal(await evaluate('document.querySelector("[data-testid=social-run-report]").disabled'), true);
+  await waitFor(async () => /Followers\s+16/.test(await text()), 'fresh report replaces saved values');
+  assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Rapid clicks generate one report.');
+  assert.deepEqual(requests.find(item => item.method === 'POST').body, { businessId: 'demo-guzman', pageId: '123' });
+  for (const failure of ['reconnect', 'failed']) {
+    runMode = failure;
+    await waitFor(async () => await evaluate('!document.querySelector("[data-testid=social-run-report]").disabled'), 'button ready');
+    await evaluate('document.querySelector("[data-testid=social-run-report]").click()');
+    await waitFor(async () => (await text()).includes(failure === 'reconnect' ? 'Reconnect Facebook before' : 'Facebook collection could not be completed.'), 'safe generation failure');
+    assert.match(await text(), /Followers\s+16/, 'Failed runs preserve previous results.');
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  const positions = await evaluate('const selector=document.querySelector("#social-account").getBoundingClientRect(); const button=document.querySelector("[data-testid=social-run-report]").getBoundingClientRect(); ({selectorRight:selector.right,buttonLeft:button.left,selectorBottom:selector.bottom,buttonBottom:button.bottom})');
+  assert.ok(positions.buttonLeft > positions.selectorRight);
+  assert.ok(Math.abs(positions.buttonBottom - positions.selectorBottom) < 2);
+  await screenshot('run-report-desktop.png');
   await cdp.send('Page.navigate', { url: `${base}/settings` });
   await waitFor(async () => (await text()).includes('Business Profile'), 'remote Settings route');
-  assert.equal(requests.every(request => request.method === 'GET'), true, 'Viewing reports must not start audits or provider calls.');
+  assert.equal(requests.filter(request => request.method !== 'GET').every(request => request.method === 'POST' && request.path === '/api/facebook/reports'), true, 'Only the explicit Run Report action performs a POST.');
   console.log(JSON.stringify({ passed: ['partial coverage', 'zero versus unavailable', 'native hero/health/report components', 'unsupported score and benchmark unavailable', 'derived findings', 'no added summary or coverage sections', 'inert provider text', 'API error state', 'business mismatch rejected', 'empty and loaded states', 'mobile layout', 'remote Settings route', 'read-only API'], artifactDirectory: artifacts }, null, 2));
 } catch (error) { console.error(error); process.exitCode = 1; }
 finally {

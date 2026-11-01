@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { facebookPostCoverageSchema, type FacebookPostWindow } from "./post-coverage.js";
+import { facebookSocialHistorySchema, type FacebookSocialHistory } from "./social-history.js";
 
 export type FacebookAvailability = "available" | "missing" | "unavailable";
 export interface FacebookField {
@@ -22,8 +24,22 @@ export interface FacebookMetric {
   total: number | null;
   collectedAt: string;
   failureCode?: string;
+  sourceMetric?: string;
+  breakdown?: "like";
+  coverage?: { complete: boolean; expectedDays: number; returnedDays: number };
 }
 export interface FacebookReport {
+  socialHistory?: FacebookSocialHistory;
+  lifetimeShares?: {
+    basis: "lifetime"; sourceField: "shares"; knownTotal: number; total: number | null;
+    complete: boolean; postsCollected: number; postsWithCounts: number; collectedAt: string;
+  };
+  commentCounts?: {
+    basis: "reporting-window"; since: string; until: string; timeZone: "America/Los_Angeles";
+    status: "available" | "unavailable"; total: number | null; observedTotal: number;
+    complete: boolean; postsCollected: number; postsChecked: number; collectedAt: string; failureCode?: string;
+  };
+  publishing?: FacebookPostWindow;
   provider: "facebook-graph";
   version: "facebook-v1";
   analysisVersion?: "facebook-analysis-v1";
@@ -31,7 +47,7 @@ export interface FacebookReport {
   pageId: string;
   pageName: string;
   collectedAt: string;
-  window: { since: string; until: string; requestedDays: number };
+  window: { since: string; until: string; requestedDays: number; timeZone?: "America/Los_Angeles"; basis?: "complete-provider-days" };
   profile: Record<string, FacebookField>;
   posts: {
     status: FacebookAvailability;
@@ -40,6 +56,7 @@ export interface FacebookReport {
       message: string | null;
       createdTime: string | null;
       url: string;
+      shareCount?: number | null;
     }[];
     truncated: boolean;
     collectedAt: string;
@@ -113,6 +130,17 @@ const hours = z.object(
 );
 export const facebookReportSchema = z
   .object({
+    socialHistory: facebookSocialHistorySchema.optional(),
+    lifetimeShares: z.object({ basis: z.literal("lifetime"), sourceField: z.literal("shares"),
+      knownTotal: z.number().int().nonnegative().safe(), total: z.number().int().nonnegative().safe().nullable(),
+      complete: z.boolean(), postsCollected: z.number().int().min(0).max(50), postsWithCounts: z.number().int().min(0).max(50), collectedAt: timestamp,
+    }).optional(),
+    commentCounts: z.object({ basis: z.literal("reporting-window"), since: timestamp, until: timestamp,
+      timeZone: z.literal("America/Los_Angeles"), status: z.enum(["available", "unavailable"]),
+      total: z.number().int().nonnegative().safe().nullable(), observedTotal: z.number().int().nonnegative().safe(),
+      complete: z.boolean(), postsCollected: z.number().int().min(0).max(250), postsChecked: z.number().int().min(0).max(250),
+      collectedAt: timestamp, failureCode: z.string().max(128).optional(),
+    }).optional(),
     analysisVersion: z.literal("facebook-analysis-v1").optional(),
     provider: z.literal("facebook-graph"),
     version: z.literal("facebook-v1"),
@@ -124,6 +152,8 @@ export const facebookReportSchema = z
       since: timestamp,
       until: timestamp,
       requestedDays: z.number().int().positive().max(90),
+      timeZone: z.literal("America/Los_Angeles").optional(),
+      basis: z.literal("complete-provider-days").optional(),
     }),
     profile: z.object({
       name: field(text),
@@ -135,6 +165,7 @@ export const facebookReportSchema = z
       hours: field(hours),
       location: field(location),
       category: field(text),
+      timezone: field(z.union([z.string().max(100), z.number().finite().min(-14).max(14)])),
       username: field(text),
       followers_count: field(number),
       fan_count: field(number),
@@ -151,6 +182,7 @@ export const facebookReportSchema = z
             id: z.string().regex(/^\d+_\d+$/),
             message: z.string().max(100000).nullable(),
             createdTime: timestamp.nullable(),
+            shareCount: z.number().int().nonnegative().safe().nullable().optional(),
             url: z
               .string()
               .regex(
@@ -163,6 +195,11 @@ export const facebookReportSchema = z
       collectedAt: timestamp,
       failureCode: z.string().max(128).optional(),
     }),
+    publishing: z.object({
+      status: z.enum(["available", "unavailable"]),
+      items: z.array(z.object({ id: z.string().regex(/^\d+_\d+$/), message: z.string().max(100000).nullable(), createdTime: timestamp.nullable(), url: z.string().regex(/^https:\/\/www\.facebook\.com\/\d+_\d+$/) }).strict()).max(100),
+      truncated: z.boolean(), collectedAt: timestamp, coverage: facebookPostCoverageSchema, failureCode: z.string().max(128).optional(),
+    }).strict().optional(),
     metrics: z
       .array(
         z.object({
@@ -174,6 +211,9 @@ export const facebookReportSchema = z
             "page_views_total",
             "page_post_engagements",
             "page_video_views",
+            "page_post_likes",
+            "page_total_actions",
+            "page_messages_new_conversations_unique",
           ]),
           status: availability,
           period: z.literal("day"),
@@ -184,9 +224,12 @@ export const facebookReportSchema = z
           total: number.nullable(),
           collectedAt: timestamp,
           failureCode: z.string().max(128).optional(),
+          sourceMetric: z.string().max(128).optional(),
+          breakdown: z.literal("like").optional(),
+          coverage: z.object({ complete: z.boolean(), expectedDays: z.number().int().min(1).max(90), returnedDays: z.number().int().min(0).max(90) }).optional(),
         }),
       )
-      .max(7),
+      .max(10),
     summary: z.object({
       followersStart: number.nullable(),
       followersEnd: number.nullable(),
