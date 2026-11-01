@@ -170,4 +170,28 @@ describe("assessment HTTP API with saved evidence, protected mocks and real SQLi
     expect(created.text).not.toContain(operator);
     noProviders();
   });
+  it("persists a source-agreement revision without preferred facts and pins its evidence pair", async () => {
+    const at = audit.completedAt!;
+    const facebook: Audit = { ...structuredClone(audit), id: randomUUID(), scope: "facebook", scoringVersion: "facebook-v1" };
+    delete facebook.strategy;
+    facebook.results = { scores: [], findings: [], recommendations: [], evidence: [{ id: "saved-hours", auditId: facebook.id, checkId: "facebook:profile:hours", mode: "live", collectedAt: at, sourceUrl: "https://www.facebook.com/123", observed: { status: "missing" } }], facebook: {
+      provider: "facebook-graph", version: "facebook-v1", graphVersion: "v26.0", pageId: "123", pageName: business.name, collectedAt: at,
+      profile: { hours: { status: "missing", value: null, collectedAt: at } }, window: { since: at, until: at, requestedDays: 30 },
+      posts: { status: "available", items: [], truncated: false, collectedAt: at }, metrics: [],
+      summary: { followersStart: null, followersEnd: null, followersChange: null, latestPostAt: null, postsInWindow: 0, postsInWindowComplete: true },
+      coverage: { profileFieldsAvailable: 0, profileFieldsMissing: 1, profileFieldsUnavailable: 0, metricsAvailable: 0, metricsRequested: 0, postsLimit: 50 }, limitations: [],
+    } };
+    await reports.write(facebook, business);
+    const input = { confirmed: true, comparisonMode: "source-agreement", country: "international", confirmedPhone: "+17025551212", websiteReportId: audit.id, facebookReportId: facebook.id,
+      sourceReviews: [{ provider: "facebook", reportId: facebook.id, evidenceIds: ["saved-hours"], field: "hours", state: "always-open", timeZone: null, hours: null, observedAt: at, validFrom: at.slice(0, 10), notes: "Operator observed Always open on the public Page." }], notes: "Approved agreement comparison; no preferred business name is known." };
+    const created = await post(`${prefix}/scoring-facts`, input).expect(201);
+    expect(created.body.schemaVersion).toBe("seo-spy.confirmed-scoring-facts.v2");
+    expect(created.body.values.preferred).toBeUndefined();
+    const read = await get(`${prefix}/scoring-facts`).expect(200);
+    expect(read.body.facts).toEqual(created.body);
+    await post(`${prefix}/scoring-facts`, { ...input, sourceReviews: [{ ...input.sourceReviews[0], reportId: randomUUID() }] }).expect(400);
+    await post(`${prefix}/scoring-facts`, { ...input, sourceReviews: [{ ...input.sourceReviews[0], evidenceIds: ["not-in-archive"] }] }).expect(400);
+    expect((await get(`${prefix}/scoring-facts`)).body.facts.id).toBe(created.body.id);
+    noProviders();
+  });
 });

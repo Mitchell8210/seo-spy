@@ -7,10 +7,13 @@ export interface AssessmentScore {
 export interface SavedAssessment {
   id: string
   businessId: string
-  policyVersion: 'seo-spy-score-v1'
+  policyVersion: 'seo-spy-score-v1' | 'seo-spy-score-v1.1' | 'seo-spy-score-v1.2'
   policyHash: string
   profile: 'baseline-mobile-v1' | 'baseline-desktop-v1'
   cutoff: string
+  socialScope?: 'facebook-profile-readiness'
+  consistencyBasis?: 'preferred-values' | 'source-agreement'
+  reportingCutoff?: string | null
   readAt: string
   sources: { reportId: string; reportHash: string; businessId: string; provider: 'website' | 'facebook'; collectedAt: string }[]
   scores: Record<'website' | 'social' | 'consistency' | 'overall', AssessmentScore>

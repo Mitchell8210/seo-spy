@@ -11,6 +11,7 @@ import { useWebsiteReport } from '../../hooks/useWebsiteReport'
 import { useInvestigation } from '../../hooks/useInvestigation'
 import { mapWebsiteReport, measurementLabel } from '../../services/websiteMapping'
 import type { ConnectedWebsite } from '../../types/website'
+import { scoreCaption } from '../../services/savedScore'
 
 export function Website() {
   const [search, setSearch] = useSearchParams()
@@ -25,7 +26,7 @@ export function Website() {
     refresh()
   }
   const record = state.report
-  const audit = record ? mapWebsiteReport(record) : null
+  const audit = record ? mapWebsiteReport(record, state.error ? null : state.dashboard?.assessment) : null
   const business = record?.business ?? state.dashboard?.business
   const connection = state.dashboard?.connections.find(item => item.platform === 'website' && item.mode === 'live')
   const website: ConnectedWebsite | null = business ? {
@@ -64,7 +65,7 @@ export function Website() {
         <section aria-labelledby="website-summary-title">
           <h2 id="website-summary-title" className="mb-4 text-lg font-semibold text-ink">Website Health Summary</h2>
           <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-            <div className="flex flex-col items-center justify-center rounded-xl border border-line bg-surface p-5 shadow-sm sm:p-6"><h3 className="mb-5 text-base font-semibold text-ink">{audit.results.overall.label}</h3><ScoreCard score={audit.results.overall} prominent live /><p className="mt-4 text-xs text-muted">Not available · Combined scoring is not implemented</p></div>
+            <div className="flex flex-col items-center justify-center rounded-xl border border-line bg-surface p-5 shadow-sm sm:p-6"><h3 className="mb-5 text-base font-semibold text-ink">{audit.results.overall.label}</h3><ScoreCard score={audit.results.overall} prominent live /><p className="mt-4 text-xs text-muted">{audit.results.overall.value === null ? 'Not available' : scoreCaption(state.dashboard?.assessment, 'website')}</p></div>
             <WebsiteHealth results={audit.results} live />
           </div>
         </section>

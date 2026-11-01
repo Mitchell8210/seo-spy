@@ -94,8 +94,8 @@ function fixture() {
       createdAt: new Date().toISOString(),
     });
   const requirePermissions = jest
-    .fn<(token: string) => Promise<void>>()
-    .mockResolvedValue(undefined);
+    .fn<(token: string) => Promise<string[]>>()
+    .mockResolvedValue(["pages_show_list", "pages_read_engagement", "read_insights", "pages_read_user_content", "business_management"]);
   const markReconnect = jest
     .fn<(id?: string) => Promise<void>>()
     .mockResolvedValue(undefined);

@@ -5,26 +5,29 @@ import type { FacebookField, FacebookReport } from "../../integrations/facebook/
 import type { AuditReportRecord } from "../../reports/report.types.js";
 import { ScoringInputError } from "../../scoring/calculator.js";
 import { SCORE_POLICY } from "../../scoring/policy.js";
+import { facebookPublishingWindow, verifyFacebookPostCoverage } from "../../integrations/facebook/post-coverage.js";
 import type { ConfirmedRevision, ScoreAssessmentInput, ScoreCriterion, ScoreEvidenceRef, ScoreProfile, ScoreSource, SocialScoreInput } from "../../scoring/scoring.types.js";
-import { confirmedFactsSchema, type ConfirmedScoringFacts } from "./confirmed-facts.js";
+import { allConfirmedFactsSchema, type AnyConfirmedScoringFacts } from "./confirmed-facts.js";
+import { buildSourceAgreement } from "./source-agreement.js";
+import { hoursConsistencyCriterion, mergeWebsiteBusinessFacts, normalizeBusinessName } from "./consistency-evidence.js";
 
-export interface AssessmentInputSelection { business: Business; website: AuditReportRecord | null; facebook: AuditReportRecord | null; cutoff: string; profile: ScoreProfile; facts: ConfirmedScoringFacts | null }
+export interface AssessmentInputSelection { business: Business; website: AuditReportRecord | null; facebook: AuditReportRecord | null; cutoff: string; profile: ScoreProfile; facts: AnyConfirmedScoringFacts | null; policyVersion?: "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2" }
 const profileFields = { "business-name": ["name"], description: ["about", "description"], "website-link": ["website"], "contact-route": ["phone", "emails"], category: ["category"] } as const;
 const ids = Object.keys(profileFields) as (keyof typeof profileFields)[];
 const entitySchema = z.object({ name: z.string().max(2048).nullable(), url: z.string().max(2048).nullable(), phone: z.string().max(2048).nullable(), hours: z.array(z.record(z.string(), z.string())).max(98).nullable() });
 type Entity = z.infer<typeof entitySchema>;
 const timestamp = (value: string) => z.string().datetime({ offset: true }).safeParse(value).success ? Date.parse(value) : Number.NaN;
 const populated = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
-const normalizedName = (value: string) => value.normalize("NFC").trim().replace(/\s+/g, " ");
+const normalizedName = normalizeBusinessName;
 const canonicalUrl = (value: unknown): string | null => {
   try { if (typeof value !== "string" || !value.trim() || /[\r\n]/.test(value)) return null; const url = new URL(value.trim()); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash ? url.href : null; } catch { return null; }
 };
 const fresh = (date: string, cutoff: string) => Number.isFinite(timestamp(date)) && timestamp(date) <= timestamp(cutoff) && timestamp(cutoff) - timestamp(date) <= SCORE_POLICY.maxSourceAgeMs;
 const ref = (reportId: string, evidenceId: string): ScoreEvidenceRef => ({ reportId, evidenceId });
-const revision = (facts: ConfirmedScoringFacts): ConfirmedRevision => ({ revision: facts.id, confirmedBy: facts.confirmedBy, confirmedAt: facts.createdAt });
-function safeFacts(facts: ConfirmedScoringFacts | null, businessId: string, cutoff: string): ConfirmedScoringFacts | null {
+const revision = (facts: AnyConfirmedScoringFacts): ConfirmedRevision => ({ revision: facts.id, confirmedBy: facts.confirmedBy, confirmedAt: facts.createdAt });
+function safeFacts(facts: AnyConfirmedScoringFacts | null, businessId: string, cutoff: string): AnyConfirmedScoringFacts | null {
   if (!facts) return null;
-  const checked = confirmedFactsSchema.safeParse(facts);
+  const checked = allConfirmedFactsSchema.safeParse(facts);
   if (!checked.success || checked.data.businessId !== businessId || timestamp(checked.data.createdAt) > timestamp(cutoff)) throw new ScoringInputError("INVALID_CONFIRMED_FACTS");
   return checked.data;
 }
@@ -41,7 +44,7 @@ function originalSource(record: AuditReportRecord, provider: ScoreSource["provid
     evidenceIds: [...new Set([...record.results!.evidence.map(item => item.id), ...synthetic])] };
 }
 const fieldReady = (field: FacebookField | undefined, cutoff: string): field is FacebookField => !!field && field.status === "available" && fresh(field.collectedAt, cutoff);
-function profileCriterion(id: keyof typeof profileFields, fb: FacebookReport, record: AuditReportRecord, facts: ConfirmedScoringFacts | null, cutoff: string): ScoreCriterion {
+function profileCriterion(id: keyof typeof profileFields, fb: FacebookReport, record: AuditReportRecord, facts: AnyConfirmedScoringFacts | null, cutoff: string): ScoreCriterion {
   const observed = profileFields[id].filter(name => {
     const field = fb.profile[name];
     if (!fieldReady(field, cutoff)) return false;
@@ -53,7 +56,7 @@ function profileCriterion(id: keyof typeof profileFields, fb: FacebookReport, re
     return populated(field.value);
   });
   if (observed.length) return { id, outcome: "pass", confirmation: "observed", evidence: observed.map(name => ref(record.reportId, `facebook-profile:${name}`)) };
-  const absence = facts?.values.profileAbsences.find(item => item.criterion === id && item.reportId === record.reportId);
+  const absence = facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v1" ? facts.values.profileAbsences.find(item => item.criterion === id && item.reportId === record.reportId) : undefined;
   const supporting = absence?.evidenceIds.map(evidenceId => record.results!.evidence.find(item => item.id === evidenceId));
   // An aggregate description/contact absence must confirm each alternative, not only one API field.
   if (supporting && supporting.every((item): item is Evidence => !!item && fresh(item.collectedAt, cutoff)) && profileFields[id].every(name => supporting.some(item => item.checkId === `facebook:profile:${name}`))) {
@@ -74,7 +77,7 @@ function publishing(fb: FacebookReport, reportId: string, cutoff: string): Socia
       evidence: [ref(reportId, "facebook-posts")] };
   }) };
 }
-function entityFrom(record: AuditReportRecord, facts: ConfirmedScoringFacts, cutoff: string): { value: Entity; evidence: ScoreEvidenceRef[] } | null {
+function entityFrom(record: AuditReportRecord, facts: Extract<AnyConfirmedScoringFacts, { schemaVersion: "seo-spy.confirmed-scoring-facts.v1" }>, cutoff: string): { value: Entity; evidence: ScoreEvidenceRef[] } | null {
   const candidates: { value: Entity; evidence: ScoreEvidenceRef[] }[] = [];
   for (const item of record.results!.evidence.filter(item => item.checkId === "business-facts" && fresh(item.collectedAt, cutoff))) {
     const raw = item.observed.entities;
@@ -89,16 +92,10 @@ function entityFrom(record: AuditReportRecord, facts: ConfirmedScoringFacts, cut
       }
     } catch { /* Malformed markup remains unknown, never a scored failure. */ }
   }
-  const distinct = new Map<string, { value: Entity; evidence: ScoreEvidenceRef[] }>();
-  for (const candidate of candidates) {
-    const key = JSON.stringify(candidate.value);
-    const old = distinct.get(key);
-    if (old) old.evidence.push(...candidate.evidence); else distinct.set(key, candidate);
-  }
-  return distinct.size === 1 ? [...distinct.values()][0] : null;
+  return mergeWebsiteBusinessFacts(candidates);
 }
 /** Explicit country context only; arbitrary digit strings and extensions are never equated. */
-export function normalizeConfirmedPhone(value: unknown, country: ConfirmedScoringFacts["values"]["preferred"]["country"]): string | null {
+export function normalizeConfirmedPhone(value: unknown, country: "US" | "CA" | "international"): string | null {
   if (!populated(value)) return null;
   const raw = value.trim();
   if (country === "international") return /^\+[1-9]\d{6,14}$/.test(raw) ? raw : null;
@@ -137,10 +134,23 @@ export function buildAssessmentInput(selection: AssessmentInputSelection): Score
       categories: lh.categories.map(item => ({ id: item.id, score: item.score, availability: item.availability })),
       ...(bindings.length === 1 ? { pageBinding: { requestedUrl: bindings[0]!.observed.requestedUrl!, finalUrl: bindings[0]!.observed.finalUrl!, evidence: ref(website.reportId, bindings[0]!.id) } } : {}) } : null,
     social: facebook && fb ? { sourceReportId: facebook.reportId, profile: ids.map(id => profileCriterion(id, fb, facebook, facts, cutoff)),
-      goal: facts && facts.values.publishingTarget !== null ? { ...revision(facts), targetPostsPerPeriod: facts.values.publishingTarget } : null,
+      goal: facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v1" && facts.values.publishingTarget !== null ? { ...revision(facts), targetPostsPerPeriod: facts.values.publishingTarget } : null,
       publishing: publishing(fb, facebook.reportId, cutoff) } : null,
     consistency: null };
-  if (website && facebook && fb && facts) {
+  if (selection.policyVersion) result.policyVersion = selection.policyVersion;
+  if (["seo-spy-score-v1.1", "seo-spy-score-v1.2"].includes(selection.policyVersion ?? "") && fb && facebook && result.social) {
+    const reportingCutoff = facebookPublishingWindow(cutoff).until;
+    const original = facebook.results!.evidence.filter(item => item.checkId === "facebook:publishing-window");
+    const bound = original.length === 1 && original[0]!.sourceUrl === `https://www.facebook.com/${fb.pageId}`;
+    const proof = verifyFacebookPostCoverage(fb.publishing, bound ? original[0]!.observed : null, reportingCutoff, cutoff);
+    const ids = new Set(fb.publishing?.items.map(item => item.id) ?? []);
+    const conflictingSample = fb.posts.status === "available" && fb.posts.items.some(item => item.createdTime !== null
+      && timestamp(item.createdTime) >= Date.parse(fb.publishing?.coverage.since ?? "unknown") && timestamp(item.createdTime) < Date.parse(reportingCutoff) && !ids.has(item.id));
+    const evidence = original.length === 1 ? [ref(facebook.reportId, original[0]!.id)] : [];
+    result.social.publishing = { reportingCutoff, complete: proof.complete && !conflictingSample, truncated: fb.publishing?.truncated ?? true,
+      trustworthyTimestamps: proof.complete && !conflictingSample, periods: proof.periods.map(period => ({ ...period, evidence })) };
+  }
+  if (website && facebook && fb && facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v1") {
     const selected = entityFrom(website, facts, cutoff);
     const profileValue = (name: string): string | null => fieldReady(fb.profile[name], cutoff) && populated(fb.profile[name].value) ? fb.profile[name].value as string : null;
     const evidence = (field: string) => [...selected?.evidence ?? [], ref(facebook.reportId, `facebook-profile:${field}`)];
@@ -153,12 +163,20 @@ export function buildAssessmentInput(selection: AssessmentInputSelection): Score
     const facebookPhone = normalizeConfirmedPhone(profileValue("phone"), preferred.country);
     const websiteUrl = canonicalUrl(selected?.value.url);
     const facebookUrl = canonicalUrl(profileValue("website"));
+    const facebookHours = facebook.results!.evidence.filter(item => item.checkId === "facebook:profile:hours").map(item => ref(facebook.reportId, item.id));
+    const hours = preferred.hoursApplicable && preferred.hours ? hoursConsistencyCriterion({ businessId: business.id, cutoff, preferredHours: preferred.hours,
+      preferredTimeZone: preferred.timeZone, website: { report: website, evidenceRefs: selected?.evidence ?? [], hours: selected?.value.hours ?? null },
+      facebook: { report: facebook, evidenceRefs: facebookHours, hours: fieldReady(fb.profile.hours, cutoff) ? fb.profile.hours.value : null }, reviews: facts.values.sourceReviews ?? [] })
+      : { id: "hours", outcome: "unknown" as const, confirmation: "unconfirmed" as const, applicable: preferred.hoursApplicable, evidence: [], reason: "Confirmed applicable hours are required." };
     result.consistency = { websiteReportId: website.reportId, facebookReportId: facebook.reportId, facts: revision(facts), applicability: preferred.hoursApplicable && preferred.phoneApplicable ? null : revision(facts), criteria: [
       comparison("business-name", websiteName ? normalizedName(websiteName) : null, facebookName ? normalizedName(facebookName) : null, names, evidence("name")),
       { ...comparison("phone", websitePhone, facebookPhone, preferred.phones, evidence("phone")), applicable: preferred.phoneApplicable },
       comparison("website-url", websiteUrl && urls.includes(canonicalUrl(business.website) ?? "") ? websiteUrl : null, facebookUrl, urls, evidence("website")),
-      { id: "hours", outcome: "unknown", confirmation: "unconfirmed", applicable: preferred.hoursApplicable, evidence: [...selected?.evidence ?? []], reason: "Facebook source timezone and comparable date scope are not recorded; preferred timezone alone is not an observed source timezone." },
+      hours,
     ] };
+  }
+  if (website && facebook && fb && facts?.schemaVersion === "seo-spy.confirmed-scoring-facts.v2" && selection.policyVersion === "seo-spy-score-v1.2") {
+    result.consistency = buildSourceAgreement(business, website, facebook, facts, cutoff);
   }
   return result;
 }

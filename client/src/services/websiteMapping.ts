@@ -1,6 +1,8 @@
 import type { LighthouseReport } from '../types/backend'
 import type { LiveWebsiteAudit, WebsiteCategory } from '../types/website'
 import type { WebsiteReport } from '../types/websiteApi'
+import type { SavedAssessment } from '../types/assessment'
+import { savedChannelScore } from './savedScore.ts'
 
 const categories = [
   { id: 'performance', label: 'Performance' },
@@ -28,7 +30,7 @@ function category(checkId: string, report?: LighthouseReport): string {
   return [...new Set(matches.map(item => lighthouseCategories[item.id] ?? item.title))].join(' · ') || checkId
 }
 
-export function mapWebsiteReport(record: WebsiteReport): LiveWebsiteAudit {
+export function mapWebsiteReport(record: WebsiteReport, assessment?: SavedAssessment | null): LiveWebsiteAudit {
   const { audit, results } = record
   if (!results) throw new Error('This report has no website results.')
   const report = results.lighthouse
@@ -56,7 +58,7 @@ export function mapWebsiteReport(record: WebsiteReport): LiveWebsiteAudit {
   return {
     id: record.auditId, websiteId: record.business.id, analyzedAt: audit.completedAt ?? record.generatedAt,
     results: {
-      overall: { id: 'website-score', label: 'SEO Spy Website Score', value: null, maximum: 100, description: 'Overall website health.' },
+      overall: { id: 'website-score', label: 'SEO Spy Website Score', value: savedChannelScore(assessment, record.business.id, record.auditId, 'website'), maximum: 100, description: 'Overall website health.' },
       categories: categories.map(item => {
         const measured = report?.categories.find(entry => entry.id === item.id)
         return { ...item, value: measured?.availability === 'measured' ? measured.score : null, maximum: 100, description: measured?.title ?? item.label }

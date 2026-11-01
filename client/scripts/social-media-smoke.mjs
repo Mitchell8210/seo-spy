@@ -16,6 +16,7 @@ const children = [];
 const errors = [];
 const requests = [];
 let mode = 'loaded';
+let savedAssessment = null;
 let cdp;
 let server;
 let artifacts;
@@ -95,6 +96,9 @@ try {
   const cache = path.join(clientDir, 'node_modules/.cache/social-media-smoke'); await mkdir(cache, { recursive: true }); artifacts = await mkdtemp(path.join(cache, 'run-'));
   server = http.createServer(async (req, res) => {
     const entry = { method: req.method, path: req.url }; requests.push(entry);
+    if (req.url === '/api/businesses/demo-guzman/assessments/latest') {
+      res.writeHead(mode === 'score-error' ? 503 : 200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: 'demo-guzman', assessment: savedAssessment })); return;
+    }
     if (req.method === 'POST' && req.url === '/api/facebook/reports') {
       let body = ''; for await (const chunk of req) body += chunk;
       entry.body = JSON.parse(body);
@@ -161,6 +165,20 @@ try {
   assert.ok((await text()).includes(recommendation.recommendedChange));
   assert.equal(await evaluate('window.fixtureExecuted === true'), false); assert.equal(await evaluate('document.querySelector("[data-testid=social-report] script") !== null'), false);
   await screenshot('desktop.png');
+  savedAssessment = { businessId: 'demo-guzman', policyVersion: 'seo-spy-score-v1.2', policyHash: 'a'.repeat(64), socialScope: 'facebook-profile-readiness', cutoff: now,
+    sources: [{ businessId: 'demo-guzman', reportId: auditId, provider: 'facebook' }], scores: { social: { value: 100, maximum: 100, availability: 'available' } } };
+  await navigateReport(`${base}/social-media`);
+  const scoreLabel = () => evaluate('document.querySelector("#social-score-title").closest("section").querySelector("[role=img]").getAttribute("aria-label")');
+  await waitFor(async () => (await scoreLabel()).includes('100 out of 100'), 'saved Social score');
+  assert.match(await scoreLabel(), /measured score/);
+  assert.match(await text(), /Facebook profile readiness · Posting activity advisory/);
+  savedAssessment.sources[0].reportId = 'different-report';
+  await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'report mismatch score check');
+  assert.equal(await scoreLabel(), 'Score: not available');
+  savedAssessment.sources[0].reportId = auditId;
+  mode = 'score-error'; await navigateReport(`${base}/social-media`); await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'score failure retains report');
+  assert.equal(await scoreLabel(), 'Score: not available');
+  mode = 'loaded'; savedAssessment = null;
   report.audit.status = 'completed';
   await navigateReport(`${base}/social-media`);
   await waitFor(async () => (await text()).includes('Your social media is in good shape, but a few things need attention.'), 'general health summary');

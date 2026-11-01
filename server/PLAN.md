@@ -617,3 +617,9 @@ Resolve these at their relevant milestone rather than blocking the first API on 
 ## Immediate next task
 
 Coordinate the first main-page integration with the frontend engineer using `../client/WEBSITE_API_MAPPING.md`. Agree on nullable and overall score presentation, passed-check semantics, and homepage-only coverage before adapting the Website page. Reuse the proven backend-lab service/polling behavior in a separately scoped change. Keep the existing main pages unchanged until that integration is authorized; retain in-memory execution for the hackathon demo.
+
+## Approved scoring completion ? November 1, 2026
+
+Implemented v1.1 separate reporting cutoff and v1.2 Social profile-only scoring (5 ?20%, activity advisory), plus explicitly approved Consistency source agreement (20/30/30/20). Persisted the user?s source review of Facebook Always open and confirmed phone without inventing preferred name or timezone. Actual saved Guzman scores: Website78 / Social100 / Consistency60 / Total81. All four existing dashboard gauges passed the actual SQLite-backed browser check, with UI classes/layout unchanged, no provider attempts and unchanged AI ledger. Historic snapshots/hashes retained. See SCORING_POLICY.md for pinned record IDs and verification detail.
+
+Follow-up remains: review which business name and hours should be authoritative before proposing a site/Page correction. A disagreement score cannot decide that. The previously deferred frontend edit-review panel still requires its own explicit presentation approval; do not add it as part of scoring.

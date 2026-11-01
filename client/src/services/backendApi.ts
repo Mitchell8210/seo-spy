@@ -1,6 +1,7 @@
 import type { AuditSummary, CreatedAudit, Dashboard, FindingsResponse, LighthouseResponse, RecommendationsResponse, Strategy } from '../types/backend'
 import type { CreatedFacebookReport, FacebookReportJobStatus, FacebookReportResponse } from '../types/facebook'
 import type { EvidenceSummaries, WebsiteAnalysis, WebsiteReport, WebsiteReportList } from '../types/websiteApi'
+import type { SavedAssessment } from '../types/assessment'
 
 export class BackendApiError extends Error {
   readonly code: string
@@ -66,6 +67,7 @@ function identifier(id: string) {
 const auditPath = (id: string) => `/audits/${identifier(id)}`
 
 export const backendApi = {
+  latestAssessment: (businessId: string, signal: AbortSignal) => request<{ businessId: string; assessment: SavedAssessment | null }>(`/businesses/${identifier(businessId)}/assessments/latest`, signal),
   facebookReportStatus: (businessId: string, signal: AbortSignal) => request<FacebookReportJobStatus>(`/facebook/reports/status?businessId=${identifier(businessId)}`, signal),
   createFacebookReport: (businessId: string, pageId: string, signal: AbortSignal) => request<CreatedFacebookReport>(
     '/facebook/reports', signal, { businessId, pageId }, 180000,

@@ -3,6 +3,7 @@ import type { FacebookReportResponse } from '../types/facebook'
 import type { WebsiteReport } from '../types/websiteApi'
 import { mapDashboardReports } from './dashboardMapping.ts'
 import { opportunityDestination, selectDashboardOpportunities, type DashboardIssue } from './dashboardOpportunities.ts'
+import { knownAssessment } from './savedScore.ts'
 
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 
@@ -10,8 +11,7 @@ const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 export function mapDashboardAssessment(businessId: string, dashboard: Dashboard | null, website: WebsiteReport | null, social: FacebookReportResponse | null) {
   const view = mapDashboardReports(dashboard, website, social)
   const assessment = dashboard?.assessment
-  const knownPolicy = assessment?.businessId === businessId && assessment.policyVersion === 'seo-spy-score-v1' && /^[a-f0-9]{64}$/.test(assessment.policyHash)
-    && Array.isArray(assessment.sources) && assessment.scores !== null && typeof assessment.scores === 'object'
+  const knownPolicy = knownAssessment(assessment, businessId)
   const websiteMatch = knownPolicy && !!website && assessment.sources.some(source => source.provider === 'website' && source.businessId === businessId && source.reportId === website.auditId)
   const socialMatch = knownPolicy && !!social?.report && assessment.sources.some(source => source.provider === 'facebook' && source.businessId === businessId && source.reportId === social.report!.auditId)
   const scoreValue = (category: 'website' | 'social' | 'consistency' | 'overall', matches: boolean) => {

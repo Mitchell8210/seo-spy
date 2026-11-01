@@ -9,12 +9,16 @@ import { mockBusiness } from '../../data/mockBusiness'
 import { useFacebookReport } from '../../hooks/useFacebookReport'
 import { useFacebookReportRun } from '../../hooks/useFacebookReportRun'
 import { mapSocialMediaReport } from '../../services/socialMediaMapping'
+import { useSavedAssessment } from '../../hooks/useSavedAssessment'
+import { savedChannelScore, scoreCaption } from '../../services/savedScore'
 
 export function SocialMedia() {
   const [search] = useSearchParams()
   const businessId = search.get('businessId')?.trim() || mockBusiness.id
   const state = useFacebookReport(businessId)
   const report = state.data?.report
+  const assessment = useSavedAssessment(businessId, report?.auditId)
+  const score = report && !state.error ? savedChannelScore(assessment, businessId, report.auditId, 'social') : null
   const view = state.data ? mapSocialMediaReport(state.data) : null
   const run = useFacebookReportRun(businessId, view?.facebook.pageId ?? '', state.refresh)
 
@@ -36,7 +40,7 @@ export function SocialMedia() {
       {state.loading && !state.data && <p role="status" className="rounded-xl border border-line bg-surface p-6 text-sm text-secondary">Loading your saved Facebook report…</p>}
       {!state.loading && !state.error && !report && <p role="status" className="rounded-xl border border-line bg-surface p-6 text-sm text-secondary">No saved Facebook analysis is available for this account.</p>}
       {report && view && <div data-testid="social-report" className="space-y-10">
-        <SocialScoreHero score={null} summary={view.scoreSummary} benchmark={null} mode="live" />
+        <SocialScoreHero score={score === null ? null : { id: 'social-score', label: 'Social Media Score', value: score, maximum: 100, description: 'Saved social score.' }} summary={view.scoreSummary} benchmark={null} mode="live" scoreCaption={score === null ? undefined : scoreCaption(assessment, 'social')} />
         <section aria-labelledby="social-health-title">
           <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3"><h2 id="social-health-title" className="text-xl font-semibold tracking-tight text-ink">Social Media Health Summary</h2><span className="rounded-md border border-line bg-elevated px-3 py-1.5 text-xs font-medium text-secondary">{view.periodLabel} · Saved live data</span></div>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">{view.healthMetrics.map(metric => <SocialHealthCard key={metric.id} metric={metric} />)}</div>

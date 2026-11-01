@@ -98,3 +98,20 @@ test('uses cited mock recommendations with an explicit mock label and leaves det
   view = mapDashboardAssessment(business.id, dashboard, website, social)
   assert.equal(view.top.website[0].recommendation.id, 'one-action', 'Unresolved model citations fall back to the recorded recommendation.')
 })
+
+
+test('maps all approved v1.2 scores and source disagreements to existing slots', () => {
+  const { business, dashboard, website, social } = scoredFixture()
+  const assessment = dashboard.assessment
+  assessment.policyVersion = 'seo-spy-score-v1.2'
+  assessment.socialScope = 'facebook-profile-readiness'
+  assessment.consistencyBasis = 'source-agreement'
+  for (const [key, value] of Object.entries({ website: 78, social: 100, consistency: 60, overall: 81 })) assessment.scores[key] = { value, maximum: 100, availability: 'available', reasons: [] }
+  assessment.comparisons = [{ id: 'business-name', outcome: 'fail', applicable: true, website: 'Multi Services', facebook: 'Associates' }, { id: 'hours', outcome: 'fail', applicable: true, website: 'Mon?Sat 09:00?18:00; Sun Unknown', facebook: 'Always open (operator reviewed)' }]
+  const view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.deepEqual(view.main.components.map(item => item.value), [78, 100, 60])
+  assert.equal(view.main.overall.value, 81)
+  assert.equal(view.consistency.checks.find(item => item.id === 'hours').matches, false)
+  assert.equal(view.consistency.checks.find(item => item.id === 'name').website, 'Multi Services')
+  assert.equal(view.scoreAssessment.consistencyBasis, 'source-agreement')
+})

@@ -12,6 +12,7 @@ import {
   type FacebookReport,
 } from "./types.js";
 import { analyzeFacebook } from "./analyze.js";
+import { collectFacebookPostWindow } from "./post-coverage.js";
 
 const idSchema = z.string().regex(/^\d+$/);
 const paging = z
@@ -87,6 +88,7 @@ const profileSchemas = {
     longitude: z.number().optional(),
   }),
   category: z.string().max(1024),
+  timezone: z.union([z.string().max(100), z.number().finite().min(-14).max(14)]),
   username: z.string().max(1024),
   followers_count: z.number().int().nonnegative(),
   fan_count: z.number().int().nonnegative(),
@@ -271,6 +273,9 @@ export async function collectFacebookReport(
     items: JSON.stringify(posts.items),
     truncated: String(posts.truncated),
   });
+  const publishing = await collectFacebookPostWindow((path, params) => request(path, token, params), pageId, new Date().toISOString(), stop);
+  evidence("facebook:publishing-window", { status: publishing.status, items: JSON.stringify(publishing.items), truncated: String(publishing.truncated), coverage: JSON.stringify(publishing.coverage) });
+  if (!publishing.coverage.complete) warnings.push(`The complete publishing window could not be established (${publishing.coverage.reason}); Social scoring remains unavailable.`);
   const knownDates = posts.items
     .flatMap((post) => (post.createdTime ? [post.createdTime] : []))
     .sort();
@@ -352,6 +357,7 @@ export async function collectFacebookReport(
     profile,
     posts,
     metrics,
+    publishing,
     summary: {
       followersStart,
       followersEnd,

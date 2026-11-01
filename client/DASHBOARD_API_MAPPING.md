@@ -45,3 +45,9 @@ From `client/`:
 - `node scripts/website-smoke.mjs --dashboard --saved`: explicit read-only check against a running local backend (`WEBSITE_API_TARGET`, default `http://127.0.0.1:3001`). It never creates an audit. Local-only screenshots live under ignored `node_modules/.cache/website-smoke/`.
 
 The actual SQLite-backed Guzman Dashboard passed the saved-data browser check against audit `9961da8a-4575-4f6c-a2e7-53ed72441838`, with external backend requests blocked: zero external provider attempts, no model calls, no new audits or edits. Desktop and 320/390/768/1280-pixel widths passed. No backend source or credentials changed.
+
+## Approved scoring v1.2 integration ? November 1, 2026
+
+The existing score slots accept backend policy v1/v1.1/v1.2 only for the same displayed report IDs and business. New v1.2 Social values measure five profile-readiness checks, with posting activity advisory. Source-agreement comparisons populate the existing four detail rows without inventing authoritative names/hours. The policy provenance slot reads the actual saved version. No labels, styling, controls or layout changed.
+
+Actual saved SQLite assessment f4222edc-0e4f-4fde-8bc7-2a6fe70e4adb displayed Website78 / Social100 / Consistency60 / Total81 in the existing gauges. Desktop and 320/390/768/1280 widths passed; all browser API requests were saved-data GETs, zero external backend attempts, and AI ledger files were unchanged. Earlier unavailable-score validation above describes the historical v1 data.

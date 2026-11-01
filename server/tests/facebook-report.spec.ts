@@ -25,6 +25,7 @@ function fixture() {
           },
         ],
       };
+    if (path === "123/posts" && params?.since) return { data: [] };
     if (path === "123/posts")
       return {
         data: [
@@ -178,7 +179,7 @@ describe("Facebook saved report collector", () => {
     const original = graph.request.getMockImplementation()!;
     let batch = 0;
     graph.request.mockImplementation(async (...args) => {
-      if (args[0] === "123/posts") {
+      if (args[0] === "123/posts" && !args[2]?.since) {
         batch++;
         return {
           data: Array.from({ length: 25 }, (_, i) => ({
@@ -203,6 +204,8 @@ describe("Facebook saved report collector", () => {
     expect(result.results.facebook?.posts.items).toHaveLength(50);
     expect(result.results.facebook?.posts.truncated).toBe(true);
     expect(result.results.facebook?.summary.postsInWindowComplete).toBe(false);
+    expect(result.results.facebook?.publishing?.coverage.complete).toBe(true);
+    expect(result.results.facebook?.publishing?.items).toHaveLength(0);
     expect(
       result.results.findings.some(
         (finding) => finding.checkId === "facebook:posts",

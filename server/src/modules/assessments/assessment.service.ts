@@ -10,13 +10,13 @@ import { calculateScoreSnapshot } from "../../scoring/calculator.js";
 import type { ScoreAssessmentInput, ScoreProfile, ScoreSnapshot } from "../../scoring/scoring.types.js";
 import { buildAssessmentInput } from "./assessment-input.js";
 import { assessmentHash, AssessmentStore } from "./assessment.store.js";
-import { confirmedFactsInputSchema, confirmedFactsSchema, type ConfirmedScoringFacts } from "./confirmed-facts.js";
+import { allConfirmedFactsSchema, confirmedFactsInputSchema, sourceAgreementInputSchema, type AnyConfirmedScoringFacts } from "./confirmed-facts.js";
 
 export interface AssessmentRecord {
   schemaVersion: "seo-spy.assessment.v1"; id: string; businessId: string; createdAt: string; cacheKey: string;
   input: ScoreAssessmentInput; snapshot: ScoreSnapshot;
 }
-export interface AssessmentSelection { websiteReportId?: string; facebookReportId?: string; profile?: ScoreProfile; cutoff?: string }
+export interface AssessmentSelection { websiteReportId?: string; facebookReportId?: string; profile?: ScoreProfile; cutoff?: string; policyVersion?: "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2" }
 const storageFailure = () => new ServiceUnavailableException({ code: "ASSESSMENT_STORAGE_ERROR", message: "The saved assessment is invalid or cannot be replayed safely." });
 
 @Injectable()
@@ -47,9 +47,9 @@ export class AssessmentService {
     }
     return report;
   }
-  facts(businessId: string, cutoff?: string): ConfirmedScoringFacts | null {
+  facts(businessId: string, cutoff?: string): AnyConfirmedScoringFacts | null {
     for (const record of this.store.list("confirmed-facts", businessId, cutoff ? 100 : 1)) {
-      const parsed = confirmedFactsSchema.safeParse(record);
+      const parsed = allConfirmedFactsSchema.safeParse(record);
       if (!parsed.success || parsed.data.businessId !== businessId) throw storageFailure();
       if (!cutoff || Date.parse(parsed.data.createdAt) <= Date.parse(cutoff)) return parsed.data;
     }
@@ -57,15 +57,28 @@ export class AssessmentService {
   }
   async confirmFacts(businessId: string, actor: string, body: unknown) {
     const business = await this.business(businessId, true);
-    const parsed = confirmedFactsInputSchema.safeParse(body);
+    const parsed = z.union([confirmedFactsInputSchema, sourceAgreementInputSchema]).safeParse(body);
     if (!parsed.success) throw new BadRequestException({ code: "SCORING_FACTS_INVALID", message: "Confirm preferred values, explicit applicability and the publishing target using the scoring-facts contract." });
-    if (!parsed.data.preferred.websiteUrls.some(value => new URL(value).href === new URL(business.website).href)) throw new BadRequestException({ code: "SCORING_FACTS_SITE_MISMATCH", message: "The approved canonical destinations must include the registered business website." });
-    for (const absence of parsed.data.profileAbsences) {
+    if ("comparisonMode" in parsed.data) {
+      const values = parsed.data;
+      await this.source(businessId, values.websiteReportId, "website");
+      await this.source(businessId, values.facebookReportId, "facebook");
+      if (values.sourceReviews.some(review => review.reportId !== (review.provider === "website" ? values.websiteReportId : values.facebookReportId))) throw new BadRequestException({ code: "SCORING_FACTS_EVIDENCE_INVALID", message: "Source reviews must reference the attested report pair." });
+    } else if (!parsed.data.preferred.websiteUrls.some(value => new URL(value).href === new URL(business.website).href)) throw new BadRequestException({ code: "SCORING_FACTS_SITE_MISMATCH", message: "The approved canonical destinations must include the registered business website." });
+    for (const absence of ("profileAbsences" in parsed.data ? parsed.data.profileAbsences : [])) {
       const report = await this.source(businessId, absence.reportId, "facebook");
       if (absence.evidenceIds.some(id => !report.results?.evidence.some(item => item.id === id))) throw new BadRequestException({ code: "SCORING_FACTS_EVIDENCE_INVALID", message: "Visible-absence confirmations must reference the selected saved report's evidence." });
     }
-    const record = confirmedFactsSchema.parse({ schemaVersion: "seo-spy.confirmed-scoring-facts.v1", id: randomUUID(), businessId, createdAt: new Date().toISOString(), confirmedBy: actor, values: parsed.data });
-    return confirmedFactsSchema.parse(this.store.write("confirmed-facts", record, assessmentHash(record)));
+    const reviews = parsed.data.sourceReviews ?? [];
+    if (new Set(reviews.map(review => `${review.provider}:${review.reportId}:${review.field}`)).size !== reviews.length) throw new BadRequestException({ code: "SCORING_FACTS_EVIDENCE_INVALID", message: "Conflicting duplicate source reviews are not allowed." });
+    for (const review of reviews) {
+      const source = await this.source(businessId, review.reportId, review.provider);
+      if (Date.parse(review.observedAt) > Date.now() || review.evidenceIds.some(id => !source.results?.evidence.some(item => item.id === id && item.checkId === (review.provider === "website" ? "business-facts" : "facebook:profile:hours")))) {
+        throw new BadRequestException({ code: "SCORING_FACTS_EVIDENCE_INVALID", message: "Hours source reviews require matching saved evidence and a nonfuture observation time." });
+      }
+    }
+    const record = allConfirmedFactsSchema.parse({ schemaVersion: "comparisonMode" in parsed.data ? "seo-spy.confirmed-scoring-facts.v2" : "seo-spy.confirmed-scoring-facts.v1", id: randomUUID(), businessId, createdAt: new Date().toISOString(), confirmedBy: actor, values: parsed.data });
+    return allConfirmedFactsSchema.parse(this.store.write("confirmed-facts", record, assessmentHash(record)));
   }
   async create(businessId: string, selection: AssessmentSelection = {}): Promise<AssessmentRecord> {
     const business = await this.business(businessId);
@@ -76,7 +89,7 @@ export class AssessmentService {
     const [website, facebook] = await Promise.all([websiteId ? this.source(businessId, websiteId, "website") : null, facebookId ? this.source(businessId, facebookId, "facebook") : null]);
     const cutoff = selection.cutoff ?? new Date().toISOString();
     if (!z.string().datetime({ offset: true }).safeParse(cutoff).success || Date.parse(cutoff) > Date.now()) throw new BadRequestException({ code: "ASSESSMENT_CUTOFF_INVALID", message: "Assessment cutoff must be a valid current or historical UTC timestamp." });
-    const input = buildAssessmentInput({ business, website, facebook, cutoff, profile: selection.profile ?? "baseline-mobile-v1", facts: this.facts(businessId, cutoff) });
+    const input = buildAssessmentInput({ business, website, facebook, cutoff, profile: selection.profile ?? "baseline-mobile-v1", facts: this.facts(businessId, cutoff), policyVersion: selection.policyVersion ?? "seo-spy-score-v1.2" });
     const snapshot = calculateScoreSnapshot(input);
     const cacheKey = assessmentHash({ version: "assessment-cache-v1", input, policyHash: snapshot.policyHash });
     const previous = this.store.byCacheKey("assessment", businessId, cacheKey);
@@ -137,6 +150,9 @@ export class AssessmentService {
       reasons.push("CONFIRMATIONS_CHANGED");
     }
     return { businessId, assessment: { id: record.id, businessId, policyVersion: record.snapshot.policyVersion, policyHash: record.snapshot.policyHash, profile: record.snapshot.profile, cutoff: record.snapshot.cutoff,
+      ...(record.snapshot.reportingCutoff !== undefined ? { reportingCutoff: record.snapshot.reportingCutoff } : {}),
+      ...(record.snapshot.socialScope ? { socialScope: record.snapshot.socialScope } : {}),
+      ...(record.snapshot.consistencyBasis ? { consistencyBasis: record.snapshot.consistencyBasis } : {}),
       readAt: new Date(now).toISOString(), sources: record.snapshot.sources, scores, analysis,
       comparisons: record.input.consistency?.criteria.map(item => ({ id: item.id, outcome: confirmationsChanged || scores.consistency.reasons.includes("STALE_INPUT") ? "unknown" as const : item.outcome, applicable: item.applicable, website: item.observations?.website ?? null, facebook: item.observations?.facebook ?? null })) ?? [],
       reasons: [...new Set(reasons)], limitations: record.snapshot.limitations } };

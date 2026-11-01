@@ -53,11 +53,12 @@ function Category({ title, description, icon, score, source, issues, empty, chil
 export function DashboardAssessment({ model }: { model: DashboardAssessmentModel }) {
   const { website, websiteReport, social, socialView, socialReport, latestWebsiteAttempt, top, main, websiteResults, consistency, socialScore, scoreAssessment } = model
   const asScore = (score: typeof main.overall): Score | null => score.value === null ? null : { ...score, value: score.value }
+  const policyLabel = `SEO Spy policy ${scoreAssessment?.policyVersion.replace('seo-spy-score-', '') ?? 'v1'}`
   const websiteSource = [websiteReport ? `Saved website report · ${websiteReport.audit.completedAt ?? websiteReport.generatedAt} · Homepage coverage` : 'No saved website report is available.',
-    websiteResults.overall.value === null ? 'SEO Spy score not available' : `SEO Spy policy v1 · ${scoreAssessment?.profile === 'baseline-desktop-v1' ? 'Desktop' : 'Mobile'} · ${scoreAssessment?.cutoff}`, websiteReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    websiteResults.overall.value === null ? 'SEO Spy score not available' : `${policyLabel} · ${scoreAssessment?.profile === 'baseline-desktop-v1' ? 'Desktop' : 'Mobile'} · ${scoreAssessment?.cutoff}`, websiteReport?.audit.status === 'partial' ? 'Partial coverage' : '',
     latestWebsiteAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', website.error ?? ''].filter(Boolean).join(' · ')
   const socialSource = [socialView ? `Saved Facebook report · ${socialView.facebook.pageName} · ${socialReport?.results.facebook.collectedAt}` : 'Numeric social score not available',
-    socialView ? socialScore.value === null ? 'Numeric score not available' : `SEO Spy policy v1 · ${scoreAssessment?.cutoff}` : '', socialReport?.audit.status === 'partial' ? 'Partial coverage' : '',
+    socialView ? socialScore.value === null ? 'Numeric score not available' : `${policyLabel} · ${scoreAssessment?.cutoff}` : '', socialReport?.audit.status === 'partial' ? 'Partial coverage' : '',
     social.data?.latestAttempt?.status === 'failed' ? 'A newer report attempt failed. Previous saved results remain visible.' : '', social.error ?? ''].filter(Boolean).join(' · ')
   return <section aria-labelledby="spy-total-title" className="min-w-0 rounded-2xl border border-blue-500/60 bg-surface p-3 shadow-lg shadow-blue-950/20 sm:p-5">
     <div className="flex items-center gap-3"><SpyLogo /><div><p className="text-xs font-semibold text-blue-300">SEO Spy</p><h2 id="spy-total-title" className="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl">Spy Total Score</h2></div></div>
@@ -65,7 +66,7 @@ export function DashboardAssessment({ model }: { model: DashboardAssessmentModel
       <section aria-label="Overall assessment" className="flex min-w-0 flex-col rounded-xl border border-blue-400/20 bg-blue-500/[0.03] p-4 md:col-span-2 xl:col-span-1">
         <ScoreCard score={main.overall} live prominent />
         <p className="mt-4 text-xs leading-5 text-secondary">SEO Spy combines your website health, social media performance, and business consistency to give you one overall view of your online presence.</p>
-        <p className="mt-2 text-[10px] leading-4 text-muted">{main.overall.value === null ? 'Combined SEO Spy score not available while required evidence is missing.' : `SEO Spy policy v1 · ${scoreAssessment?.cutoff}`}</p>
+        <p className="mt-2 text-[10px] leading-4 text-muted">{main.overall.value === null ? 'Combined SEO Spy score not available while required evidence is missing.' : `${policyLabel} · ${scoreAssessment?.cutoff}`}</p>
         <dl className="mt-auto space-y-3 border-t border-line pt-4 text-[11px]">
           {[
             { label: 'Website Health', score: asScore(websiteResults.overall), dot: 'bg-cyan-400' },

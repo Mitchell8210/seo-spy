@@ -92,3 +92,15 @@ test('unknown check IDs are preserved, and Lighthouse category membership comes 
   record.results.findings[0].checkId = 'lighthouse:pass'
   assert.equal(mapWebsiteReport(record).findings[0].category, 'Accessibility · Technical SEO')
 })
+
+
+test('uses only the saved assessment score for this website report', () => {
+  const record = fixture()
+  const assessment = { businessId: record.business.id, policyVersion: 'seo-spy-score-v1.2', policyHash: 'a'.repeat(64), sources: [{ businessId: record.business.id, reportId: record.auditId, provider: 'website' }], scores: { website: { value: 78, maximum: 100, availability: 'available' } } }
+  const original = JSON.stringify(record)
+  assert.equal(mapWebsiteReport(record, assessment).results.overall.value, 78)
+  assert.equal(mapWebsiteReport(record, assessment).results.categories.find(item => item.id === 'seo').value, 91)
+  assert.equal(JSON.stringify(record), original)
+  assessment.sources[0].reportId = 'different-report'
+  assert.equal(mapWebsiteReport(record, assessment).results.overall.value, null)
+})

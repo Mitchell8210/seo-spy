@@ -148,8 +148,11 @@ export class FacebookReportsService implements OnModuleDestroy {
         message: "Business not found.",
       });
     this.abort.signal.throwIfAborted();
+    let grantedPermissions: string[];
+    let permissionsCheckedAt: string;
     try {
-      await this.facebook.requirePermissions(credential.token);
+      grantedPermissions = await this.facebook.requirePermissions(credential.token);
+      permissionsCheckedAt = new Date().toISOString();
     } catch (error) {
       if (error instanceof FacebookError && error.providerCode === 190) {
         await this.facebook.markReconnect(sessionId);
@@ -192,6 +195,8 @@ export class FacebookReportsService implements OnModuleDestroy {
         this.abort.signal,
       );
       audit.results = collected.results;
+      audit.results.evidence.push({ id: randomUUID(), auditId: audit.id, checkId: "facebook:permissions", sourceUrl: `https://www.facebook.com/${pageId}`,
+        collectedAt: permissionsCheckedAt, mode: "live", observed: { requiredReadPermissionsGranted: "true", grantedPermissions: JSON.stringify(grantedPermissions), checkedAt: permissionsCheckedAt } });
       audit.warnings = collected.warnings;
       audit.status = collected.partial ? "partial" : "completed";
       audit.stage = "complete";

@@ -1,8 +1,18 @@
-# Approved SEO Spy scoring policy v1
+# Approved SEO Spy scoring policy v1.2
 
 The user approved the complete [discussion draft](SCORING_POLICY_DRAFT.md) on October 31, 2026. The implementation is `src/scoring/policy.ts` and `calculator.ts`; `GET /api/scoring-policy` exposes the version and SHA256 policy hash. These product rules measure declared observations, not rankings, revenue, compliance or an entire website.
 
-## Arithmetic and eligibility
+## Current approved amendments (November 1, 2026)
+
+New assessments default to `seo-spy-score-v1.2`. The original v1 and intermediate v1.1 remain registered with their original hashes and immutable snapshots. The rules below describing publishing targets and preferred facts are the historical v1 baseline; these approved amendments override them for v1.2:
+
+- Social is Facebook profile readiness only: business name, description/about, website link, contact route and category, each 20%. Posting activity is advisory; no publishing target is required for its numeric score. Missing fields remain unknown unless separately confirmed visibly absent.
+- Consistency supports explicitly approved `source-agreement` when no preferred name is known. Compare the two pinned sources directly with name/phone/website/hours weights 20/30/30/20. This measures agreement, not correctness. Do not invent a preferred name, aliases, timezone or Sunday hours.
+- Source-agreement confirmations use `seo-spy.confirmed-scoring-facts.v2`, with exact website/Facebook report IDs, confirmed E164 phone/context, actor/time and cited source reviews. Review state `always-open` records the operator observation separately from API hours omission; it uses no invented timezone. An observed restricted schedule disagrees with 24/7 even if Sunday is unspecified. Ordinary schedules still require comparable timezone/date scope. Missing or mismatched evidence blocks the affected score.
+- v1.1 separated collection/assessment time from reporting cutoff. Complete activity evidence covers four full UTC weeks ending at the latest completed UTC day. A separately filtered, bounded, exhaustive Page feed query records coverage proof; the recent-post sample and its existing UI fields remain unchanged. v1.2 retains this activity evidence as advisory.
+- Overall 50/30/20, Website 50/25/15/10, seven-day freshness, 72-hour source skew, strict completeness and final half-up rounding are unchanged. Reads never call providers or recalculate history.
+
+## Original v1 arithmetic and eligibility
 
 - Overall: Website 50%, Social 30%, Consistency 20%. All three must be eligible. Missing weights never move to another component.
 - Website: Lighthouse SEO 50%, Performance 25%, Accessibility 15%, Best Practices 10%. Require all four measured categories from one live run, page, strategy and version. Mobile and desktop have separately identified profiles. Zero is valid; null, duplicates, invalid ranges or incompatible runs are unavailable. HTML findings do not cause extra deductions.
@@ -32,7 +42,7 @@ Operator routes reuse server-only `WORDPRESS_OPERATOR_KEY` and the configured bu
 
 The dashboard reads the latest snapshot through its existing business response. Only scores whose pinned source IDs match the currently displayed reports populate its existing gauges. Unknown channels keep the existing unavailable treatment. Saved interpretation prose may replace a matching linked recommendation only when citations resolve; mock recommendations carry an explicit mock label. Neither viewing reports nor scores generates AI.
 
-## Confirmed facts and current data gaps
+## Original v1 confirmed facts and data gaps (historical)
 
 The request schema is `modules/assessments/confirmed-facts.ts`. It records the operator actor/time, preferred name/aliases, country-aware approved E164 phones, `phoneApplicable` (defaults true), canonical website destinations, timezone/`hoursApplicable`, a nullable publishing target and optional cited visible-absence confirmations. Nothing is inferred as business approval. Confirmations do not silently recalculate old snapshots; create a new assessment after a revision.
 
@@ -61,10 +71,20 @@ General homepage findings are not WordPress media IDs. They cannot bypass the ta
 
 The user explicitly deferred the proposed compact panel. Revisit after the backend workflow is settled: expand the existing Fix with AI feedback area with target/current/proposed alt text, expiry/status and Edit, Approve & Apply, Verify controls; establish a local operator browser connection without exposing credentials. Obtain specific UI approval before implementation. [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) retain this follow-up so it is reviewed in future work.
 
-## Dated saved-data validation
+## Original v1 saved-data validation (historical)
 
 The actual Guzman saved Lighthouse inputs (SEO 92, Performance 45, Accessibility 85, Best Practices 96) yield exact Website 79.6, displayed 80. Snapshot `91d67ab5-3f7e-4212-adc9-eb9259450c15` references audit `9961da8a-4575-4f6c-a2e7-53ed72441838`; the saved redirect evidence establishes the tested www page. Social remains unavailable (`UNCONFIRMED_PUBLISHING_GOAL`, `INCOMPLETE_POST_WINDOW`), Consistency requires confirmed business facts, and Overall remains null. These are calculations from existing measurements, not a new scan or a website improvement.
 
 Labeled mock interpretation `c7953af7-0edc-406d-a8c8-3e50a227ec18` was saved and displayed through existing recommendation slots. The actual local browser check passed at desktop and 320/390/768/1280 widths with backend external requests blocked: zero provider attempts, no new audits/edits and byte-unchanged AI ledger files. Mock input/output usage was zero. No real-site edit or live Meta evaluation was performed.
 
 Final checks passed: 44 backend suites, 789 tests and one pre-existing skip; backend/client type checking/build/lint as applicable; Dashboard, Website and Settings browser checks. A fresh read-only SQLite process replayed the stored snapshot exactly (`398/5`, displayed 80) and verified the persisted interpretation remained mocked. Dashboard component class expressions and production CSS remained unchanged.
+
+## v1.2 saved-data verification ? November 1, 2026
+
+The user reran the Facebook report through the refreshed browser connection. All five required read permissions were granted. API hours were omitted and the timezone field request returned code 100; neither establishes visible absence. The user separately confirmed that the public Page shows Always open, confirmed +1 725-340-6758, and approved source agreement without a preferred name.
+
+Confirmation 63546772-fcde-4df9-b83e-ec4296eb7a9b pins Website b1dd467e-026a-4b9f-a91f-35f7b10b9504 and Facebook af8dd660-2ef6-4d36-9a68-bb910d5dffed. Assessment f4222edc-0e4f-4fde-8bc7-2a6fe70e4adb yields Website **78**, Social **100**, Consistency **60**, Overall **81**. Names differ; phone and website agree; Facebook Always open disagrees with the website?s Mon?Sat 09:00?18:00, Sunday unknown. Social 100 denotes profile readiness, not posting activity or reach.
+
+A fresh local backend and headless browser displayed all four persisted scores in existing dashboard gauges, passing desktop and 320/390/768/1280 widths. External provider attempts were blocked and remained zero, AI accounting files were byte-unchanged, and no WordPress writes or new audits were made. The configured .env Facebook token had separately failed once with expired-token code 190/subcode 463; it was not retried. The successful report used the refreshed browser connection.
+
+Final v1.2 checks: backend typecheck/lint/build and 46 suites (909 tests passed, one pre-existing skip); frontend lint/build, 11 dashboard mapping tests, opportunity checks and dashboard browser regressions passed. All six persisted assessments replayed exactly across v1, v1.1 and v1.2. The running localhost:3001 Dashboard endpoint also returned 78/100/60/81. Dashboard class expressions and the production CSS hash remained unchanged.

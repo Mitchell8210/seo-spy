@@ -361,7 +361,7 @@ export class FacebookService implements OnModuleDestroy {
       message: "Connect or reconnect Facebook to continue.",
     });
   }
-  async requirePermissions(token: string): Promise<void> {
+  async requirePermissions(token: string): Promise<string[]> {
     const permissions = z
       .object({
         data: z.array(z.object({ permission: z.string(), status: z.string() })),
@@ -378,6 +378,7 @@ export class FacebookService implements OnModuleDestroy {
         message:
           "Reconnect Facebook and grant all five required read permissions.",
       });
+    return [...granted].filter(permission => /^[a-z_]{1,100}$/.test(permission));
   }
   async listPages(id?: string) {
     const connection = await this.credential(id);

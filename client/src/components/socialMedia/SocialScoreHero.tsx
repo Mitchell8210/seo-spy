@@ -2,16 +2,16 @@ import { BadgeCheck, TrendingUp } from 'lucide-react'
 import type { Score } from '../../types/dashboard'
 import { ScoreCard } from '../dashboard/ScoreCard'
 
-export function SocialScoreHero({ score, summary, benchmark, mode = 'demo' }: { score: Score | null; summary: string; benchmark: { percentile: number } | null; mode?: 'demo' | 'live' }) {
+export function SocialScoreHero({ score, summary, benchmark, mode = 'demo', scoreCaption }: { score: Score | null; summary: string; benchmark: { percentile: number } | null; mode?: 'demo' | 'live'; scoreCaption?: string }) {
   return (
     <section aria-labelledby="social-score-title" className="overflow-hidden rounded-2xl border border-blue-400/30 bg-surface p-5 shadow-xl shadow-black/15 sm:p-8">
       <div className="grid items-center gap-7 md:grid-cols-[232px_minmax(0,1fr)] xl:grid-cols-[232px_minmax(0,1fr)_240px]">
-        <div className="flex justify-center rounded-2xl border border-blue-400/15 bg-elevated px-2 py-6 shadow-inner shadow-black/10"><ScoreCard score={score} prominent /></div>
+        <div className="flex justify-center rounded-2xl border border-blue-400/15 bg-elevated px-2 py-6 shadow-inner shadow-black/10"><ScoreCard score={score} prominent live={mode === 'live'} /></div>
         <div className="min-w-0">
           <p className="mb-4 inline-flex rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1.5 text-xs font-semibold tracking-wide text-blue-300">YOUR SOCIAL PRESENCE</p>
           <h2 id="social-score-title" className="text-lg font-semibold leading-7 tracking-tight text-blue-200">SEO Spy Social Media Score</h2>
           <p className="mt-3 text-2xl font-semibold leading-9 tracking-tight text-ink sm:text-[1.7rem]">{summary}</p>
-          <p className="mt-4 text-xs leading-6 text-muted">{mode === 'live' ? 'Based on saved Facebook evidence. A social score has not been defined.' : 'Mock score · Same as the Dashboard’s social media component score.'}</p>
+          <p className="mt-4 text-xs leading-6 text-muted">{mode === 'live' ? scoreCaption ?? 'Based on saved Facebook evidence. Score not available.' : 'Mock score · Same as the Dashboard’s social media component score.'}</p>
         </div>
         <div className="min-w-0 md:col-span-2 md:grid md:grid-cols-2 md:items-center md:gap-5 xl:col-span-1 xl:block">
           <div data-performance-graphic aria-hidden="true" className="mb-4 rounded-xl border border-blue-400/10 bg-elevated/50 px-3 pt-4 md:mb-0 xl:mb-4">

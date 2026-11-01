@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { facebookPostCoverageSchema, type FacebookPostWindow } from "./post-coverage.js";
 
 export type FacebookAvailability = "available" | "missing" | "unavailable";
 export interface FacebookField {
@@ -24,6 +25,7 @@ export interface FacebookMetric {
   failureCode?: string;
 }
 export interface FacebookReport {
+  publishing?: FacebookPostWindow;
   provider: "facebook-graph";
   version: "facebook-v1";
   analysisVersion?: "facebook-analysis-v1";
@@ -135,6 +137,7 @@ export const facebookReportSchema = z
       hours: field(hours),
       location: field(location),
       category: field(text),
+      timezone: field(z.union([z.string().max(100), z.number().finite().min(-14).max(14)])),
       username: field(text),
       followers_count: field(number),
       fan_count: field(number),
@@ -163,6 +166,11 @@ export const facebookReportSchema = z
       collectedAt: timestamp,
       failureCode: z.string().max(128).optional(),
     }),
+    publishing: z.object({
+      status: z.enum(["available", "unavailable"]),
+      items: z.array(z.object({ id: z.string().regex(/^\d+_\d+$/), message: z.string().max(100000).nullable(), createdTime: timestamp.nullable(), url: z.string().regex(/^https:\/\/www\.facebook\.com\/\d+_\d+$/) }).strict()).max(100),
+      truncated: z.boolean(), collectedAt: timestamp, coverage: facebookPostCoverageSchema, failureCode: z.string().max(128).optional(),
+    }).strict().optional(),
     metrics: z
       .array(
         z.object({

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SCORE_POLICY, SCORE_POLICY_HASH } from "./policy.js";
+import { SCORE_POLICY_REGISTRY } from "./policy.js";
 import { add, decimal, exact, fromExact, multiply, rational, roundHalfUp, type Rational } from "./rational.js";
 import type { CalculatedScore, ConfirmedRevision, CriterionLedger, ScoreAssessmentInput, ScoreCriterion, ScoreEvidenceRef, ScoreSnapshot, ScoreSource } from "./scoring.types.js";
 
@@ -32,6 +32,9 @@ const missing = (id: string, reasons = ["MISSING_EVIDENCE"]): CalculatedScore =>
 
 /** Pure and replayable: no providers, database, environment configuration, jobs or clock reads. */
 export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapshot {
+  const version = input.policyVersion ?? "seo-spy-score-v1";
+  if (!Object.hasOwn(SCORE_POLICY_REGISTRY, version)) throw new ScoringInputError("UNSUPPORTED_POLICY");
+  const { policy, hash: policyHash } = SCORE_POLICY_REGISTRY[version];
   const cutoff = timestamp(input.cutoff);
   if (cutoff === null || !label(input.businessId) || !url(input.expectedAssets.websiteUrl) || !Array.isArray(input.sources) || input.sources.length > 2) throw new ScoringInputError("INVALID_SCORING_INPUT");
   if (!["baseline-mobile-v1", "baseline-desktop-v1"].includes(input.profile)) throw new ScoringInputError("UNSUPPORTED_PROFILE");
@@ -45,7 +48,7 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
     const collected = timestamp(source.collectedAt);
     if (collected === null) reasons.push("INVALID_TIMESTAMP");
     else if (collected > cutoff) reasons.push("FUTURE_INPUT");
-    else if (cutoff - collected > SCORE_POLICY.maxSourceAgeMs) reasons.push("STALE_INPUT");
+    else if (cutoff - collected > policy.maxSourceAgeMs) reasons.push("STALE_INPUT");
     return unique(reasons);
   };
   const source = (id: string, provider: ScoreSource["provider"]): ScoreSource | null => input.sources.find(item => item.reportId === id && item.provider === provider) ?? null;
@@ -53,7 +56,7 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
   const revisionValid = (value: ConfirmedRevision | null): boolean => !!value && label(value.revision) && label(value.confirmedBy) && timestamp(value.confirmedAt) !== null && timestamp(value.confirmedAt)! <= cutoff;
   const skewReasons = (sources: ScoreSource[]) => {
     const dates = sources.map(item => timestamp(item.collectedAt));
-    return dates.some(value => value === null) ? ["INVALID_TIMESTAMP"] : Math.max(...dates as number[]) - Math.min(...dates as number[]) > SCORE_POLICY.maxSourceSkewMs ? ["SOURCE_TIME_MISMATCH"] : [];
+    return dates.some(value => value === null) ? ["INVALID_TIMESTAMP"] : Math.max(...dates as number[]) - Math.min(...dates as number[]) > policy.maxSourceSkewMs ? ["SOURCE_TIME_MISMATCH"] : [];
   };
   const criterionValue = (criterion: ScoreCriterion | undefined, allowed: string[], absenceOnly: boolean) => {
     const reasons: string[] = [];
@@ -80,7 +83,7 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
       || data.strategy !== (input.profile === "baseline-mobile-v1" ? "mobile" : "desktop")) reasons.push("RUN_MISMATCH");
     const measuredCategories = Array.isArray(data.categories) ? data.categories : [];
     if (measuredCategories.length !== 4 || new Set(measuredCategories.map(item => item.id)).size !== 4) reasons.push("INVALID_MEASUREMENT");
-    website = finish(Object.entries(SCORE_POLICY.websiteWeights).map(([id, weight]) => {
+    website = finish(Object.entries(policy.websiteWeights).map(([id, weight]) => {
       const categories = measuredCategories.filter(item => item.id === id);
       const category = categories[0];
       const evidence = [{ reportId: data.sourceReportId, evidenceId: `lighthouse-category:${id}` }];
@@ -91,25 +94,31 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
   }
 
   let social: CalculatedScore;
-  if (!input.social) social = missing("social", ["MISSING_EVIDENCE", "UNCONFIRMED_PUBLISHING_GOAL"]);
+  if (!input.social) social = missing("social", version === "seo-spy-score-v1.2" ? ["MISSING_EVIDENCE"] : ["MISSING_EVIDENCE", "UNCONFIRMED_PUBLISHING_GOAL"]);
   else {
     const data = input.social;
     const selected = source(data.sourceReportId, "facebook");
     const reasons = selected ? sourceReasons(selected) : ["MISSING_EVIDENCE"];
     if (data.profile.length !== 5 || new Set(data.profile.map(item => item.id)).size !== 5) reasons.push("INVALID_CRITERIA");
-    const profile = finish(Object.entries(SCORE_POLICY.profileWeights).map(([id, weight]) => {
+    const profile = finish(Object.entries(policy.profileWeights).map(([id, weight]) => {
       const criterion = data.profile.find(item => item.id === id);
       const result = criterionValue(criterion, [data.sourceReportId], true);
       return row(id, weight, reasons.length || result.reasons.length ? null : result.value, criterion?.outcome ?? null, [...reasons, ...result.reasons], criterion?.evidence);
     }), 100);
+    if (version === "seo-spy-score-v1.2") social = profile;
+    else {
     const publishingReasons = [...reasons];
     const goal = data.goal;
     if (!goal || !revisionValid(goal) || !Number.isSafeInteger(goal.targetPostsPerPeriod) || goal.targetPostsPerPeriod <= 0) publishingReasons.push("UNCONFIRMED_PUBLISHING_GOAL");
     const publishing = data.publishing;
+    const expectedReportingCutoff = Math.floor(cutoff / 86400000) * 86400000;
+    const declaredReportingCutoff = publishing?.reportingCutoff ? timestamp(publishing.reportingCutoff) : null;
+    const reportingCutoff = version === "seo-spy-score-v1.1" ? declaredReportingCutoff : cutoff;
+    if (version === "seo-spy-score-v1.1" && (declaredReportingCutoff === null || declaredReportingCutoff !== expectedReportingCutoff)) publishingReasons.push("INVALID_REPORTING_CUTOFF");
     if (!publishing || !publishing.complete || publishing.truncated || !publishing.trustworthyTimestamps || publishing.periods.length !== 4) publishingReasons.push("INCOMPLETE_POST_WINDOW");
     const periods: CriterionLedger[] = (publishing?.periods ?? []).slice(0, 4).map((period, index) => {
-      const start = cutoff - (4 - index) * SCORE_POLICY.periodMs;
-      const end = cutoff - (3 - index) * SCORE_POLICY.periodMs;
+      const start = (reportingCutoff ?? cutoff) - (4 - index) * policy.periodMs;
+      const end = (reportingCutoff ?? cutoff) - (3 - index) * policy.periodMs;
       const periodReasons = [...publishingReasons];
       if (timestamp(period.startAt) !== start || timestamp(period.endAt) !== end || !Number.isSafeInteger(period.count) || period.count < 0 || !refsValid(period.evidence, [data.sourceReportId])) periodReasons.push("INCOMPLETE_POST_WINDOW");
       const value = periodReasons.length ? null : multiply(rational(BigInt(Math.min(period.count, goal!.targetPostsPerPeriod)), BigInt(goal!.targetPostsPerPeriod)), rational(100n));
@@ -123,6 +132,7 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
     // Native subweights and contributions remain nested, avoiding double-counting.
     social.ledger[0].details = profile.ledger;
     social.ledger[1].details = publishingScore.ledger;
+    }
   }
 
   let consistency: CalculatedScore;
@@ -133,27 +143,40 @@ export function calculateScoreSnapshot(input: ScoreAssessmentInput): ScoreSnapsh
     const facebookSource = source(data.facebookReportId, "facebook");
     const sources = [websiteSource, facebookSource].filter((value): value is ScoreSource => value !== null);
     const reasons = sources.length !== 2 ? ["MISSING_EVIDENCE"] : [...sources.flatMap(sourceReasons), ...skewReasons(sources)];
+    const agreement = data.comparisonMode === "source-agreement";
+    if (data.comparisonMode && !["preferred-values", "source-agreement"].includes(data.comparisonMode) || agreement && version !== "seo-spy-score-v1.2") reasons.push("UNSUPPORTED_COMPARISON_MODE");
+    if (agreement && (!data.facts?.sourceAttestation || data.facts.sourceAttestation.websiteReportId !== data.websiteReportId || data.facts.sourceAttestation.facebookReportId !== data.facebookReportId)) reasons.push("UNCONFIRMED_SOURCE_ATTESTATION");
     if (!revisionValid(data.facts)) reasons.push("UNCONFIRMED_BUSINESS_FACTS");
     if (data.criteria.length !== 4 || new Set(data.criteria.map(item => item.id)).size !== 4) reasons.push("INVALID_CRITERIA");
-    const definitions = Object.entries(SCORE_POLICY.consistencyWeights).map(([id, weight]) => ({ id, weight, criterion: data.criteria.find(item => item.id === id) }));
+    const definitions = Object.entries(policy.consistencyWeights).map(([id, weight]) => ({ id, weight, criterion: data.criteria.find(item => item.id === id) }));
     if (definitions.some(item => !item.criterion || typeof item.criterion.applicable !== "boolean") || definitions.some(item => ["business-name", "website-url"].includes(item.id) && !item.criterion?.applicable)) reasons.push("INVALID_APPLICABILITY");
     if (definitions.some(item => item.criterion?.applicable === false) && !revisionValid(data.applicability)) reasons.push("UNCONFIRMED_APPLICABILITY");
     const denominator = definitions.reduce((total, item) => total + (item.criterion?.applicable === false ? 0 : item.weight), 0);
     consistency = finish(definitions.map(({ id, weight, criterion }) => {
       if (criterion?.applicable === false) return row(id, 0, null, "not-applicable", ["NOT_APPLICABLE"], criterion.evidence);
       const result = criterionValue(criterion, [data.websiteReportId, data.facebookReportId], false);
+      if (agreement && (!criterion?.observations || !label(criterion.observations.website ?? "") || !label(criterion.observations.facebook ?? ""))) result.reasons.push("MISSING_EVIDENCE");
       if (criterion && (!criterion.evidence.some(ref => ref.reportId === data.websiteReportId) || !criterion.evidence.some(ref => ref.reportId === data.facebookReportId))) result.reasons.push("MISSING_EVIDENCE");
       return row(id, weight, reasons.length || result.reasons.length ? null : result.value, criterion?.outcome ?? null, [...reasons, ...result.reasons], criterion?.evidence, denominator || 100);
     }), denominator, reasons);
   }
 
   const components = { website, social, consistency };
-  const overall = finish(Object.entries(SCORE_POLICY.overallWeights).map(([id, weight]) => {
+  const overall = finish(Object.entries(policy.overallWeights).map(([id, weight]) => {
     const score = components[id as keyof typeof components];
     return row(id, weight, score.exact ? fromExact(score.exact) : null, score.value, score.reasons);
   }), 100, input.sources.length === 2 ? skewReasons(input.sources) : []);
+  const validReportingCutoff = input.social?.publishing?.reportingCutoff && timestamp(input.social.publishing.reportingCutoff) === Math.floor(cutoff / 86400000) * 86400000 ? input.social.publishing.reportingCutoff : null;
+  const consistencyBasis = !input.consistency ? null : input.consistency.comparisonMode === "source-agreement" ? "source-agreement" as const
+    : !input.consistency.comparisonMode || input.consistency.comparisonMode === "preferred-values" ? "preferred-values" as const : null;
   return { schemaVersion: "seo-spy.score-snapshot.v1", businessId: input.businessId, cutoff: input.cutoff, profile: input.profile,
-    policyVersion: SCORE_POLICY.version, policyHash: SCORE_POLICY_HASH, sources: structuredClone(input.sources),
+    policyVersion: policy.version, policyHash,
+    ...(version === "seo-spy-score-v1.1" ? { reportingCutoff: validReportingCutoff } : {}),
+    ...(version === "seo-spy-score-v1.2" ? { socialScope: "facebook-profile-readiness" as const, consistencyBasis,
+      ...(validReportingCutoff ? { reportingCutoff: validReportingCutoff } : {}) } : {}),
+    sources: structuredClone(input.sources),
     confirmations: { socialGoal: structuredClone(input.social?.goal ?? null), consistencyFacts: structuredClone(input.consistency?.facts ?? null), applicability: structuredClone(input.consistency?.applicability ?? null) },
-    scores: { ...components, overall }, limitations: ["Website coverage is one tested page and device profile, not a sitewide assessment.", "This policy measures declared observed criteria, not search rankings, traffic, revenue or compliance.", "Rank Math, traffic metrics, issue counts and Muse judgments do not alter this baseline's arithmetic."] };
+    scores: { ...components, overall }, limitations: ["Website coverage is one tested page and device profile, not a sitewide assessment.", "This policy measures declared observed criteria, not search rankings, traffic, revenue or compliance.", "Rank Math, traffic metrics, issue counts and Muse judgments do not alter this baseline's arithmetic.",
+      ...(version === "seo-spy-score-v1.2" ? ["Social measures Facebook profile readiness only. Publishing activity and posting targets are advisory and do not change Social or Overall.",
+        consistencyBasis === "source-agreement" ? "Consistency measures agreement between confirmed source observations. A disagreement does not establish which source is correct or preferred." : consistencyBasis === "preferred-values" ? "Consistency compares source observations with recorded preferred business values." : "No eligible consistency comparison basis was established."] : [])] };
 }

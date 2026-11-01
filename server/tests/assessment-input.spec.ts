@@ -2,10 +2,11 @@ import { load } from "cheerio";
 import { randomUUID } from "node:crypto";
 import { extractWebsiteBusinessEntities } from "../src/integrations/website/business-facts.js";
 import { buildAssessmentInput, normalizeConfirmedPhone } from "../src/modules/assessments/assessment-input.js";
-import { confirmedFactsSchema } from "../src/modules/assessments/confirmed-facts.js";
+import { confirmedFactsSchema, sourceAgreementFactsSchema } from "../src/modules/assessments/confirmed-facts.js";
 import { calculateScoreSnapshot } from "../src/scoring/calculator.js";
 import type { AuditReportRecord } from "../src/reports/report.types.js";
 import type { FacebookReport } from "../src/integrations/facebook/types.js";
+import { collectFacebookPostWindow } from "../src/integrations/facebook/post-coverage.js";
 
 const at = "2026-11-01T00:00:00.000Z";
 const business = { id: "business", name: "Confirmed Accounting", website: "https://example.com/", createdAt: at };
@@ -32,6 +33,42 @@ function fixture() {
     values: { confirmed: true, publishingTarget: 1, preferred: { name: business.name, aliases: [], country: "US", phones: ["+17025551212"], websiteUrls: [business.website], timeZone: "America/Los_Angeles", hours: null, hoursApplicable: false }, profileAbsences: [] } });
   return { business, website, facebook, facts, cutoff: at, profile: "baseline-mobile-v1" as const };
 }
+
+function agreementFixture() {
+  const selected = fixture();
+  selected.website.results!.evidence[0]!.observed.entities = JSON.stringify([{ name: "Accounting & Multi Services", url: business.website, phone: "+1-702-555-1212", hours: [{ day: "Monday", opens: "09:00", closes: "18:00" }] }]);
+  const fb = selected.facebook.results!.facebook!;
+  fb.profile.name!.value = "Accounting & Associates";
+  fb.profile.hours = { status: "missing", value: null, collectedAt: at };
+  for (const field of ["name", "phone", "website", "hours"]) selected.facebook.results!.evidence.push({ id: `real-${field}`, auditId: selected.facebook.reportId, checkId: `facebook:profile:${field}`, mode: "live", collectedAt: at, sourceUrl: "https://www.facebook.com/123", observed: { status: fb.profile[field]!.status } });
+  const facts = sourceAgreementFactsSchema.parse({ schemaVersion: "seo-spy.confirmed-scoring-facts.v2", id: randomUUID(), businessId: business.id, createdAt: at, confirmedBy: "a".repeat(64), values: {
+    confirmed: true, comparisonMode: "source-agreement", country: "international", confirmedPhone: "+17025551212", websiteReportId: selected.website.reportId, facebookReportId: selected.facebook.reportId,
+    sourceReviews: [{ provider: "facebook", reportId: selected.facebook.reportId, evidenceIds: ["real-hours"], field: "hours", state: "always-open", timeZone: null, hours: null, observedAt: at, validFrom: "2026-11-01", notes: "The operator confirms the public Page displays Always open." }], notes: "Source agreement approved without a preferred business name." } });
+  return { ...selected, facts, policyVersion: "seo-spy-score-v1.2" as const };
+}
+
+describe("approved source-agreement adapter", () => {
+  it("scores real paired observations without a preferred name or publishing target", () => {
+    const selected = agreementFixture();
+    const input = buildAssessmentInput(selected);
+    const scores = calculateScoreSnapshot(input);
+    expect(scores.scores.social.value).toBe(100);
+    expect(scores.scores.consistency.value).toBe(60);
+    expect(scores.scores.overall.value).toBe(82);
+    expect(input.consistency?.criteria.map(item => item.outcome)).toEqual(["fail", "pass", "pass", "fail"]);
+    expect(input.consistency?.criteria[3]!.observations?.facebook).toBe("Always open (operator reviewed)");
+  });
+  it("fails closed on API omission without the operator observation", () => {
+    const selected = agreementFixture(); selected.facts.values.sourceReviews = [];
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBeNull();
+  });
+  it("requires the exact attested source pair and genuine paired evidence", () => {
+    const selected = agreementFixture(); selected.facts.values.facebookReportId = randomUUID();
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBeNull();
+    const missing = agreementFixture(); missing.facebook.results!.evidence = missing.facebook.results!.evidence.filter(item => item.checkId !== "facebook:profile:phone");
+    expect(calculateScoreSnapshot(buildAssessmentInput(missing)).scores.consistency.value).toBeNull();
+  });
+});
 
 describe("saved evidence to scoring inputs", () => {
   it("derives all eligible component values from confirmed facts and complete saved evidence", () => {
@@ -95,6 +132,41 @@ describe("saved evidence to scoring inputs", () => {
     expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.website.value).toBe(80);
     selected.website.results!.evidence.at(-1)!.observed.redirects = "[]";
     expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.website.value).toBeNull();
+  });
+  it("scores a separately collected complete publishing window without replacing the recent-post sample", async () => {
+    const selected = fixture(); selected.cutoff = "2026-11-01T12:00:00.000Z";
+    const original = JSON.stringify(selected.facebook.results!.facebook!.posts);
+    const posts = selected.facebook.results!.facebook!.posts.items;
+    const publishing = await collectFacebookPostWindow(async () => ({ data: posts.map(item => ({ id: item.id, created_time: item.createdTime! })) }), "123", selected.cutoff);
+    selected.facebook.results!.facebook!.publishing = publishing;
+    selected.facebook.results!.evidence.push({ id: "window", auditId: selected.facebook.auditId, checkId: "facebook:publishing-window", mode: "live", sourceUrl: "https://www.facebook.com/123", collectedAt: selected.cutoff,
+      observed: { status: publishing.status, truncated: String(publishing.truncated), items: JSON.stringify(publishing.items), coverage: JSON.stringify(publishing.coverage) } });
+    const snapshot = calculateScoreSnapshot(buildAssessmentInput({ ...selected, policyVersion: "seo-spy-score-v1.1" }));
+    expect(snapshot.scores.social.value).toBe(90); expect(snapshot.scores.overall.value).toBe(87);
+    expect(snapshot.reportingCutoff).toBe(at);
+    expect(JSON.stringify(selected.facebook.results!.facebook!.posts)).toBe(original);
+    selected.facebook.results!.evidence[0]!.sourceUrl = "https://www.facebook.com/999";
+    expect(calculateScoreSnapshot(buildAssessmentInput({ ...selected, policyVersion: "seo-spy-score-v1.1" })).scores.social.value).toBeNull();
+  });
+  it("keeps missing or conflicting complete-window proof unavailable", async () => {
+    const selected = fixture(); selected.cutoff = "2026-11-01T12:00:00.000Z";
+    const publishing = await collectFacebookPostWindow(async () => ({ data: [] }), "123", selected.cutoff);
+    selected.facebook.results!.facebook!.publishing = publishing;
+    selected.facebook.results!.evidence.push({ id: "window", auditId: selected.facebook.auditId, checkId: "facebook:publishing-window", mode: "live", sourceUrl: "https://www.facebook.com/123", collectedAt: selected.cutoff,
+      observed: { status: publishing.status, truncated: String(publishing.truncated), items: JSON.stringify(publishing.items), coverage: JSON.stringify(publishing.coverage) } });
+    expect(calculateScoreSnapshot(buildAssessmentInput({ ...selected, policyVersion: "seo-spy-score-v1.1" })).scores.social.value).toBeNull();
+    selected.facebook.results!.facebook!.posts.items = [];
+    expect(calculateScoreSnapshot(buildAssessmentInput({ ...selected, policyVersion: "seo-spy-score-v1.1" })).scores.social.value).toBe(60);
+  });
+  it("merges complementary markup only after establishing the same observed business identity", () => {
+    const selected = fixture();
+    selected.facts.values.preferred.name = "Confirmed & Accounting";
+    selected.facebook.results!.facebook!.profile.name!.value = "Confirmed & Accounting";
+    selected.website.results!.evidence[0]!.observed.entities = JSON.stringify([
+      { name: "Confirmed &amp; Accounting", url: business.website, phone: null, hours: null },
+      { name: "Confirmed & Accounting", url: business.website, phone: "702-555-1212", hours: null },
+    ]);
+    expect(calculateScoreSnapshot(buildAssessmentInput(selected)).scores.consistency.value).toBe(100);
   });
 });
 

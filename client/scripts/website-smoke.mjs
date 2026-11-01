@@ -163,7 +163,29 @@ try {
   let port; await waitFor(async () => { port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]); return Boolean(port); }, 'Chrome startup');
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); cdp = await connect(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('Network.enable'); await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  if (dashboardMode && savedTarget) {
+  if (savedTarget && process.argv.includes('--channel-scores')) {
+    const dashboard = await (await fetch(savedTarget + '/api/businesses/demo-guzman/dashboard')).json();
+    for (const [route, category, title] of [['website', 'website', 'website-summary-title'], ['social-media', 'social', 'social-score-title']]) {
+      const expected = dashboard.assessment.scores[category];
+      assert.equal(expected.availability, 'available');
+      await navigateReport(base + '/' + route);
+      const label = () => evaluate('document.getElementById(' + JSON.stringify(title) + ').closest("section").querySelector("[role=img]").getAttribute("aria-label")');
+      await waitFor(async () => (await label())?.includes(`: ${expected.value} out of 100`), `actual saved ${category} score`);
+      assert.match(await label(), /measured score/);
+      assert.ok((await text()).includes('SEO Spy policy v1.2'));
+      if (category === 'social') assert.match(await text(), /Facebook profile readiness · Posting activity advisory/);
+      assert.doesNotMatch(await text(), /scoring is not implemented|social score has not been defined/);
+      await screenshot('saved-' + route + '-score-desktop.png');
+      for (const width of [320, 390, 768, 1280]) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+        assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, route + ' overflow at ' + width);
+      }
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+    }
+    assert.ok(browserApiRequests.every(item => item.method === 'GET' && !/google\/|muse|ai\//i.test(item.path)));
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ passed: ['persisted Website and Social scores match dashboard', 'correct policy scopes', 'responsive layout', 'saved reads only'], artifactDirectory: artifacts }, null, 2));
+  } else if (dashboardMode && savedTarget) {
     const savedDashboard = await (await fetch(savedTarget + '/api/businesses/demo-guzman/dashboard')).json();
     const list = await (await fetch(savedTarget + '/api/businesses/demo-guzman/reports')).json();
     const candidate = list.reports.find(item => item.mode === 'live' && ['homepage', 'lighthouse'].includes(item.scope) && ['completed', 'partial'].includes(item.status));
@@ -178,7 +200,14 @@ try {
       await waitFor(async () => await evaluate('Boolean(document.querySelector(' + JSON.stringify(`section[aria-label="Website Health"] [aria-label^="SEO Spy Website Score: ${websiteScore.value} out of 100"]`) + '))'), 'actual persisted Website score matches the existing gauge');
     }
     for (const finding of analysis.findings.filter(item => item.source === 'website').slice(0, 3)) assert.ok((await text()).includes(finding.title), 'Saved website finding: ' + finding.id);
-    assert.equal(await evaluate('document.querySelector("section[aria-labelledby=spy-total-title] [role=img]").getAttribute("aria-label")'), 'Score: not available');
+    const savedScores = savedDashboard.assessment?.scores;
+    const totalLabel = await evaluate('document.querySelector("section[aria-labelledby=spy-total-title] [role=img]").getAttribute("aria-label")');
+    if (savedScores?.overall.availability === 'available') assert.ok(totalLabel.includes(`: ${savedScores.overall.value} out of 100`));
+    else assert.equal(totalLabel, 'Score: not available');
+    for (const [category, title] of [['social', 'Social Media Performance'], ['consistency', 'Business Consistency']]) {
+      const expected = savedScores?.[category];
+      if (expected?.availability === 'available') await waitFor(async () => await evaluate('Boolean(document.querySelector(' + JSON.stringify(`section[aria-label="${title}"] [aria-label*="${expected.value} out of 100"]`) + '))'), `persisted ${category} score matches existing gauge`);
+    }
     assert.equal(await evaluate('document.querySelectorAll("#consistency-details li").length'), 4);
     assert.doesNotMatch(await text(), /Demo overall score|Demo score and findings|Demo comparison|Business hours differ|Phone formatting differs/);
     await screenshot('saved-dashboard-desktop.png');
@@ -189,7 +218,7 @@ try {
     await screenshot('saved-dashboard-mobile.png');
     assert.ok(browserApiRequests.every(item => item.method === 'GET' && !/google\/|muse|ai\//i.test(item.path)), 'Actual saved Dashboard reads are read-only and never invoke Google or AI routes.');
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ passed: ['actual SQLite-backed saved data', 'registered business', 'saved findings', 'unavailable scoring and comparison', 'responsive layout', 'no audit creation, edits or AI requests'], auditId: candidate.auditId, artifactDirectory: artifacts }, null, 2));
+    console.log(JSON.stringify({ passed: ['actual SQLite-backed saved data', 'registered business', 'saved findings', 'saved eligible scores match existing gauges', 'responsive layout', 'no audit creation, edits or AI requests'], auditId: candidate.auditId, artifactDirectory: artifacts }, null, 2));
   } else if (dashboardMode) {
     const go = async (query = '') => { await navigateReport(base + '/dashboard' + query); };
     const categoryText = label => evaluate('document.querySelector(' + JSON.stringify(`section[aria-label="${label}"]`) + ').innerText');
@@ -284,7 +313,11 @@ try {
     for (const category of record.results.lighthouse?.categories ?? []) {
       if (category.availability === 'measured') assert.ok(scores.some(value => value.toLowerCase().startsWith((category.title + ': ' + category.score + ' out of 100').toLowerCase())), category.title + ' matches archive');
     }
-    assert.equal(await evaluate('document.querySelector("#website-summary-title").closest("section").querySelector("[role=img]").getAttribute("aria-label")'), 'Score: not available');
+    const dashboard = await (await fetch(savedTarget + '/api/businesses/demo-guzman/dashboard')).json();
+    const expectedScore = dashboard.assessment?.scores.website;
+    const scoreLabel = await evaluate('document.querySelector("#website-summary-title").closest("section").querySelector("[role=img]").getAttribute("aria-label")');
+    if (expectedScore?.availability === 'available' && dashboard.assessment.sources.some(source => source.provider === 'website' && source.reportId === candidate.auditId && source.businessId === record.business.id)) assert.ok(scoreLabel.includes(`: ${expectedScore.value} out of 100`));
+    else assert.equal(scoreLabel, 'Score: not available');
     const expectedFindings = record.results.findings.filter(item => item.source === 'website');
     const visible = await text(); for (const finding of expectedFindings) assert.ok(visible.includes(finding.title));
     const priorities = await (await fetch(savedTarget + '/api/audits/' + candidate.auditId + '/website-analysis')).json();
@@ -310,7 +343,7 @@ try {
     await assertDetailsFit('saved mobile details');
     await screenshot('saved-mobile.png');
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ passed: ['real archive through local API', 'business identity', 'original completion time', 'measured scores match archive', 'combined score unavailable', 'all website findings', 'mobile overflow'], auditId: candidate.auditId, artifactDirectory: artifacts }, null, 2));
+    console.log(JSON.stringify({ passed: ['real archive through local API', 'business identity', 'original completion time', 'measured scores match archive', 'eligible saved Website score', 'all website findings', 'mobile overflow'], auditId: candidate.auditId, artifactDirectory: artifacts }, null, 2));
   } else {
   const go = async () => { await navigateReport(base + '/website'); };
   await go();
@@ -344,6 +377,16 @@ try {
     assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'no page overflow at ' + width);
   }
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  savedAssessment = { businessId: business.id, policyVersion: 'seo-spy-score-v1.2', policyHash: 'a'.repeat(64), profile: 'baseline-mobile-v1', cutoff: now,
+    sources: [{ businessId: business.id, reportId: report.auditId, provider: 'website' }], scores: { website: { value: 78, maximum: 100, availability: 'available' } } };
+  await go();
+  const websiteScoreLabel = () => evaluate('document.querySelector("#website-summary-title").closest("section").querySelector("[role=img]").getAttribute("aria-label")');
+  await waitFor(async () => (await websiteScoreLabel()).includes('78 out of 100'), 'saved Website policy score');
+  assert.match(await text(), /SEO Spy policy v1\.2.*Mobile website health/);
+  savedAssessment.sources[0].reportId = 'different-report';
+  await go(); await waitFor(async () => (await text()).includes('Review fixture image alternatives'), 'mismatched score report');
+  assert.equal(await websiteScoreLabel(), 'Score: not available');
+  savedAssessment = null;
   mode = 'failed-latest'; await go(); await waitFor(async () => (await text()).includes('latest website investigation failed'), 'failed newer attempt');
   assert.match(await text(), /Review fixture image alternatives/);
   mode = 'running'; await go(); await waitFor(async () => (await text()).includes('Investigation running'), 'active investigation');

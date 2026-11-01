@@ -1,5 +1,6 @@
 export type ScoreCategory = "website" | "social" | "consistency" | "overall";
 export type ScoreProfile = "baseline-mobile-v1" | "baseline-desktop-v1";
+export type ScorePolicyVersion = "seo-spy-score-v1" | "seo-spy-score-v1.1" | "seo-spy-score-v1.2";
 export type ScoreOutcome = "pass" | "fail" | "unknown";
 export interface ScoreEvidenceRef { reportId: string; evidenceId: string }
 export interface ScoreSource {
@@ -35,11 +36,17 @@ export interface ScoreCriterion {
   reason?: string;
 }
 export interface ConfirmedRevision { revision: string; confirmedBy: string; confirmedAt: string }
+export interface ConfirmedConsistencyRevision extends ConfirmedRevision {
+  /** A reviewed source observation, not a preferred-value declaration. */
+  sourceAttestation?: { websiteReportId: string; facebookReportId: string };
+}
 export interface SocialScoreInput {
   sourceReportId: string;
   profile: ScoreCriterion[];
   goal: (ConfirmedRevision & { targetPostsPerPeriod: number }) | null;
   publishing: {
+    /** v1.1: exclusive UTC midnight ending the latest complete UTC reporting day. */
+    reportingCutoff?: string;
     complete: boolean;
     truncated: boolean;
     trustworthyTimestamps: boolean;
@@ -47,13 +54,16 @@ export interface SocialScoreInput {
   } | null;
 }
 export interface ConsistencyScoreInput {
+  comparisonMode?: "preferred-values" | "source-agreement";
   websiteReportId: string;
   facebookReportId: string;
-  facts: ConfirmedRevision | null;
+  facts: ConfirmedConsistencyRevision | null;
   applicability: ConfirmedRevision | null;
   criteria: (ScoreCriterion & { applicable: boolean })[];
 }
 export interface ScoreAssessmentInput {
+  /** Omitted preserves legacy v1 calculation and snapshot shape exactly. */
+  policyVersion?: ScorePolicyVersion;
   businessId: string;
   cutoff: string;
   profile: ScoreProfile;
@@ -89,10 +99,14 @@ export interface ScoreSnapshot {
   businessId: string;
   cutoff: string;
   profile: ScoreProfile;
-  policyVersion: "seo-spy-score-v1";
+  policyVersion: ScorePolicyVersion;
   policyHash: string;
+  /** v1.1 required reporting metadata; v1.2 optional advisory metadata. Never emitted for v1. */
+  reportingCutoff?: string | null;
+  socialScope?: "facebook-profile-readiness";
+  consistencyBasis?: "preferred-values" | "source-agreement" | null;
   sources: ScoreSource[];
-  confirmations: { socialGoal: SocialScoreInput["goal"]; consistencyFacts: ConfirmedRevision | null; applicability: ConfirmedRevision | null };
+  confirmations: { socialGoal: SocialScoreInput["goal"]; consistencyFacts: ConfirmedConsistencyRevision | null; applicability: ConfirmedRevision | null };
   scores: Record<ScoreCategory, CalculatedScore>;
   limitations: string[];
 }

@@ -20,7 +20,7 @@ The /website page now reads saved live Website reports. Its existing sections, c
 | Selected website | Registered business ID, URL and hostname; saved-report status when archive data is shown |
 | Analyzed time | audit.completedAt, with generatedAt fallback; original timestamp formatted in the existing Pacific timezone |
 | Four category cards | Lighthouse performance, accessibility, best-practices and seo category scores; existing label capitalization preserved |
-| SEO Spy Website Score | Unavailable; no frontend averaging or substitution of Lighthouse SEO |
+| SEO Spy Website Score | Eligible backend Website score from the dashboard's saved assessment, pinned to the displayed business and report; no frontend averaging or substitution of Lighthouse SEO |
 | Issues requiring attention | Number of website-source findings actually displayed |
 | Checks passed / Great Condition | Distinct category-referenced binary Lighthouse checks with score 1; numeric, manual, skipped, informative and error checks are excluded |
 | Finding severity/title/explanation | Backend values, mapped to the existing severity labels |
@@ -43,7 +43,15 @@ From client/:
 
 - npm run lint
 - npm run build
-- npm run test:website: offline adapter tests and Chrome browser checks against a controlled local API. No provider calls or credentials. Chrome path can be supplied with CHROME_PATH.
-- npm run test:website:saved: optional read-only browser check against an already running backend and an existing saved live Website report. Defaults to http://127.0.0.1:3001; override with WEBSITE_API_TARGET. It does not create an audit or consume provider credits.
+- `node --test scripts/website-mapping.test.mjs scripts/saved-score.test.mjs` and `node scripts/website-smoke.mjs`: offline adapter tests and Chrome browser checks against a controlled local API. No provider calls or credentials. Chrome path can be supplied with CHROME_PATH.
+- `node scripts/website-smoke.mjs --saved`: optional read-only browser check against an already running backend and an existing saved live Website report. Defaults to http://127.0.0.1:3001; override with WEBSITE_API_TARGET. It does not create an audit or consume provider credits.
 
 Browser screenshots are written under ignored node_modules/.cache/website-smoke/ directories. Coverage includes unavailable/zero scores, binary pass semantics, evidence and review controls, safe text rendering, older usable results after failures, active progress, refresh recovery, partial HTML-only results, identity rejection, demo/social exclusion and mobile overflow.
+
+## Saved channel scores — November 1, 2026
+
+The Website page maps its existing dashboard assessment into the existing Website score fields. The Social Media page reads `GET /api/businesses/:businessId/assessments/latest` separately from its saved Facebook report. Its assessment reader refreshes on focus, report changes and every 15 seconds, aborts on navigation/business changes, and clears score eligibility on read failure while retaining the report. Both pages require a supported policy, a valid score and the exact business/channel/report binding. They never calculate scores or trigger collection/model calls while loading.
+
+The user approved replacing only the obsolete score captions with saved policy/scope provenance. Existing labels, classes, controls and layout remain unchanged. Social v1.2 explicitly identifies profile readiness and advisory posting activity; its benchmark remains unavailable. Lighthouse category scores retain their independent meaning.
+
+The actual SQLite-backed Website 78 and Social 100 matched the Dashboard in a browser with backend external requests blocked, AI disabled and the AI ledger unchanged. Desktop and 320/390/768/1280 widths passed. `node scripts/website-smoke.mjs --saved --channel-scores` verifies both pages read-only. Offline browser fixtures also cover missing scores, wrong report binding, score API failure and the existing report controls.
