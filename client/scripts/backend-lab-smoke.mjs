@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
 const liveMode = process.argv.includes('--live');
+const plannerMode = process.argv.includes('--planner');
 const settingsMode = process.argv.includes('--settings');
 const dashboardMode = process.argv.includes('--dashboard');
 const liveScope = process.argv.includes('--homepage') ? 'homepage' : 'lighthouse';
@@ -41,6 +42,10 @@ let statusRequests = 0;
 let loseNextCreateResponse = false;
 let nextOutcome = null;
 let extraSocialOpportunities = false;
+let plannerSocialResolved = false;
+let plannerFacebookFailure = false;
+let plannerFacebookDelayMs = 0;
+let plannerNewFinding = false;
 const stageDelayMs = 6500;
 
 function summary(id, { scope = 'lighthouse', mode = 'live', status = 'completed', stage = 'complete', failure = null } = {}) {
@@ -123,22 +128,65 @@ function savedFacebookReport() {
     schemaVersion: 'seo-spy.audit-report.v1', reportId: auditId, auditId, generatedAt: collectedAt,
     business: { id: businessId, name: 'Fixture Tax Accounting', website: 'https://example.com/' },
     audit: { id: auditId, businessId, scope: 'facebook', mode: 'live', status: 'partial', warnings: [], failure: null },
-    results: { scores: [], findings: extraSocialOpportunities ? [finding, ...[1, 2, 3].map(index => ({ ...finding, id: `remaining-${index}`, title: ['Review contact information', 'Check profile details', 'Contact information may be inconsistent'][index - 1], severity: index === 3 ? 'low' : 'medium' }))] : [finding], recommendations: extraSocialOpportunities ? [{ id: 'remaining-action', findingId: 'remaining-3', title: 'Review your saved contact details', explanation: finding.explanation, recommendedChange: 'Confirm the correct phone number in your connected profiles.', status: 'needs_review' }] : [], evidence: [], facebook: {
+    results: { scores: [], findings: plannerSocialResolved ? [] : plannerNewFinding ? [finding, { ...finding, id: 'planner-new-finding', title: 'Review newly saved profile details' }] : extraSocialOpportunities ? [finding, ...[1, 2, 3].map(index => ({ ...finding, id: `remaining-${index}`, title: ['Review contact information', 'Check profile details', 'Contact information may be inconsistent'][index - 1], severity: index === 3 ? 'low' : 'medium' }))] : [finding], recommendations: extraSocialOpportunities ? [{ id: 'remaining-action', findingId: 'remaining-3', title: 'Review your saved contact details', explanation: finding.explanation, recommendedChange: 'Confirm the correct phone number in your connected profiles.', status: 'needs_review' }] : [], evidence: [], facebook: {
       pageId: 'fixture-page', pageName: 'Saved fixture Facebook Page', collectedAt,
       window: { requestedDays: 30 }, profile: {}, metrics: [],
     } },
   } };
 }
 
+// Planner-only saved Website contracts; no production/demo findings are injected.
+const plannerWebsiteAuditId = '00000000-0000-4000-8000-000000000042';
+const plannerWebsiteSeeds = [
+  { id:'image-alt', title:'Add helpful image descriptions', severity:'medium', change:'Review recorded image descriptions and describe informative images.' },
+  { id:'meta-description', title:'Clarify your search summary', severity:'low', change:'Review the saved homepage summary and describe your services clearly.' },
+  { id:'business-hours', title:'Review recorded business hours', severity:'critical', change:'Confirm the business hours recorded on the website.' },
+  { id:'contact-phone', title:'Review recorded contact information', severity:'medium', change:'Confirm the phone number recorded on the website.' },
+];
+const plannerExpectedTasks = [
+  ...plannerWebsiteSeeds.map(item => ({id:`website:${item.id}`,title:item.title})),
+  {id:'social:facebook-fixture-finding',title:'Confirm the Facebook contact number'},
+];
+function plannerWebsiteReport() {
+  const auditId = plannerWebsiteAuditId;
+  const generatedAt = '2026-10-29T16:49:21.881Z';
+  const savedFindings = plannerWebsiteSeeds.map(item => ({id:item.id,auditId,checkId:item.id,evidenceIds:[`evidence-${item.id}`],
+    title:item.title,severity:item.severity,source:'website',explanation:`The saved website report flags ${item.id}.`,status:'needs_review'}));
+  return {schemaVersion:'seo-spy.audit-report.v1',reportId:auditId,auditId,generatedAt,
+    business:{id:businessId,name:'Fixture Tax Accounting',website:'https://example.com/',createdAt:generatedAt},
+    audit:{...summary(auditId,{scope:'homepage',mode:'live'}),completedAt:generatedAt,counts:{findings:savedFindings.length,recommendations:savedFindings.length}},
+    results:{findings:savedFindings,
+      evidence:savedFindings.map(item=>({id:item.evidenceIds[0],auditId,checkId:item.checkId,mode:'live',sourceUrl:'https://example.com/',collectedAt:generatedAt,observed:{fixture:item.id}})),
+      recommendations:plannerWebsiteSeeds.map(item=>({id:`action-${item.id}`,auditId,findingId:item.id,title:item.title,
+        explanation:'Review the saved website evidence.',recommendedChange:item.change,status:'needs_review'}))}};
+}
+function plannerWebsiteSummaries(report) {
+  return {version:'programmatic-evidence-v1',auditId:report.auditId,checks:[],
+    findings:report.results.findings.map(item=>({id:item.id,evidenceIds:item.evidenceIds,text:item.explanation,sourceLabel:'Saved homepage fixture'}))};
+}
+
 async function serveFixture(req, res) {
   apiRequests++;
   // Saved reports remain readable when the investigation service is unavailable.
   if (req.method === 'GET' && req.url === `/api/businesses/${businessId}/facebook-report`) {
+    if (plannerFacebookDelayMs) await delay(plannerFacebookDelayMs);
+    if (plannerFacebookFailure) return reply(res, 503, { error: { code: 'UNAVAILABLE', message: 'Saved Facebook report temporarily unavailable.' } });
     return reply(res, 200, savedFacebookReport());
   }
   if (!available) return reply(res, 503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Fixture backend unavailable. Please retry.', requestId: 'fixture-request' } });
   settleJobs();
   const route = new URL(req.url, 'http://fixture').pathname;
+  if (plannerMode && req.method === 'GET') {
+    const report = plannerWebsiteReport();
+    if (route === `/api/businesses/${businessId}/reports`) return reply(res,200,{businessId,reports:[{
+      reportId:report.reportId,auditId:report.auditId,businessId,scope:report.audit.scope,mode:'live',status:'completed',generatedAt:report.generatedAt,counts:report.audit.counts}]});
+    if (route === `/api/audits/${report.auditId}/report`) return reply(res,200,report);
+    if (route === `/api/audits/${report.auditId}/evidence-summary`) return reply(res,200,plannerWebsiteSummaries(report));
+    if (route === `/api/audits/${report.auditId}/website-analysis`) return reply(res,200,{version:'website-priority-v1',auditId:report.auditId,
+      findings:report.results.findings,recommendations:report.results.recommendations,
+      priorities:report.results.findings.map(item=>({findingId:item.id,ruleId:'fixture-rule',severity:item.severity,reason:'Saved fixture priority',evidenceIds:item.evidenceIds}))});
+  }
+
   const overall = id => {
     const audit = jobs.get(id)?.summary;
     if (!audit || audit.mode !== 'live') return null;
@@ -440,6 +488,291 @@ async function dashboardScenario(base, backendBase) {
   console.log(JSON.stringify({ mode: liveMode ? 'live-dashboard' : 'fixture-dashboard', passed: results.length, scenarios: results, artifactDirectory: artifactDir }, null, 2));
 }
 
+async function plannerScenario(base) {
+  await cdp.send('Network.enable');
+  const requestStart = browserRequests.length;
+  const readCount = () => browserRequests.slice(requestStart).filter(item => item.url.includes('/facebook-report')).length;
+  const kpi = label => evaluate(`document.querySelector('[data-kpi="${label}"]').textContent`);
+  async function pressEnter() {
+    await cdp.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
+    await cdp.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  }
+  async function setField(id, value) {
+    await evaluate(`(() => { const node = document.getElementById(${JSON.stringify(id)}); const proto = node.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(node, ${JSON.stringify(value)}); node.dispatchEvent(new Event(node.tagName === 'SELECT' ? 'change' : 'input', {bubbles:true})); })()`);
+  }
+  async function clickText(text, container = 'document') {
+    await evaluate(`Array.from(${container}.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(text)}).click()`);
+  }
+  async function fixTask(id, mode) {
+    await evaluate(`document.querySelector('[data-task-id="${id}"] button[aria-label^="${mode === 'ai' ? 'Fix with AI:' : 'Manual Fix:'}"]').click()`);
+    await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`), 'fix dialog');
+    assert.equal(await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).find(button => button.textContent.includes('Mark as Done')).disabled`),true,'Completion needs user confirmation');
+    await evaluate(`document.querySelector('dialog input[type="checkbox"]').click()`);
+    await clickText('Mark as Done', "document.querySelector('dialog')");
+    await waitFor(() => evaluate(`document.querySelector('[data-task-id="${id}"]').innerText.includes('Done')`), 'task Done');
+  }
+  async function dragTask(id, day, hour, fromCalendar = false) {
+    const selector = fromCalendar ? `[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]` : `[data-task-id="${id}"]`;
+    await evaluate(`(() => { window.plannerDragData = new DataTransfer(); document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.plannerDragData})); })()`);
+    await delay(40);
+    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.plannerDragData}))`);
+    await waitFor(() => evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dataset.dropActive === 'true'`),'active calendar drop highlight');
+    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:window.plannerDragData}))`);
+    await evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:window.plannerDragData}))`);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]').length`),1,'A task has one calendar block');
+    assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]').parentElement.dataset.calendarSlot`),`${day}:${hour}`);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-drop-active="true"]').length`),0);
+  }
+  async function rescan() {
+    await waitFor(() => evaluate(`Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Re-scan' && !button.disabled)`),'Re-scan ready');
+    const reads = readCount(); await clickText('Re-scan');
+    await waitFor(() => readCount() > reads, 'saved findings refresh GET');
+    await waitFor(async () => (await pageText()).includes('Current saved findings refreshed.'), 'refresh completion');
+  }
+  await navigate(`${base}/recommendations`);
+  await waitFor(async () => (await pageText()).includes('Confirm the Facebook contact number'), 'shared saved Facebook planner source');
+  await waitFor(() => evaluate(`document.querySelectorAll('article[data-task-id]').length === ${plannerExpectedTasks.length}`),'all saved channel findings');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('article[data-task-id]')).map(node=>({id:node.dataset.taskId,title:node.querySelector('h3').textContent})).sort((a,b)=>a.id.localeCompare(b.id))`),[...plannerExpectedTasks].sort((a,b)=>a.id.localeCompare(b.id)));
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id^="consistency:"]').length`),0,'No unsupported demo consistency tasks');
+
+  assert.equal(await evaluate('document.querySelector("h1").textContent'),'Smart Planner');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
+  assert.doesNotMatch(await pageText(),/Pending Verification|How It Works|Google Calendar|Microsoft Outlook|Trello/);
+  assert.equal(await evaluate(`document.querySelector('dialog[open]') === null`),true);
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Plan Completion (This Week)'),'0%');
+  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false');
+  assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0])).size`),5);
+  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Fix with AI:"]').length`),plannerExpectedTasks.length);
+  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Manual Fix:"]').length`),plannerExpectedTasks.length);
+  pass('Smart Planner route, exact sidebar, six KPIs, shared sources, both fix actions, business-day defaults, and no prohibited sections');
+  const businessDays = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()`);
+  await dragTask('website:image-alt',businessDays[2],13);
+  await dragTask('website:image-alt',businessDays[3],14);
+  await dragTask('website:image-alt',businessDays[1],15,true);
+  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length));
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),1);
+  pass('Direct recommendation drops assign day/time, calendar moves reuse the same task, active status stays unchanged, and drop highlighting clears');
+  await clickText('Auto Plan (AI)');
+  await waitFor(() => evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === ${plannerExpectedTasks.length}`),'automatic planning');
+  await fixTask('website:image-alt','manual');
+  assert.equal(await kpi('Done'),'1'); assert.equal(await kpi('Plan Completion (This Week)'),`${Math.round(100 / plannerExpectedTasks.length)}%`);
+  assert.ok((await evaluate(`document.querySelector('[data-kpi="Done"]').parentElement.querySelector('span').className`)).includes('text-blue-300'));
+  assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').parentElement.querySelector('span').className`)).includes('text-indigo-300'));
+  assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').closest('article').querySelector('.h-full').className`)).includes('bg-indigo-400'));
+  assert.ok((await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').className`)).includes('text-blue-200'));
+  await fixTask('social:facebook-fixture-finding','ai');
+  assert.equal(await kpi('Done'),'2');
+  await rescan();
+  await waitFor(async () => await kpi('Done') === '0','unresolved findings reopen');
+  await fixTask('social:facebook-fixture-finding','manual');
+  plannerSocialResolved = true; await rescan();
+  assert.equal(await kpi('Done'),'1','A source-resolved task stays completed');
+  plannerSocialResolved = false; await rescan();
+  await waitFor(async () => await kpi('Done') === '0','returning source issue reopens');
+  pass('Manual/AI preview confirmation, derived completion, source refresh, unresolved reopen, and resolved completion retention');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Add Custom Task').focus()`);
+  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'keyboard custom task');
+  await setField('planner-task-name','Review local business notes');
+  await setField('planner-priority','Urgent');
+  await clickText('Add Task',"document.querySelector('dialog')");
+  await waitFor(async () => (await pageText()).includes('Review local business notes'),'custom task created');
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
+  for (const [priority,color] of [['Urgent','red'],['Medium','amber'],['Low','emerald']]) {
+    const badge = await evaluate(`(() => { const row = Array.from(document.querySelectorAll('[data-task-id]')).find(node => node.querySelector('div > span:last-child')?.textContent === '${priority}'); const badge = row.querySelector('div > span:first-child'); return {classes:badge.className,iconColor:getComputedStyle(badge.querySelector('svg')).color,badgeColor:getComputedStyle(badge).color}; })()`);
+    for (const token of [`border-${color}-400/40`,`bg-${color}-400/15`,`text-${color}-300`]) assert.ok(badge.classes.includes(token),`${priority} badge uses ${token}`);
+    assert.equal(badge.iconColor,badge.badgeColor,'Icon inherits the urgency color');
+  }
+  pass('Urgent, Medium, and Low badges use matching icon, background, and border colors while preserving urgency pills');
+
+  const customId = await evaluate(`Array.from(document.querySelectorAll('[data-task-id]')).find(node => node.innerText.includes('Review local business notes')).dataset.taskId`);
+  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').focus()`);
+  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'keyboard scheduling');
+  const originalDay = await evaluate(`document.getElementById('planner-day').value`);
+  await setField('planner-hour','15'); await clickText('Save Schedule',"document.querySelector('dialog')");
+  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/15:00/);
+  const secondDay = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()[1]`);
+  await dragTask(customId,secondDay,14,true);
+  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/14:00/);
+  await clickText('Plan Manually'); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'manual planning alternative');
+  await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  const saturday = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()[5]`);
+  assert.ok(saturday);
+  await dragTask(customId,saturday,11);
+  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').click()`);
+  await setField('planner-day',saturday); await clickText('Save Schedule',"document.querySelector('dialog')");
+  assert.ok((await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`)).includes(saturday));
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0])).size`),5);
+  assert.ok(!(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`)).includes(saturday));
+  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').click()`);
+  await setField('planner-day',saturday); await clickText('Save Schedule',"document.querySelector('dialog')");
+  assert.match(await pageText(),/Enable Use Weekends before scheduling/);
+  await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);
+  await clickText('Auto Plan (AI)');
+  const range = await elementText('planner-date-range');
+  await evaluate(`document.querySelector('button[aria-label="Next week"]').click()`);
+  assert.notEqual(await elementText('planner-date-range'),range);
+  await evaluate(`document.querySelector('button[aria-label="Previous week"]').click()`);
+  assert.equal(await elementText('planner-date-range'),range);
+  assert.ok(originalDay);
+  pass('Custom tasks, keyboard creation, manual scheduling, native drop handlers, week controls, and weekend restrictions without data loss');
+  async function setView(view) {
+    await evaluate(`(() => { const node = document.querySelector('select[aria-label="Calendar view"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(node,${JSON.stringify(view)}); node.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+  }
+  async function monthDrop(id, day, fromCalendar = false, allowed = true) {
+    const source = fromCalendar ? `[data-testid="monthly-calendar"] [data-calendar-task="${id}"]` : `[data-task-id="${id}"]`;
+    const previous = await evaluate(`document.querySelector('[data-task-id="${id}"]').innerText`);
+    await evaluate(`(() => { window.plannerDragData = new DataTransfer(); document.querySelector(${JSON.stringify(source)}).dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.plannerDragData})); })()`);
+    await delay(40);
+    await evaluate(`document.querySelector('[data-month-day="${day}"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.plannerDragData}))`);
+    assert.equal(await evaluate(`document.querySelector('[data-month-day="${day}"]').dataset.dropActive === 'true'`),allowed);
+    await evaluate(`document.querySelector('[data-month-day="${day}"]').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:window.plannerDragData}))`);
+    if (allowed) {
+      assert.equal(await evaluate(`document.querySelectorAll('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').length`),1);
+      assert.equal(await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').parentElement.dataset.monthDay`),day);
+    } else assert.equal(await evaluate(`document.querySelector('[data-task-id="${id}"]').innerText`),previous);
+  }
+  assert.equal(await evaluate(`document.querySelector('select[aria-label="Calendar view"]').value`),'weekly');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelector('select[aria-label="Calendar view"]').options).map(option=>option.textContent)`),['Weekly View','Monthly View']);
+  await setView('monthly');
+  const monthInfo = await evaluate(`(() => { const nodes = Array.from(document.querySelectorAll('[data-month-day]')); const inside=nodes.filter(node=>node.dataset.inMonth === 'true').map(node=>node.dataset.monthDay); const [year,month]=inside[0].split('-').map(Number); return {count:nodes.length,inside,expected:new Date(year,month,0).getDate(),start:new Date(nodes[0].dataset.monthDay+'T12:00:00').getDay(),end:new Date(nodes.at(-1).dataset.monthDay+'T12:00:00').getDay()}; })()`);
+  assert.equal(monthInfo.count % 7,0); assert.equal(monthInfo.inside.length,monthInfo.expected); assert.equal(new Set(monthInfo.inside).size,monthInfo.expected); assert.equal(monthInfo.start,1); assert.equal(monthInfo.end,0);
+  for (const [id,color] of [['website:image-alt','amber'],['website:meta-description','emerald'],[customId,'red']]) {
+    assert.ok((await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').className`)).includes(`text-${color}-300`));
+  }
+  await monthDrop('website:image-alt',businessDays[2]);
+  assert.match(await evaluate(`document.querySelector('[data-task-id="website:image-alt"]').innerText`),/15:00/);
+  await monthDrop('website:image-alt',businessDays[3],true);
+  const weekend = await evaluate(`document.querySelector('[data-month-day][data-in-month="true"][data-drop-disabled="true"]').dataset.monthDay`);
+  await monthDrop('website:image-alt',weekend,false,false);
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  await monthDrop('website:image-alt',weekend);
+  await monthDrop('website:image-alt',businessDays[2],true);
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
+  await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="website:image-alt"]').focus()`);
+  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'monthly keyboard editing');
+  assert.equal(await evaluate(`document.getElementById('planner-day').value`),businessDays[2]);
+  await setField('planner-hour','16'); await clickText('Save Schedule',"document.querySelector('dialog')");
+  await setView('weekly');
+  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:16`);
+  await dragTask('website:image-alt',businessDays[1],14,true);
+  await setView('monthly');
+  assert.equal(await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="website:image-alt"]').parentElement.dataset.monthDay`),businessDays[1]);
+  const monthLabel = await elementText('planner-date-range');
+  await evaluate(`document.querySelector('[aria-label="Next month"]').click()`);
+  assert.notEqual(await elementText('planner-date-range'),monthLabel);
+  await evaluate(`document.querySelector('[aria-label="Previous month"]').click()`);
+  assert.equal(await elementText('planner-date-range'),monthLabel);
+  await fixTask(customId,'manual');
+  assert.ok((await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${customId}"]').className`)).includes('text-blue-200'));
+  pass('Full monthly grid, urgency/completion colors, shared weekly/monthly state, date moves without duplicates, weekend rejection/enablement, and keyboard editing');
+  await setView('weekly');
+  for (const width of [1440,768,390,320]) {
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<768});
+    await evaluate('window.scrollTo(0,0)'); await delay(150);
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),true,`Planner has no overflow at ${width}`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-testid="${width<768 ? 'mobile-day-grid' : 'desktop-week-grid'}"]')).display !== 'none'`),true);
+    await screenshot(`smart-planner-${width}.png`);
+    await setView('monthly');
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),true,`Monthly planner has no page overflow at ${width}`);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-month-day]').length % 7`),0);
+    await screenshot(`smart-planner-monthly-${width}.png`);
+    await setView('weekly');
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  const storageKey = `seo-spy:planner:v1:${businessId}`;
+  const savedState = () => evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(storageKey)}))`);
+  async function awaitSource() {
+    await waitFor(() => evaluate(`Boolean(document.querySelector('[data-task-id="social:facebook-fixture-finding"]')) && Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Re-scan' && !button.disabled) && !document.querySelector('[role="alert"]')`),'saved Facebook source ready');
+  }
+  async function visitDashboardAndReturn() {
+    await evaluate(`document.querySelector('#primary-navigation a[href="/dashboard"]').click()`);
+    await waitFor(() => evaluate(`location.pathname === '/dashboard' && document.querySelector('h1')?.textContent === 'Dashboard'`),'Dashboard navigation and Planner unmount');
+    await evaluate(`document.querySelector('#primary-navigation a[href="/recommendations"]').click()`);
+    await waitFor(() => evaluate(`location.pathname === '/recommendations' && Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),'Planner remount');
+    await awaitSource();
+  }
+  async function reloadPlanner() {
+    await evaluate(`window.plannerReloadPending = true`);
+    await cdp.send('Page.reload');
+    await waitFor(() => evaluate(`!window.plannerReloadPending && Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),'Planner document reload');
+  }
+  // Monthly navigation selected a different week; remount restores the normal current-week cursor.
+  await visitDashboardAndReturn();
+  await dragTask('website:image-alt',businessDays[2],10);
+  await waitFor(async () => (await savedState()).edits['website:image-alt']?.schedule.hour === 10,'schedule persisted');
+  await visitDashboardAndReturn();
+  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:10`);
+  await reloadPlanner(); await awaitSource();
+  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:10`);
+  await dragTask('website:image-alt',businessDays[3],13,true);
+  await waitFor(async () => (await savedState()).edits['website:image-alt']?.schedule.hour === 13,'moved schedule persisted');
+  await reloadPlanner(); await awaitSource();
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').length`),1);
+  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[3]}:13`);
+  await fixTask('website:image-alt','manual');
+  await visitDashboardAndReturn();
+  assert.match(await evaluate(`document.querySelector('[data-task-id="website:image-alt"]').innerText`),/Done/);
+  await reloadPlanner(); await awaitSource();
+  assert.equal((await savedState()).completed['website:image-alt'].status,'Done');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id="${customId}"]').length`),1);
+  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/Done/);
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  await visitDashboardAndReturn();
+  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'true');
+  await reloadPlanner(); await awaitSource();
+  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'true');
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);
+  await visitDashboardAndReturn();
+  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false');
+  pass('Schedules, moves without duplication, custom tasks, Done, and both weekend preferences survive navigation and browser reload');
+  await dragTask('social:facebook-fixture-finding',businessDays[2],11);
+  await waitFor(async () => (await savedState()).edits['social:facebook-fixture-finding']?.schedule.hour === 11,'Facebook assignment persisted');
+  plannerFacebookDelayMs = 600;
+  await reloadPlanner();
+  assert.equal((await savedState()).edits['social:facebook-fixture-finding'].schedule.hour,11,'Loading must retain saved Facebook assignments');
+  await awaitSource(); plannerFacebookDelayMs = 0;
+  plannerFacebookFailure = true;
+  await reloadPlanner();
+  await waitFor(async () => (await pageText()).includes('Saved Facebook findings could not be refreshed.'),'Facebook failure feedback');
+  assert.equal((await savedState()).edits['social:facebook-fixture-finding'].schedule.hour,11,'Failure must retain saved Facebook assignments');
+  plannerFacebookFailure = false;
+  await reloadPlanner(); await awaitSource();
+  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="social:facebook-fixture-finding"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:11`);
+  plannerNewFinding = true; await rescan();
+  await waitFor(() => evaluate(`Boolean(document.querySelector('[data-task-id="social:planner-new-finding"]'))`),'new source finding');
+  assert.match(await evaluate(`document.querySelector('[data-task-id="social:planner-new-finding"]').innerText`),/Schedule task/);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-calendar-task="social:planner-new-finding"]').length`),0);
+  plannerSocialResolved = true; await rescan();
+  await waitFor(() => evaluate(`!document.querySelector('[data-task-id="social:facebook-fixture-finding"]')`),'stale active finding removed');
+  await waitFor(async () => !(await savedState()).edits['social:facebook-fixture-finding'],'stale source association pruned');
+  await reloadPlanner();
+  await waitFor(() => evaluate(`Boolean(document.querySelector('button[role="switch"]')) && !document.querySelector('button[role="switch"]').disabled`),'Planner loaded');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id="social:facebook-fixture-finding"]').length`),0);
+  plannerSocialResolved = false; plannerNewFinding = false; await rescan(); await awaitSource();
+  assert.match(await evaluate(`document.querySelector('[data-task-id="social:facebook-fixture-finding"]').innerText`),/Schedule task/,'Pruned assignments do not resurrect with a returning finding');
+  pass('Facebook assignments survive loading/failure; new findings start unscheduled and successfully removed findings cannot resurrect stale assignments');
+  // Corrupt only this planner entry; unrelated storage must survive.
+  await evaluate(`localStorage.setItem('planner-test-unrelated','keep'); localStorage.setItem(${JSON.stringify(storageKey)},'{invalid json')`);
+  await reloadPlanner(); await awaitSource();
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),0);
+  assert.equal(await evaluate(`localStorage.getItem('planner-test-unrelated')`),'keep');
+  const storageFailureScript = await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('Storage blocked','SecurityError')}})`});
+  await reloadPlanner(); await awaitSource();
+  await dragTask('website:image-alt',businessDays[2],10);
+  await clickText('Auto Plan (AI)');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),plannerExpectedTasks.length);
+  await cdp.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:storageFailureScript.identifier});
+  pass('Malformed planner storage resets safely without touching other keys; denied storage leaves scheduling and Auto Plan usable in memory');
+  assert.equal(browserRequests.slice(requestStart).filter(request=>request.method==='POST').length,0,'Planner actions must not write externally or start provider scans');
+  assert.deepEqual(browserErrors,[]);
+  pass('Four responsive widths, selected-day mobile layout, no runtime errors, and no external write/AI calls');
+  console.log(JSON.stringify({passed:results.length,scenarios:results,artifactDirectory:artifactDir},null,2));
+}
+
 async function settingsScenario(base) {
   await cdp.send('Network.enable');
   const requestStart = browserRequests.length;
@@ -450,7 +783,7 @@ async function settingsScenario(base) {
   await evaluate(`document.querySelector('a[href="/settings#connected-assets"]').click()`);
   await waitFor(() => evaluate(`location.pathname === '/settings' && location.hash === '#connected-assets' && document.activeElement?.id === 'settings-assets-title'`), 'Dashboard to Settings focus');
   assert.equal(await evaluate(`document.querySelector('h1').textContent`), 'Connections & Settings');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`), ['Dashboard', 'Website', 'Social Media', 'Analysis', 'Recommendations', 'Connections & Settings']);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`), ['Dashboard', 'Website', 'Social Media', 'Analysis', 'Smart Planner', 'Connections & Settings']);
   assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
   const connected = await evaluate(`${assets}.querySelector('[aria-label="Currently connected assets"]').innerText`);
   assert.match(connected, /guzmantaxaccounting.com/); assert.match(connected, /Guzman Tax Accounting/);
@@ -648,7 +981,9 @@ try {
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
 
-  if (settingsMode) {
+  if (plannerMode) {
+    await plannerScenario(base);
+  } else if (settingsMode) {
     await settingsScenario(base);
   } else if (dashboardMode) {
     await dashboardScenario(base, backendBase);
