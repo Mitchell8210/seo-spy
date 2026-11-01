@@ -31,7 +31,7 @@ const evidenceSummaries = () => ({ version: 'programmatic-evidence-v1', auditId:
   findings: [{ id: finding.id, evidenceIds: ['evidence'], text: readableEvidence, sourceLabel: `Saved Facebook evidence · Collected ${now}` }], checks: [] });
 const facebook = {
   provider: 'facebook-graph', version: 'facebook-v1', graphVersion: 'v26.0', pageId: '123', pageName: 'Fixture Facebook Page', collectedAt: now,
-  window: { since: '2026-09-29T16:49:21.881Z', until: now, requestedDays: 30 },
+  window: { since: '2026-09-29T07:00:00.000Z', until: '2026-10-29T07:00:00.000Z', requestedDays: 30, basis: 'complete-provider-days', timeZone: 'America/Los_Angeles' },
   profile: { followers_count: { status: 'available', value: 15, collectedAt: now }, hours: { status: 'missing', value: null, collectedAt: now } },
   posts: { status: 'available', items: [{ id: '123_456', message: '<img src=x onerror="window.fixtureExecuted=true">', createdTime: now, url: 'https://www.facebook.com/123_456' }], truncated: true, collectedAt: now },
   metrics: [
@@ -46,6 +46,7 @@ const facebook = {
   coverage: { profileFieldsAvailable: 1, profileFieldsMissing: 1, profileFieldsUnavailable: 0, metricsAvailable: 1, metricsRequested: 2, postsLimit: 50 },
   limitations: ['At most 50 recent posts are collected.'],
 };
+for (const metric of facebook.metrics) metric.coverage = { complete: true, expectedDays: 30, returnedDays: 30 };
 const report = { schemaVersion: 'seo-spy.audit-report.v1', reportId: auditId, auditId, generatedAt: now, business: { id: 'demo-guzman', name: 'Fixture Business', website: 'https://example.com/', createdAt: now },
   audit: { id: auditId, businessId: 'demo-guzman', scope: 'facebook', mode: 'live', status: 'partial', warnings: ['Recent posts are bounded.'], failure: null },
   results: { facebook, findings: [], recommendations: [], evidence: [evidence], scores: [] } };

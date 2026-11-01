@@ -488,6 +488,37 @@ describe("Facebook local HTTP boundary", () => {
       .expect(400);
   });
 
+  it("protects explicit metric probes with confirmation, backend Host, session and selected Page access", async () => {
+    const route = "/api/facebook/connection-metrics";
+    await request(app.getHttpServer()).get(route).query({ pageId: "99" }).set("Host", "localhost:3001").expect(400);
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" }).set("Host", "localhost:5173").expect(400);
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" }).set("Host", "localhost:3001").expect(400);
+    expect(graph.request).not.toHaveBeenCalled();
+    const sessionId = "a".repeat(64);
+    await store.save(sessionId, { token: USER_TOKEN, expiresAt: Date.now() + 86400000, createdAt: new Date().toISOString() });
+    graph.request.mockImplementation(async path => {
+      if (path === "me/permissions") return permissions();
+      if (path === "me/accounts") return { data: [{ id: "88", access_token: PAGE_TOKEN }] };
+      throw new Error("Unselected Page must not be probed");
+    });
+    await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" })
+      .set("Host", "localhost:3001").set("Cookie", `seo_spy_facebook_test=${sessionId}`).expect(400);
+    expect(graph.request).toHaveBeenCalledTimes(2);
+    graph.request.mockClear();
+    graph.request.mockImplementation(async (path, token) => {
+      if (path === "me/permissions") { expect(token).toBe(USER_TOKEN); return permissions(); }
+      if (path === "me/accounts") { expect(token).toBe(USER_TOKEN); return { data: [{ id: "99", access_token: PAGE_TOKEN }] }; }
+      expect(token).toBe(PAGE_TOKEN);
+      return { data: [] };
+    });
+    const result = await request(app.getHttpServer()).get(route).query({ pageId: "99", confirmed: "true" })
+      .set("Host", "localhost:3001").set("Cookie", `seo_spy_facebook_test=${sessionId}`).expect(200);
+    expect(result.body).toMatchObject({ pageId: "99", readOnly: true, writesEnabled: false });
+    expect(result.body.probes.length).toBeGreaterThan(10);
+    expect(result.text).not.toContain(USER_TOKEN);
+    expect(result.text).not.toContain(PAGE_TOKEN);
+  });
+
   it("rejects an untrusted Host and cross-origin or originless mutations", async () => {
     const home = await request(app.getHttpServer())
       .get("/api/facebook")

@@ -11,6 +11,9 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
+import { probeFacebookContactMetrics } from "../../integrations/facebook/metric-probes.js";
+import { probeFacebookShares } from "../../integrations/facebook/share-probes.js";
+import { probeFacebookComments } from "../../integrations/facebook/comment-probes.js";
 
 export const READ_PERMISSIONS = [
   "pages_show_list",
@@ -434,6 +437,32 @@ export class FacebookService implements OnModuleDestroy {
         "Unable to list Facebook Pages. Try again or reconnect.",
       );
     }
+  }
+  async probeContactMetrics(id: string | undefined, pageId: string, kind: "contacts" | "shares" | "comments" = "contacts") {
+    if (!/^\d{1,40}$/.test(pageId)) throw new BadRequestException("A numeric Page ID is required.");
+    const connection = await this.credential(id);
+    const permissions = await this.requirePermissions(connection.token);
+    const stop = AbortSignal.timeout(120000);
+    const pages = z.object({ data: z.array(z.object({ id: z.string().regex(/^\d+$/),
+      access_token: z.string().max(32768).optional() })).max(100),
+      paging: z.object({ cursors: z.object({ after: z.string().max(4096).optional() }).optional(), next: z.string().optional() }).optional() });
+    let after: string | undefined;
+    for (let batch = 0; batch < 5; batch++) {
+      const result = pages.parse(await this.graph.request("me/accounts", connection.token,
+        { fields: "id,access_token", limit: "25", ...(after ? { after } : {}) }, true, stop));
+      const selected = result.data.find(page => page.id === pageId);
+      if (selected?.access_token) {
+        const pageToken = selected.access_token;
+        return { graphVersion: this.graph.graphVersion, permissions,
+          ...await (kind === "shares" ? probeFacebookShares : kind === "comments" ? probeFacebookComments : probeFacebookContactMetrics)((path, params) => {
+            stop.throwIfAborted();
+            return this.graph.request(path, pageToken, params, true, stop);
+          }, pageId) };
+      }
+      after = result.paging?.cursors?.after;
+      if (!result.paging?.next || !after) break;
+    }
+    throw new BadRequestException("The selected Page is not authorized within the bounded Page listing.");
   }
   async diagnose(id?: string) {
     const connection = await this.credential(id);

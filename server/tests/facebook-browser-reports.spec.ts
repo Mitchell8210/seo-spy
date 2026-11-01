@@ -11,6 +11,7 @@ import {
 import type { BusinessRepository } from "../src/persistence/repositories.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import type { ReportFileReference } from "../src/reports/report.types.js";
+import { createFacebookReportingWindow } from "../src/integrations/facebook/reporting-window.js";
 
 class MockGraph extends FacebookGraph {
   override request = jest.fn<FacebookGraph["request"]>();
@@ -41,13 +42,16 @@ function fixture() {
         ],
       };
     if (path === "123/posts") return { data: [] };
+    if (path.endsWith("/comments")) return { data: [] };
     if (path === "123/insights")
       return {
         data: [
           {
             name: params?.metric,
             period: "day",
-            values: [{ value: 0, end_time: "2026-10-29T07:00:00Z" }],
+            values: createFacebookReportingWindow(new Date()).dayEnds.map(end_time => ({
+              value: params?.metric === "page_actions_post_reactions_total" ? {} : 0, end_time,
+            })),
           },
         ],
       };

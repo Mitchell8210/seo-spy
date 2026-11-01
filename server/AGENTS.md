@@ -90,6 +90,8 @@ Website performance priorities follow [WEBSITE_PRIORITY_RULES.md](WEBSITE_PRIORI
 
 Local Facebook diagnostic routes are `/api/facebook` and its `/status`, `/connect`, `/callback`, `/connection`, and `/disconnect` routes; see [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for methods and setup. Keep provider tokens server-only, bound to the test browser session, and out of audit archives. Do not expose this local tool publicly or imply that permission grants verify write capability.
 
+Explicit `/api/facebook/connection-metrics?pageId=...&confirmed=true` diagnoses individual interaction/contact candidates using the same browser authorization and bounded authorized Page selection. It never runs from startup, collection or frontend polling, saves no audit and returns no message content or credentials. Candidate failures/empty arrays/omitted counts are not zero; per-post lifetime counts, new conversations and aggregate Page actions cannot substitute for period interactions, messages or unique people.
+
 Creation accepts `{"scope":"demo"}`, `{"scope":"homepage"}`, or `{"scope":"lighthouse","strategy":"mobile"}` (desktop is also supported; mobile is the default) and returns `202` with a relative `statusUrl`. Homepage targets come from the business record; arbitrary URL overrides are not accepted. Only one audit may be queued/running per business; duplicates return `409 AUDIT_ALREADY_ACTIVE`.
 
 For changes that affect client integration:

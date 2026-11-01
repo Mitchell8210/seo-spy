@@ -256,6 +256,9 @@ export function analyzeFacebook(
     page_views_total: "Page views",
     page_post_engagements: "Post engagements",
     page_video_views: "Video views",
+    page_post_likes: "Post likes",
+    page_total_actions: "Page actions",
+    page_messages_new_conversations_unique: "New messaging conversations",
     page_daily_follows_unique: "Daily follows",
     page_daily_unfollows_unique: "Daily unfollows",
   };
@@ -272,7 +275,9 @@ export function analyzeFacebook(
     );
   }
   analysis.summaries.push(
-    "Metric totals cover returned daily measurements only. Meta period boundaries may differ from the requested window, and the latest period may be incomplete. Daily unique follows/unfollows are summed events across days, not distinct people across the full period.",
+    report.window.basis === "complete-provider-days"
+      ? "Cumulative totals require all 30 completed Pacific reporting days and exclude the current partial day. Daily unique follows/unfollows and new conversations are summed daily activity, not distinct people across the full period."
+      : "Metric totals cover returned daily measurements only. Meta period boundaries may differ from the requested window, and the latest period may be incomplete. Daily unique follows/unfollows are summed events across days, not distinct people across the full period.",
   );
   return analysis;
 }

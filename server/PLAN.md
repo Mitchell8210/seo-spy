@@ -8,6 +8,30 @@ Last updated: October 31, 2026.
 
 ## Progress record
 
+### November 1, 2026 - Shares and Comments connected to existing Social Media rows
+
+- User approved temporary lifetime Shares and explicitly required its label to remain Shares; separately chose 30-day Comments. Added saved lifetime share fields and bounded timestamp-only comment/reply enumeration across older/newer accessible posts. Preserve missing counts, coverage, cursor/deadline limits, exact date matching and source evidence; positive partial share sums display with `+`, never an invented exact total.
+- Frontend mapping alone fills the existing Shares/Comments slots; no component/label/layout/style changes. Other metrics remain at 30 completed Pacific days, and Interactions is not recomputed from mixed-period rows. Explicit report collection only; no scoring change, AI request or external write.
+- Live readback established Shares `243+` (20 known share fields among 50 recent posts). Comments required a separate bounded post-history read because the original sample was truncated; Meta then omitted nested comment fields on otherwise accessible posts. Focused live diagnostics verified direct reads and all field-expansion variants. Added direct reads for omitted edges, preserving unknown-versus-zero and a 150-request/250-post/deadline bound. No UI changes were needed for either correction.
+- Final explicit live run `8d6ae8b9-23c9-4867-bccc-248133050615` checked all 76 accessible posts and saved complete October 2–31 comment count 1. Real saved-report frontend mapping verified Comments `1` and Shares `243+`, keeping both original labels. No comment content/identity, live write or paid model call involved.
+
+### November 1, 2026 - Focused shares endpoint verification
+
+- Added `probe=shares` to the explicitly confirmed browser diagnostic, preserving Page/session scoping, bounded reads, credential/content redaction and writes-off behavior. Separately tests lifetime shares, basic sharedposts access and timestamp-field selection on five posts.
+- User-supplied live result confirmed two posts with nine lifetime shares each, but all five sharedposts reads returned empty lists. Access works; timestamped share-event coverage does not. No complete 30-day share count can be derived from this response; existing UI/scoring and saved reports remain unchanged. See [dated capability evidence](FACEBOOK_SETUP.md#explicit-interactioncontact-metric-diagnostics-november-1-2026).
+
+### November 1, 2026 - Cumulative Facebook reporting implemented
+
+- Explicit report runs collect 30 complete Pacific reporting days using independent DST-aware boundaries; sum only exact 30/30 validated daily buckets, preserving null/missing/error distinctions and source provenance. Exclude partial current-day/future buckets and reject duplicates/invalid/mismatched values. Profile/follower snapshots remain distinct.
+- Added LIKE-only daily reaction aggregation plus separately named Page-actions/new-conversation metrics. Wired eligible cumulative values into existing Social Media slots without labels/layout/components/styles changes; legacy unproven cumulative values stay unavailable until a new explicit report. Lifetime comments/shares, conversations and unique-mention samples never substitute for missing period metrics. Scoring arithmetic, immutable history, AI ledger and write gates remain unchanged.
+- User-triggered live run saved `45e6b787-93ee-4d06-94af-4e90777d0139`, October 2–31 Pacific, with all ten metric series at complete 30/30 coverage. Saved results include 5 interactions/4 likes/115 media views/36 Page views/12 video views/2 follows/0 unfollows. Separate conversation count 1 and aggregate actions 0 are not relabeled as messages/people. Backend full checks passed 929 tests (one skipped), plus client lint/build and mapping checks.
+
+### November 1, 2026 - Explicit Facebook interaction/contact capability probes
+
+- Added a confirmed, local browser-session diagnostic for individually isolated Page metrics, LIKE/comment/share counts, tagged/visitor posts and Messenger metadata. Uses existing encrypted credentials, bounded authorized Page selection, safe allowlisted output, a total deadline and no retries. No frontend presentation, saved audit/scoring, provider writes or AI calls changed.
+- Actual browser result established a reaction breakdown containing four likes and a new-conversation series containing one; lifetime comment counts are accessible, shares omitted. Click candidates rejected with Meta 100; Messenger conversations rejected with 200. These are capability observations, not permission to substitute metrics under existing UI labels. See [dated results and limitations](FACEBOOK_SETUP.md#explicit-interactioncontact-metric-diagnostics-november-1-2026).
+- Confirmed an official Meta documentation/integration MCP exists, separately configurable; not installed or authorized. Full UI data mapping remains dependent on correct period, completeness and metric semantics.
+
 ### October 31, 2026 - Approved scoring and mocked recommendation/edit workflow
 
 - User approved the complete scoring draft: Overall 50/30/20, Website Lighthouse 50/25/15/10, confirmed Facebook profile/publishing goal and business consistency rubrics, strict missing-data/freshness/skew rules, rational arithmetic and final half-up rounding. Baseline excludes numeric Rank Math until its separate eligibility profile is defined. See [approved policy](SCORING_POLICY.md).

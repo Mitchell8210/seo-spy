@@ -276,6 +276,16 @@ export class FacebookController {
     this.guard(req, res);
     res.json(await this.facebook.diagnose(this.session(req)));
   }
+  @Get("connection-metrics")
+  @ApiOperation({ summary: "Explicit read-only probes for interaction/contact metrics using this browser connection" })
+  @ApiOkResponse({ description: "Sanitized bounded candidate-metric results; no credentials or message content" })
+  async connectionMetrics(@Req() req: Request, @Res() res: Response,
+    @Query("pageId") pageId: string, @Query("confirmed") confirmed: string, @Query("probe") probe?: string) {
+    this.guard(req, res);
+    if (confirmed !== "true") throw new BadRequestException("Explicit confirmed=true is required for live metric probes.");
+    if (probe !== undefined && probe !== "shares" && probe !== "comments") throw new BadRequestException("Unknown diagnostic probe.");
+    res.json(await this.facebook.probeContactMetrics(this.session(req), pageId, probe === "shares" || probe === "comments" ? probe : "contacts"));
+  }
   @Post("disconnect")
   @ApiResponse({
     status: 303,

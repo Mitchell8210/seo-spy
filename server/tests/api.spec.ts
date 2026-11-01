@@ -130,6 +130,7 @@ describe("demo API", () => {
         "/api/facebook/test-token",
         "/api/facebook/callback",
         "/api/facebook/connection",
+        "/api/facebook/connection-metrics",
         "/api/facebook/disconnect",
         "/api/facebook/reports",
         "/api/facebook/reports/status",

@@ -16,15 +16,20 @@ export interface FacebookMetric {
   aggregation: 'sum' | 'snapshot'
   total: number | null
   collectedAt: string
+  sourceMetric?: string
+  breakdown?: 'like'
+  coverage?: { complete: boolean; expectedDays: number; returnedDays: number }
 }
 export interface FacebookReport {
+  lifetimeShares?: { basis: 'lifetime'; sourceField: 'shares'; knownTotal: number; total: number | null; complete: boolean; postsCollected: number; postsWithCounts: number; collectedAt: string }
+  commentCounts?: { basis: 'reporting-window'; since: string; until: string; timeZone: 'America/Los_Angeles'; status: 'available' | 'unavailable'; total: number | null; observedTotal: number; complete: boolean; postsCollected: number; postsChecked: number; collectedAt: string; failureCode?: string }
   provider: 'facebook-graph'
   version: 'facebook-v1'
   graphVersion: string
   pageId: string
   pageName: string
   collectedAt: string
-  window: { since: string; until: string; requestedDays: number }
+  window: { since: string; until: string; requestedDays: number; timeZone?: 'America/Los_Angeles'; basis?: 'complete-provider-days' }
   profile: Record<string, FacebookField>
   posts: { status: 'available' | 'missing' | 'unavailable'; items: { id: string; message: string | null; createdTime: string | null; url: string }[]; truncated: boolean; collectedAt: string }
   metrics: FacebookMetric[]

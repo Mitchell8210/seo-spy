@@ -13,6 +13,8 @@ import {
 } from "./types.js";
 import { analyzeFacebook } from "./analyze.js";
 import { collectFacebookPostWindow } from "./post-coverage.js";
+import { aggregateFacebookDailyValues, createFacebookReportingWindow } from "./reporting-window.js";
+import { collectFacebookCommentCounts } from "./comment-counts.js";
 
 const idSchema = z.string().regex(/^\d+$/);
 const paging = z
@@ -44,28 +46,11 @@ const postList = z.object({
         id: z.string().regex(/^\d+_\d+$/),
         message: z.string().max(100000).optional(),
         created_time: date.optional(),
+        shares: z.unknown().optional(),
       }),
     )
     .max(100),
   paging,
-});
-const metricData = z.object({
-  data: z
-    .array(
-      z.object({
-        name: z.string(),
-        period: z.literal("day"),
-        values: z
-          .array(
-            z.object({
-              value: z.number().finite().nonnegative(),
-              end_time: date,
-            }),
-          )
-          .max(100),
-      }),
-    )
-    .max(10),
 });
 const profileSchemas = {
   name: z.string().max(1024),
@@ -105,6 +90,9 @@ const metricNames = [
   "page_views_total",
   "page_post_engagements",
   "page_video_views",
+  "page_post_likes",
+  "page_total_actions",
+  "page_messages_new_conversations_unique",
 ];
 const errorCode = (error: unknown) =>
   error instanceof FacebookError
@@ -128,8 +116,9 @@ export async function collectFacebookReport(
   const deadline = AbortSignal.timeout(120000);
   const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
   const collectedAt = new Date().toISOString();
-  const until = new Date();
-  const since = new Date(until.getTime() - 30 * 86400000);
+  const reportingWindow = createFacebookReportingWindow(new Date(collectedAt));
+  const since = new Date(reportingWindow.since);
+  const until = new Date(reportingWindow.until);
   const request = async (
     path: string,
     token: string,
@@ -243,13 +232,15 @@ export async function collectFacebookReport(
     for (let batch = 0; batch < 2; batch++) {
       const list = postList.parse(
         await request(`${pageId}/posts`, token, {
-          fields: "id,message,created_time",
+          fields: "id,message,created_time,shares",
           limit: "25",
           ...(cursor ? { after: cursor } : {}),
         }),
       );
-      for (const post of list.data.slice(0, 25))
-        if (!posts.items.some((item) => item.id === post.id))
+      for (const post of list.data.slice(0, 25)) {
+        if (!post.id.startsWith(`${pageId}_`)) throw new Error("Wrong Page post");
+        if (!posts.items.some((item) => item.id === post.id)) {
+          const shareField = z.object({ count: z.number().int().nonnegative().safe() }).safeParse(post.shares);
           posts.items.push({
             id: post.id,
             message: post.message ?? null,
@@ -257,7 +248,10 @@ export async function collectFacebookReport(
               ? new Date(post.created_time).toISOString()
               : null,
             url: `https://www.facebook.com/${post.id}`,
+            shareCount: shareField.success ? shareField.data.count : null,
           });
+        }
+      }
       posts.truncated = Boolean(list.paging?.next) || list.data.length > 25;
       cursor = list.paging?.cursors?.after;
       if (!posts.truncated || !cursor) break;
@@ -273,6 +267,18 @@ export async function collectFacebookReport(
     items: JSON.stringify(posts.items),
     truncated: String(posts.truncated),
   });
+  const postsWithCounts = posts.items.filter(post => typeof post.shareCount === "number");
+  const knownTotal = postsWithCounts.reduce((sum, post) => sum + post.shareCount!, 0);
+  const sharesComplete = posts.status === "available" && !posts.truncated && postsWithCounts.length === posts.items.length && Number.isSafeInteger(knownTotal);
+  const lifetimeShares: FacebookReport["lifetimeShares"] = {
+    basis: "lifetime", sourceField: "shares", knownTotal: Number.isSafeInteger(knownTotal) ? knownTotal : 0,
+    total: sharesComplete ? knownTotal : null, complete: sharesComplete,
+    postsCollected: posts.items.length, postsWithCounts: postsWithCounts.length, collectedAt: posts.collectedAt,
+  };
+  evidence("facebook:lifetime-shares", { summary: JSON.stringify(lifetimeShares) });
+  const commentCounts = await collectFacebookCommentCounts((path, params) => request(path, token, params), pageId, posts, reportingWindow);
+  evidence("facebook:comment-counts", { summary: JSON.stringify(commentCounts) });
+  if (!commentCounts.complete) warnings.push(`The 30-day comment total is unavailable (${commentCounts.failureCode ?? "incomplete coverage"}).`);
   const publishing = await collectFacebookPostWindow((path, params) => request(path, token, params), pageId, new Date().toISOString(), stop);
   evidence("facebook:publishing-window", { status: publishing.status, items: JSON.stringify(publishing.items), truncated: String(publishing.truncated), coverage: JSON.stringify(publishing.coverage) });
   if (!publishing.coverage.complete) warnings.push(`The complete publishing window could not be established (${publishing.coverage.reason}); Social scoring remains unavailable.`);
@@ -290,36 +296,26 @@ export async function collectFacebookReport(
       total: null,
       aggregation: name === "page_follows" ? "snapshot" : "sum",
       collectedAt: new Date().toISOString(),
+      coverage: { complete: false, expectedDays: 30, returnedDays: 0 },
     };
+    const sourceMetric = name === "page_post_likes" ? "page_actions_post_reactions_total" : name;
+    metric.sourceMetric = sourceMetric;
+    if (name === "page_post_likes") metric.breakdown = "like";
     try {
-      const response = metricData.parse(
-        await request(`${pageId}/insights`, token, {
-          metric: name,
+      const response = await request(`${pageId}/insights`, token, {
+          metric: sourceMetric,
           period: "day",
           since: String(Math.floor(since.getTime() / 1000)),
           until: String(Math.floor(until.getTime() / 1000)),
-        }),
-      );
-      const values = response.data.find((item) => item.name === name)?.values;
-      metric.points = (values ?? [])
-        .map((point) => ({
-          endTime: new Date(point.end_time).toISOString(),
-          value: point.value,
-        }))
-        .sort((a, b) => a.endTime.localeCompare(b.endTime));
-      if (
-        new Set(metric.points.map((point) => point.endTime)).size !==
-        metric.points.length
-      )
-        throw new Error("Duplicate periods");
-      metric.status = metric.points.length ? "available" : "missing";
-      if (metric.status === "available" && metric.aggregation === "sum")
-        metric.total = metric.points.reduce(
-          (sum, point) => sum + point.value,
-          0,
-        );
-      if (metric.status === "missing")
-        warnings.push(`Insight ${name} returned no measurements.`);
+        });
+      const aggregated = aggregateFacebookDailyValues(response, sourceMetric, reportingWindow, name === "page_post_likes" ? "like" : undefined);
+      Object.assign(metric, aggregated);
+      // A snapshot is never cumulative. Retain usable returned history separately.
+      if (metric.aggregation === "snapshot") {
+        metric.total = null;
+        if (metric.points.length) metric.status = "available";
+      }
+      if (metric.status !== "available") warnings.push(`Insight ${name} does not establish all 30 completed reporting days (${metric.failureCode ?? metric.status}).`);
     } catch (error) {
       metric.points = [];
       metric.failureCode = errorCode(error);
@@ -349,13 +345,12 @@ export async function collectFacebookReport(
     pageId,
     pageName: selected.name,
     collectedAt,
-    window: {
-      since: since.toISOString(),
-      until: until.toISOString(),
-      requestedDays: 30,
-    },
+    window: { since: reportingWindow.since, until: reportingWindow.until, requestedDays: 30,
+      timeZone: "America/Los_Angeles", basis: "complete-provider-days" },
     profile,
     posts,
+    lifetimeShares,
+    commentCounts,
     metrics,
     publishing,
     summary: {
@@ -372,7 +367,7 @@ export async function collectFacebookReport(
               (post) =>
                 post.createdTime &&
                 Date.parse(post.createdTime) >= since.getTime() &&
-                Date.parse(post.createdTime) <= until.getTime(),
+                Date.parse(post.createdTime) < until.getTime(),
             ).length
           : null,
       postsInWindowComplete:
@@ -398,10 +393,13 @@ export async function collectFacebookReport(
     },
     limitations: [
       "Read-only Facebook evidence; no overall or social score is defined.",
-      "Daily metrics retain Meta period boundaries; the latest period may be incomplete. Totals cover returned periods only.",
+      "Cumulative metrics cover exactly 30 completed America/Los_Angeles reporting days, excluding the current partial day. Missing daily buckets make totals unavailable; no zero filling or lifetime post totals.",
+      "New messaging conversations and aggregate Page actions are retained as distinct metrics, not messages or unique people contacted. Likes are the like-only daily reaction breakdown; other reactions are excluded.",
+      "Shares temporarily uses lifetime counts on accessible collected posts. Omitted counts remain unknown; incomplete positive totals are lower bounds. Shares is independent of the 30-day reporting window.",
+      "Comments counts accessible comments/replies created within the reporting window across all collected posts, including older posts. Hidden/deleted/inaccessible content cannot be established. Truncation or failed comment reads makes the period total unavailable.",
       "Follower change compares the first and last returned snapshots; it is not a sum or a causal growth estimate.",
       "At most 50 recent posts are collected. Visibility and missing fields do not establish completeness of the public Page.",
-      "Website consistency, visual image quality, comments, publishing and profile edits were not evaluated.",
+      "Website consistency, visual image quality, publishing and profile edits were not evaluated.",
     ],
   };
   if (posts.truncated)

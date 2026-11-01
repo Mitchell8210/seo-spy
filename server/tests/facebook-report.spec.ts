@@ -6,6 +6,8 @@ import {
   FacebookError,
 } from "../src/modules/facebook/facebook.service.js";
 import { collectFacebookReport } from "../src/integrations/facebook/collect.js";
+import { createFacebookReportingWindow } from "../src/integrations/facebook/reporting-window.js";
+import { facebookReportSchema } from "../src/integrations/facebook/types.js";
 
 class MockGraph extends FacebookGraph {
   override request = jest.fn<FacebookGraph["request"]>();
@@ -26,6 +28,7 @@ function fixture() {
         ],
       };
     if (path === "123/posts" && params?.since) return { data: [] };
+    if (path.endsWith("/comments")) return { data: [] };
     if (path === "123/posts")
       return {
         data: [
@@ -43,16 +46,11 @@ function fixture() {
           {
             name: params?.metric,
             period: "day",
-            values: [
-              {
-                value: params?.metric === "page_follows" ? 12 : 0,
-                end_time: "2026-10-01T07:00:00Z",
-              },
-              {
-                value: params?.metric === "page_follows" ? 15 : 0,
-                end_time: "2026-10-02T07:00:00Z",
-              },
-            ],
+            values: createFacebookReportingWindow(new Date()).dayEnds.map((end_time, index) => ({
+              value: params?.metric === "page_follows" ? index === 0 ? 12 : 15 :
+                params?.metric === "page_actions_post_reactions_total" ? index === 5 ? { like: 4, love: 2 } : {} : 0,
+              end_time,
+            })),
           },
         ],
       };
@@ -103,6 +101,12 @@ describe("Facebook saved report collector", () => {
         (metric) => metric.name === "page_media_view",
       ),
     ).toMatchObject({ total: 0, status: "available" });
+    expect(results.facebook?.window).toMatchObject({ requestedDays: 30, basis: "complete-provider-days", timeZone: "America/Los_Angeles" });
+    expect(facebookReportSchema.parse(results.facebook)).toEqual(results.facebook);
+    expect(results.facebook?.metrics.find(metric => metric.name === "page_post_likes")).toMatchObject({
+      total: 4, status: "available", sourceMetric: "page_actions_post_reactions_total", breakdown: "like",
+      coverage: { complete: true, expectedDays: 30, returnedDays: 30 },
+    });
     expect(results.facebook?.profile.hours).toMatchObject({
       status: "missing",
       value: {},
@@ -142,6 +146,47 @@ describe("Facebook saved report collector", () => {
     expect(graph.request).toHaveBeenCalledTimes(1);
   });
 
+  it("saves lifetime share coverage separately from comments created within the 30-day window", async () => {
+    const graph = fixture();
+    const original = graph.request.getMockImplementation()!;
+    const window = createFacebookReportingWindow(new Date());
+    graph.request.mockImplementation(async (...args) => {
+      if (args[0] === "123/posts" && args[2]?.fields?.includes("comments.filter")) return { data: [] };
+      if (args[0] === "123/posts" && !args[2]?.since) {
+        expect(args[2]?.fields).toBe("id,message,created_time,shares");
+        return { data: [
+          { id: "123_1", created_time: "2020-01-01T00:00:00Z", shares: { count: 9 } },
+          { id: "123_2", created_time: "2020-01-01T00:00:00Z" },
+        ] };
+      }
+      if (args[0] === "123_1/comments") return { data: [
+        { id: "123_1_1", created_time: window.since, message: "private comment" },
+        { id: "123_1_2", created_time: window.until },
+      ] };
+      return original(...args);
+    });
+    const { results } = await collectFacebookReport(graph, "private-user-token", "123", "audit");
+    expect(results.facebook?.lifetimeShares).toMatchObject({ basis: "lifetime", knownTotal: 9, total: null,
+      complete: false, postsCollected: 2, postsWithCounts: 1 });
+    expect(results.facebook?.commentCounts).toMatchObject({ status: "available", total: 1,
+      complete: true, since: window.since, until: window.until, postsChecked: 2 });
+    expect(facebookReportSchema.parse(results.facebook)).toEqual(results.facebook);
+    expect(JSON.stringify(results)).not.toContain("private comment");
+    expect(results.evidence.some(item => item.checkId === "facebook:comment-counts")).toBe(true);
+    expect(results.evidence.some(item => item.checkId === "facebook:lifetime-shares")).toBe(true);
+  });
+
+  it("preserves an explicit zero share count but never treats omission as zero", async () => {
+    const graph = fixture();
+    const original = graph.request.getMockImplementation()!;
+    graph.request.mockImplementation(async (...args) => {
+      if (args[0] === "123/posts" && !args[2]?.since) return { data: [{ id: "123_1", shares: { count: 0 } }] };
+      return original(...args);
+    });
+    const { results } = await collectFacebookReport(graph, "private-user-token", "123", "audit");
+    expect(results.facebook?.lifetimeShares).toMatchObject({ total: 0, knownTotal: 0, complete: true });
+  });
+
   it("retains useful data when profile reads and metrics fail without turning failures into missing-field advice", async () => {
     const graph = fixture();
     const original = graph.request.getMockImplementation()!;
@@ -179,6 +224,7 @@ describe("Facebook saved report collector", () => {
     const original = graph.request.getMockImplementation()!;
     let batch = 0;
     graph.request.mockImplementation(async (...args) => {
+      if (args[0] === "123/posts" && args[2]?.fields?.includes("comments.filter")) return { data: [] };
       if (args[0] === "123/posts" && !args[2]?.since) {
         batch++;
         return {
