@@ -132,17 +132,16 @@ try {
   await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'saved Facebook report');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), false, 'The saved account dropdown must be interactive.');
   assert.equal(await evaluate('document.querySelector("#social-account").value'), '123');
-  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+0/); assert.match(await text(), /People Reached\s+Not available/);
+  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+Not available/); assert.match(await text(), /View Activity\s+Not available/);
   assert.match(await text(), /Review the phone number/);
   assert.match(await text(), /Social Media Health Summary/); assert.match(await text(), /SEO Spy Social Media Report/);
   assert.doesNotMatch(await text(), /returned daily measurements|Newest collected post|Report coverage and business details/);
-  assert.match(await text(), /People Who Contacted You\s+Not available/);
+  assert.doesNotMatch(await text(), /People Who Contacted You/);
   const healthLabels = await evaluate(`Array.from(document.querySelectorAll('section[aria-labelledby="social-health-title"] article')).map(card => ({ title: card.querySelector('h3').textContent, labels: Array.from(card.querySelectorAll('dt')).map(row => row.lastElementChild.textContent.trim()) }))`);
   assert.deepEqual(healthLabels, [
     { title: 'Followers', labels: ['New Followers', 'Unfollowed'] },
-    { title: 'People Reached', labels: ['Media views', 'Page views', 'Video views'] },
-    { title: 'People Who Contacted You', labels: ['Website Clicks', 'Address Clicks', 'People Mentioning Your Business'] },
-    { title: 'Interactions', labels: ['Likes', 'Comments', 'Shares', 'Messages'] },
+    { title: 'View Activity', labels: ['Media views', 'Page views', 'Video views', 'Website Visits'] },
+    { title: 'Interactions', labels: ['Likes', 'Comments', 'Conversations', 'Lifetime Shares'] },
   ], 'Health tiles preserve main labels while retaining correctly labeled view metrics.');
   assert.match(await text(), /Media views\s+63/);
   assert.match(await text(), /Page views\s+3/);

@@ -55,6 +55,7 @@ export interface FacebookReportRecord {
   results: { facebook: FacebookReport; findings: FacebookFinding[]; recommendations: Recommendation[]; evidence: Evidence[]; scores: Score[] }
 }
 export interface FacebookReportResponse {
+  websiteVisits?: { businessId: string; provider: 'ga4'; metric: 'sessions'; attribution: 'facebook-session-source-v1'; since: string; until: string; timeZone: 'America/Los_Angeles'; status: 'available' | 'unavailable'; total: number | null; collectedAt: string | null; failureCode?: string; limitations: string[] } | null
   businessId: string
   report: FacebookReportRecord | null
   analysis: FacebookAnalysis | null

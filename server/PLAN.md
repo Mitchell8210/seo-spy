@@ -8,6 +8,23 @@ Last updated: October 31, 2026.
 
 ## Progress record
 
+### November 1, 2026 - Historical explicit-mention search
+
+- User had no known example URL, so searched public web results and authorized historical tagged/feed/comment sources for an existing exact Page-ID tag. Added bounded historical and feed-only diagnostics with direct positive-control verification when a candidate exists; privacy-preserving aggregate results only, no content creation.
+- Live scans exhausted 76 accessible Page posts/their comment streams (one comment), empty tagged history, and subsequently all 77 accessible feed records. The feed returned tag metadata on 61 records and author IDs on 77, but none matched the business Page's ID. No existing positive-control mention was found; uniqueness/human identity and Facebook-wide coverage remain unverified. Frontend metric unchanged, no invented zero, external write or model call.
+
+### November 1, 2026 - Mention metadata and unique-people capability checked
+
+- Added an explicit browser-scoped mentions diagnostic for tagged/visitor posts, structured Page mention tags, author-ID availability, sampled comments and direct comment-node reads. Privacy-preserving counts only; no names/text/author or comment IDs retained or returned, no provider URL following, no writes or model calls.
+- Live sources were accessible but returned no tagged/visitor posts, and the one sampled in-window comment omitted mention tags/author ID in both list and direct reads. No reliable unique-people metric is established; no zero or automatic frontend population was introduced. Targeted checks passed 24 tests plus typecheck/lint/build; original frontend/scoring/report-generation behavior remains intact.
+
+### November 1, 2026 - Facebook-attributed GA4 website visits integrated
+
+- User approved Website Visits in the existing Website Clicks slot. Added sessions-only, hostname-bound, exact-period Facebook session-source reporting with strict response/date/timezone validation and no first-user/all-social substitutions. Matching sessions can include paid/organic sources and are not selected-Page clicks or unique contacts.
+- Explicit Facebook Run Report now optionally collects/caches Google visits. Saved report reads return a separately scoped cached companion without provider requests or archive/scoring mutation. Preserve identity/config guards, failure-versus-zero, negative cache, scoped concurrency, stale-source handling and failclosed storage. No frontend credentials or new card/control/layout introduced.
+- Live source returned **3** Facebook-attributed sessions for October 2–31 Pacific; source timezone matched, saved-read equality and byte-unchanged AI ledger verified. No Meta/model call or website write. Existing Google totals/Search Console behavior remains intact.
+- The user separately approved frontend **View Activity Total** (163 = media/Page/video counts, with overlap acknowledged) and **Interactions** as Likes + Comments + Conversations (6), excluding Lifetime Shares. These are display rollups, not scoring or replacements for archived native metrics. Backend full check passed 1000 tests (one skipped); client lint/build and five mapping checks passed, and real saved-data mapping showed Website Visits3 / View Activity Total163 / Interactions6.
+
 ### November 1, 2026 - Shares and Comments connected to existing Social Media rows
 
 - User approved temporary lifetime Shares and explicitly required its label to remain Shares; separately chose 30-day Comments. Added saved lifetime share fields and bounded timestamp-only comment/reply enumeration across older/newer accessible posts. Preserve missing counts, coverage, cursor/deadline limits, exact date matching and source evidence; positive partial share sums display with `+`, never an invented exact total.

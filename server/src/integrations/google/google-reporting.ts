@@ -1,7 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { GOOGLE_TOKEN_PROVIDER, type GoogleTokenProvider } from "./google-auth.js";
 import { GoogleApiError, GoogleTransport } from "./google-transport.js";
-import { ga4ReportDataSchema, searchConsoleReportDataSchema, type Ga4ReportData, type SearchConsoleMetrics, type SearchConsoleReportData } from "./google-reporting.types.js";
+import { FACEBOOK_SESSION_SOURCE_PATTERN, ga4FacebookVisitsReportDataSchema, ga4ReportDataSchema, searchConsoleReportDataSchema, type Ga4FacebookVisitsReportData, type Ga4ReportData, type SearchConsoleMetrics, type SearchConsoleReportData } from "./google-reporting.types.js";
+
+export { FACEBOOK_SESSION_SOURCE_PATTERN } from "./google-reporting.types.js";
 
 const object = (value: unknown): Record<string, unknown> | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const invalid = () => new GoogleApiError("GOOGLE_INVALID_RESPONSE", "Google returned an incompatible reporting response; no metrics were invented.");
@@ -93,6 +95,70 @@ function searchMetrics(value: unknown): SearchConsoleMetrics {
 @Injectable()
 export class GoogleReportingClient {
   constructor(@Inject(GOOGLE_TOKEN_PROVIDER) private readonly auth: GoogleTokenProvider, private readonly transport: GoogleTransport) {}
+
+  async ga4FacebookVisits(propertyId: string, startDate: string, endDate: string, hostname: string): Promise<Ga4FacebookVisitsReportData> {
+    if (typeof propertyId !== "string" || !/^[1-9]\d{0,19}$/.test(propertyId) ||
+        typeof startDate !== "string" || typeof endDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw configured();
+    const start = Date.parse(`${startDate}T00:00:00.000Z`), end = Date.parse(`${endDate}T00:00:00.000Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || new Date(start).toISOString().slice(0, 10) !== startDate ||
+        new Date(end).toISOString().slice(0, 10) !== endDate || end - start !== 29 * 86400000 ||
+        typeof hostname !== "string" || hostname.length > 253 ||
+        !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(hostname)) throw configured();
+    const normalizedHostname = hostname.toLowerCase().replace(/^www\./, "");
+    const accessToken = await this.auth.getAccessToken();
+    const collectedAt = new Date().toISOString();
+    const raw = object(await this.transport.post(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:batchRunReports`, {
+      requests: [{ dateRanges: [{ startDate, endDate }], metrics: [{ name: "sessions" }],
+        dimensionFilter: { andGroup: { expressions: [
+          { filter: { fieldName: "sessionSource", stringFilter: { matchType: "FULL_REGEXP", value: FACEBOOK_SESSION_SOURCE_PATTERN, caseSensitive: false } } },
+          { filter: { fieldName: "hostName", inListFilter: { values: [normalizedHostname, `www.${normalizedHostname}`], caseSensitive: false } } },
+        ] } }, limit: "1", keepEmptyRows: false }],
+    }, { accessToken }));
+    if (!raw || raw.error || !Array.isArray(raw.reports) || raw.reports.length !== 1) throw invalid();
+    const report = object(raw.reports[0]);
+    if (!report || report.error || !Array.isArray(report.metricHeaders) || report.metricHeaders.length !== 1 || object(report.metricHeaders[0])?.name !== "sessions" ||
+        report.dimensionHeaders !== undefined && (!Array.isArray(report.dimensionHeaders) || report.dimensionHeaders.length !== 0)) throw invalid();
+    const rows: unknown[] = report.rows === undefined ? [] : Array.isArray(report.rows) ? report.rows : (() => { throw invalid(); })();
+    if (rows.length > 1 || report.rowCount !== undefined && (!integer(report.rowCount) || report.rowCount !== rows.length)) throw invalid();
+    let sessions = 0;
+    if (rows.length) {
+      const row = object(rows[0]);
+      if (!row || !Array.isArray(row.metricValues) || row.metricValues.length !== 1 ||
+          row.dimensionValues !== undefined && (!Array.isArray(row.dimensionValues) || row.dimensionValues.length !== 0)) throw invalid();
+      sessions = metricCount(object(row.metricValues[0])?.value);
+    }
+    const metadata = report.metadata === undefined ? {} : object(report.metadata);
+    if (!metadata) throw invalid();
+    for (const key of ["subjectToThresholding", "dataLossFromOtherRow"]) if (metadata[key] !== undefined && typeof metadata[key] !== "boolean") throw invalid();
+    if (metadata.timeZone !== undefined && (typeof metadata.timeZone !== "string" || !metadata.timeZone || metadata.timeZone.length > 100)) throw invalid();
+    let timeZone = typeof metadata.timeZone === "string" ? metadata.timeZone : null;
+    if (timeZone) try { new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date(collectedAt)); } catch { timeZone = null; }
+    const sampling = metadata.samplingMetadatas ?? [];
+    if (!Array.isArray(sampling) || sampling.length > 5) throw invalid();
+    const normalizedSampling = sampling.map(value => {
+      const sample = object(value);
+      if (!sample || typeof sample.samplesReadCount !== "string" || typeof sample.samplingSpaceSize !== "string" ||
+          !/^\d{1,30}$/.test(sample.samplesReadCount) || !/^\d{1,30}$/.test(sample.samplingSpaceSize) ||
+          BigInt(sample.samplesReadCount) > BigInt(sample.samplingSpaceSize)) throw invalid();
+      return { samplesReadCount: sample.samplesReadCount, samplingSpaceSize: sample.samplingSpaceSize };
+    });
+    const limitations = ["Counts GA4 sessions attributed to matching Facebook session sources, not Facebook link clicks, unique people or individual messages.",
+      "Includes paid and organic Facebook sources matching the declared filter; cannot identify clicks from a particular Facebook Page or untracked visits.",
+      "Only sessions including the configured website hostname or its www alias are included. Dates use the GA4 property timezone; matching another reporting window requires timezone compatibility."];
+    if (!timeZone) limitations.push("A usable GA4 property timezone was not established; date-window compatibility is unknown.");
+    if (!rows.length) limitations.push("The successful Google response contained no matching rows; its session count is zero, not an access failure.");
+    if (metadata.subjectToThresholding === true) limitations.push("Google reported privacy thresholding; returned values may omit suppressed data.");
+    if (metadata.dataLossFromOtherRow === true) limitations.push("Google reported high-cardinality aggregation/data loss in the report source.");
+    if (normalizedSampling.some(sample => BigInt(sample.samplesReadCount) < BigInt(sample.samplingSpaceSize))) limitations.push("Google reported sampled event data; these values are not an unsampled census.");
+    if (metadata.dataTruncationReasons !== undefined && !Array.isArray(metadata.dataTruncationReasons)) throw invalid();
+    if (Array.isArray(metadata.dataTruncationReasons) && metadata.dataTruncationReasons.length) limitations.push("Google reported report-data truncation; coverage is limited.");
+    if (object(metadata.schemaRestrictionResponse)) limitations.push("Google returned schema-restriction metadata; metric visibility may be restricted.");
+    return ga4FacebookVisitsReportDataSchema.parse({ schemaVersion: "seo-spy.google-ga4-facebook-visits.v1", provider: "google-analytics-data",
+      propertyId, collectedAt, availability: rows.length ? "available" : "empty", hostname: normalizedHostname,
+      sourceDimension: "sessionSource", attribution: "facebook-session-source-v1", sourcePattern: FACEBOOK_SESSION_SOURCE_PATTERN,
+      dateRange: { startDate, endDate, timeZone }, sessions,
+      metadata: { subjectToThresholding: metadata.subjectToThresholding === true, dataLossFromOtherRow: metadata.dataLossFromOtherRow === true, sampling: normalizedSampling }, limitations });
+  }
 
   async ga4(propertyId: string): Promise<Ga4ReportData> {
     if (typeof propertyId !== "string" || !/^[1-9]\d{0,19}$/.test(propertyId)) throw configured();

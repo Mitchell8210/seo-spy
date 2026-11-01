@@ -95,6 +95,7 @@ export class FacebookAnalysisDto implements FacebookAnalysis {
   recommendations!: RecommendationDto[];
 }
 export class SavedFacebookReportDto {
+  @ApiProperty({ type: "object", nullable: true, additionalProperties: true, description: "Saved GA4 Facebook-attributed website sessions for the matching business/report window. Reads never collect Google data; not Facebook link clicks." }) websiteVisits?: object | null;
   @ApiProperty() businessId!: string;
   @ApiProperty({
     type: () => AuditReportDto,

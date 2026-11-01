@@ -6,9 +6,10 @@ import { FacebookReportsService } from "./facebook-reports.service.js";
 import { PersistenceModule } from "../../persistence/persistence.module.js";
 import { ReportsModule } from "../../reports/reports.module.js";
 import { AssessmentCoreModule } from "../assessments/assessment-core.module.js";
+import { GoogleReportingModule } from "../google/google.module.js";
 
 @Module({
-  imports: [PersistenceModule, ReportsModule, AssessmentCoreModule],
+  imports: [PersistenceModule, ReportsModule, AssessmentCoreModule, GoogleReportingModule],
   controllers: [FacebookController],
   providers: [
     FacebookGraph,

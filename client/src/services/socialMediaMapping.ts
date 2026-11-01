@@ -29,25 +29,43 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
       : sources.length > 0
         ? 'Your social media is in good shape, but a few things need attention.'
         : 'No issues were found in the social media checks we completed.'
-  const value = (name: string) => {
+  const metricTotal = (name: string): number | null => {
     const metric = facebook.metrics.find(item => item.name === name)
     return facebook.window.requestedDays === 30 && facebook.window.basis === 'complete-provider-days' &&
       (name !== 'page_post_likes' || (metric?.sourceMetric === 'page_actions_post_reactions_total' && metric.breakdown === 'like')) &&
       metric?.status === 'available' && metric.aggregation === 'sum' && metric.coverage?.complete === true &&
-      metric.coverage.expectedDays === 30 && metric.coverage.returnedDays === 30
-      ? formatNumber(metric.total) : 'Not available'
+      metric.coverage.expectedDays === 30 && metric.coverage.returnedDays === 30 &&
+      typeof metric.total === 'number' && Number.isSafeInteger(metric.total) && metric.total >= 0
+      ? metric.total : null
+  }
+  const value = (name: string) => formatNumber(metricTotal(name))
+  const sum = (values: (number | null)[]) => {
+    if (values.some(item => item === null)) return 'Not available'
+    const total = values.reduce<number>((total, item) => total + item!, 0)
+    return Number.isSafeInteger(total) ? formatNumber(total) : 'Not available'
   }
   const profileFollowers = facebook.profile.followers_count
+  const visits = data.websiteVisits
+  const websiteVisitTotal = visits?.businessId === data.businessId && report.business.id === data.businessId &&
+    visits.provider === 'ga4' && visits.metric === 'sessions' && visits.attribution === 'facebook-session-source-v1' &&
+    visits.status === 'available' && facebook.window.requestedDays === 30 && facebook.window.basis === 'complete-provider-days' &&
+    typeof visits.total === 'number' && Number.isSafeInteger(visits.total) && visits.total >= 0 &&
+    visits.since === facebook.window.since && visits.until === facebook.window.until && visits.timeZone === facebook.window.timeZone
+    ? visits.total : null
+  const websiteVisitValue = formatNumber(websiteVisitTotal)
   const shares = facebook.lifetimeShares
   const shareValue = shares?.basis === 'lifetime' && shares.sourceField === 'shares'
     ? shares.complete && shares.total !== null ? formatNumber(shares.total)
       : Number.isSafeInteger(shares.knownTotal) && shares.knownTotal > 0 ? `${formatNumber(shares.knownTotal)}+` : 'Not available'
     : 'Not collected'
   const comments = facebook.commentCounts
-  const commentValue = comments ? comments.basis === 'reporting-window' && comments.status === 'available' && comments.complete &&
+  const commentTotal = comments?.basis === 'reporting-window' && comments.status === 'available' && comments.complete &&
     facebook.window.requestedDays === 30 && facebook.window.basis === 'complete-provider-days' &&
-    comments.since === facebook.window.since && comments.until === facebook.window.until && comments.timeZone === facebook.window.timeZone
-    ? formatNumber(comments.total) : 'Not available' : 'Not collected'
+    comments.since === facebook.window.since && comments.until === facebook.window.until && comments.timeZone === facebook.window.timeZone &&
+    typeof comments.total === 'number' && Number.isSafeInteger(comments.total) && comments.total >= 0 ? comments.total : null
+  const commentValue = comments ? formatNumber(commentTotal) : 'Not collected'
+  const viewActivityTotal = sum([...['page_media_view', 'page_views_total', 'page_video_views'].map(metricTotal), websiteVisitTotal])
+  const interactionTotal = sum([metricTotal('page_post_likes'), commentTotal, metricTotal('page_messages_new_conversations_unique')])
   const followers = profileFollowers?.status === 'available' && typeof profileFollowers.value === 'number' ? formatNumber(profileFollowers.value) : 'Not available'
   const supporting = (id: string, label: string, content: string): SocialHealthMetric['supporting'][number] => ({
     id, label, value: content,
@@ -55,9 +73,8 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
   })
   const healthMetrics: SocialHealthMetric[] = [
     { id: 'followers', title: 'Followers', value: followers, supporting: [supporting('new-followers', 'New Followers', value('page_daily_follows_unique')), supporting('unfollowed', 'Unfollowed', value('page_daily_unfollows_unique'))] },
-    { id: 'reach', title: 'People Reached', value: 'Not available', supporting: [supporting('media-views', 'Media views', value('page_media_view')), supporting('page-views', 'Page views', value('page_views_total')), supporting('video-views', 'Video views', value('page_video_views'))] },
-    { id: 'contacts', title: 'People Who Contacted You', value: 'Not available', supporting: [supporting('website-clicks', 'Website Clicks', 'Not collected'), supporting('address-clicks', 'Address Clicks', 'Not collected'), supporting('mentions', 'People Mentioning Your Business', 'Not collected')] },
-    { id: 'interactions', title: 'Interactions', value: value('page_post_engagements'), supporting: [supporting('likes', 'Likes', value('page_post_likes')), supporting('comments', 'Comments', commentValue), supporting('shares', 'Shares', shareValue), supporting('messages', 'Messages', 'Not collected')] },
+    { id: 'reach', title: 'View Activity', value: viewActivityTotal, supporting: [supporting('media-views', 'Media views', value('page_media_view')), supporting('page-views', 'Page views', value('page_views_total')), supporting('video-views', 'Video views', value('page_video_views')), supporting('website-clicks', 'Website Visits', websiteVisitValue)] },
+    { id: 'interactions', title: 'Interactions', value: interactionTotal, supporting: [supporting('likes', 'Likes', value('page_post_likes')), supporting('comments', 'Comments', commentValue), supporting('messages', 'Conversations', value('page_messages_new_conversations_unique')), supporting('shares', 'Lifetime Shares', shareValue)] },
   ]
   const findings: SocialFinding[] = sources.map(finding => {
     const recommendation = recommendations.find(item => item.findingId === finding.id)

@@ -12,6 +12,7 @@ import type { BusinessRepository } from "../src/persistence/repositories.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import type { ReportFileReference } from "../src/reports/report.types.js";
 import { createFacebookReportingWindow } from "../src/integrations/facebook/reporting-window.js";
+import type { GoogleFacebookVisitsService } from "../src/modules/google/facebook-visits.service.js";
 
 class MockGraph extends FacebookGraph {
   override request = jest.fn<FacebookGraph["request"]>();
@@ -30,7 +31,7 @@ const reference: ReportFileReference = {
   downloadUrl: "/api/audits/saved/report",
 };
 
-function fixture() {
+function fixture(websiteVisits?: GoogleFacebookVisitsService) {
   const graph = new MockGraph(
     new ConfigService({ FACEBOOK_GRAPH_VERSION: "v26.0" }),
   );
@@ -113,6 +114,9 @@ function fixture() {
     businesses,
     graph,
     facebook,
+    undefined,
+    undefined,
+    websiteVisits,
   );
   return {
     service,
@@ -126,6 +130,29 @@ function fixture() {
 }
 
 describe("Facebook reports from browser authorization", () => {
+  it("collects matching Google website visits only during explicit report generation, not status reads", async () => {
+    const collect = jest.fn<GoogleFacebookVisitsService["collect"]>().mockImplementation(async (businessId, since, until) => ({
+      businessId, provider: "ga4", metric: "sessions", attribution: "facebook-session-source-v1", since, until,
+      timeZone: "America/Los_Angeles", status: "available", total: 3, collectedAt: new Date().toISOString(), limitations: [],
+    }));
+    const f = fixture({ collect } as unknown as GoogleFacebookVisitsService);
+    expect(collect).not.toHaveBeenCalled();
+    await f.service.create("session", business.id, "123");
+    const window = f.write.mock.calls[0]![0].results!.facebook!.window;
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(collect).toHaveBeenCalledWith(business.id, window.since, window.until);
+    await f.service.status("session", business.id);
+    expect(collect).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the usable Facebook report if optional Google collection fails", async () => {
+    const collect = jest.fn<GoogleFacebookVisitsService["collect"]>().mockRejectedValue(new Error("private provider detail"));
+    const f = fixture({ collect } as unknown as GoogleFacebookVisitsService);
+    await expect(f.service.create("session", business.id, "123")).resolves.toMatchObject({ status: "completed" });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(f.write.mock.calls)).not.toContain("private provider detail");
+    expect(collect).toHaveBeenCalledTimes(1);
+  });
   it("exposes running and terminal progress only to the initiating browser without Meta reads", async () => {
     const f = fixture();
     let release!: (value: ReportFileReference) => void;

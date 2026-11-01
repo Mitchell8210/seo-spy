@@ -34,6 +34,7 @@ import { summarizeEvidence } from "../reporting/evidence-summary.js";
 import { EvidenceSummariesDto } from "../reporting/evidence-summary.dto.js";
 import { analyzeWebsite } from "../integrations/lighthouse/prioritize.js";
 import { WebsiteAnalysisDto } from "../contracts/website-analysis.dto.js";
+import { GoogleFacebookVisitsService } from "../modules/google/facebook-visits.service.js";
 
 @Controller()
 @ApiTags("Saved reports")
@@ -44,6 +45,7 @@ export class ReportsController {
     private readonly reports: FileReportStore,
     @Inject(BUSINESS_REPOSITORY)
     private readonly businesses: BusinessRepository,
+    private readonly websiteVisits: GoogleFacebookVisitsService,
   ) {}
 
   @Get("businesses/:businessId/facebook-report")
@@ -83,6 +85,8 @@ export class ReportsController {
             record.results.evidence,
           ),
           latestAttempt: attempts[0] ?? null,
+          websiteVisits: record.results.facebook.window.basis === "complete-provider-days"
+            ? await this.websiteVisits.saved(businessId, record.results.facebook.window.since, record.results.facebook.window.until) : null,
         };
       }
       return {

@@ -23,6 +23,7 @@ import {
 import { FileReportStore } from "../../reports/file-report.store.js";
 import { AssessmentService } from "../assessments/assessment.service.js";
 import type { ReportFileReference } from "../../reports/report.types.js";
+import { GoogleFacebookVisitsService } from "../google/facebook-visits.service.js";
 import {
   FacebookError,
   FacebookGraph,
@@ -57,6 +58,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     private readonly facebook: FacebookService,
     @Optional() @Inject(AUDIT_REPOSITORY) private readonly audits?: AuditRepository,
     @Optional() private readonly assessments?: AssessmentService,
+    @Optional() private readonly websiteVisits?: GoogleFacebookVisitsService,
   ) {}
 
   async status(sessionId: string | undefined, businessId: string): Promise<FacebookReportProgress> {
@@ -198,6 +200,11 @@ export class FacebookReportsService implements OnModuleDestroy {
       audit.results.evidence.push({ id: randomUUID(), auditId: audit.id, checkId: "facebook:permissions", sourceUrl: `https://www.facebook.com/${pageId}`,
         collectedAt: permissionsCheckedAt, mode: "live", observed: { requiredReadPermissionsGranted: "true", grantedPermissions: JSON.stringify(grantedPermissions), checkedAt: permissionsCheckedAt } });
       audit.warnings = collected.warnings;
+      const window = collected.results.facebook?.window;
+      if (window?.basis === "complete-provider-days" && this.websiteVisits && !this.abort.signal.aborted) {
+        try { await this.websiteVisits.collect(businessId, window.since, window.until); }
+        catch { this.logger.warn("Google website-visit reporting is unavailable; the Facebook report is retained without invented traffic."); }
+      }
       audit.status = collected.partial ? "partial" : "completed";
       audit.stage = "complete";
     } catch (error) {

@@ -14,6 +14,8 @@ import { z } from "zod";
 import { probeFacebookContactMetrics } from "../../integrations/facebook/metric-probes.js";
 import { probeFacebookShares } from "../../integrations/facebook/share-probes.js";
 import { probeFacebookComments } from "../../integrations/facebook/comment-probes.js";
+import { probeFacebookMentions } from "../../integrations/facebook/mention-probes.js";
+import { probeFacebookMentionHistory, probeFacebookMentionFeedHistory } from "../../integrations/facebook/mention-history.js";
 
 export const READ_PERMISSIONS = [
   "pages_show_list",
@@ -438,7 +440,7 @@ export class FacebookService implements OnModuleDestroy {
       );
     }
   }
-  async probeContactMetrics(id: string | undefined, pageId: string, kind: "contacts" | "shares" | "comments" = "contacts") {
+  async probeContactMetrics(id: string | undefined, pageId: string, kind: "contacts" | "shares" | "comments" | "mentions" | "mentions-history" | "mentions-feed-history" = "contacts") {
     if (!/^\d{1,40}$/.test(pageId)) throw new BadRequestException("A numeric Page ID is required.");
     const connection = await this.credential(id);
     const permissions = await this.requirePermissions(connection.token);
@@ -453,8 +455,10 @@ export class FacebookService implements OnModuleDestroy {
       const selected = result.data.find(page => page.id === pageId);
       if (selected?.access_token) {
         const pageToken = selected.access_token;
+        const probe = { contacts: probeFacebookContactMetrics, shares: probeFacebookShares, comments: probeFacebookComments,
+          mentions: probeFacebookMentions, "mentions-history": probeFacebookMentionHistory, "mentions-feed-history": probeFacebookMentionFeedHistory }[kind];
         return { graphVersion: this.graph.graphVersion, permissions,
-          ...await (kind === "shares" ? probeFacebookShares : kind === "comments" ? probeFacebookComments : probeFacebookContactMetrics)((path, params) => {
+          ...await probe((path, params) => {
             stop.throwIfAborted();
             return this.graph.request(path, pageToken, params, true, stop);
           }, pageId) };

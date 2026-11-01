@@ -283,8 +283,8 @@ export class FacebookController {
     @Query("pageId") pageId: string, @Query("confirmed") confirmed: string, @Query("probe") probe?: string) {
     this.guard(req, res);
     if (confirmed !== "true") throw new BadRequestException("Explicit confirmed=true is required for live metric probes.");
-    if (probe !== undefined && probe !== "shares" && probe !== "comments") throw new BadRequestException("Unknown diagnostic probe.");
-    res.json(await this.facebook.probeContactMetrics(this.session(req), pageId, probe === "shares" || probe === "comments" ? probe : "contacts"));
+    if (probe !== undefined && probe !== "shares" && probe !== "comments" && probe !== "mentions" && probe !== "mentions-history" && probe !== "mentions-feed-history") throw new BadRequestException("Unknown diagnostic probe.");
+    res.json(await this.facebook.probeContactMetrics(this.session(req), pageId, probe === "shares" || probe === "comments" || probe === "mentions" || probe === "mentions-history" || probe === "mentions-feed-history" ? probe : "contacts"));
   }
   @Post("disconnect")
   @ApiResponse({

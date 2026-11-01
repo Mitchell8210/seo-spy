@@ -65,6 +65,23 @@ describe("Google reporting HTTP integration with offline fixtures and real SQLit
     for (const secret of [operator, "private-google-access-token", "private-account-fingerprint", "private_key", "client_email"]) expect(first.text + second.text).not.toContain(secret);
   });
 
+  it("protects and caches exact-period Facebook website-session collection through the operator route", async () => {
+    const params = new URLSearchParams({ since: "2026-10-02T07:00:00.000Z", until: "2026-11-01T07:00:00.000Z" });
+    const path = `${prefix}/facebook-visits?${params}`;
+    await request(app.getHttpServer()).get(path).set("Host", "localhost:3001").expect(401);
+    await get(`${prefix}/facebook-visits?since=invalid&until=invalid`).expect(400);
+    expect(post).not.toHaveBeenCalled();
+    post.mockResolvedValue({ reports: [{ metricHeaders: [{ name: "sessions" }], rows: [{ metricValues: [{ value: "3" }] }], rowCount: 1, metadata: { timeZone: "America/Los_Angeles" } }] });
+    const first = await get(path).expect(200);
+    expect(first.body).toMatchObject({ businessId, provider: "ga4", metric: "sessions", status: "available", total: 3 });
+    expect(first.headers["cache-control"]).toBe("no-store");
+    const second = await get(path).expect(200);
+    expect(second.body).toEqual(first.body);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(first.text).not.toContain(operator);
+    expect(first.text).not.toContain("private-google-access-token");
+  });
+
   it("keeps Search Console site totals separate from top-query measurements and caches each scope", async () => {
     const summary = await get(`${prefix}/search-console`).expect(200);
     expect(summary.body.data).toMatchObject({ days: 30, view: "summary", summary: { clicks: 10, impressions: 200, ctr: 0.05, averagePosition: 8.2 }, topQueries: [] });

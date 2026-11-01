@@ -54,6 +54,7 @@ export class GoogleReportingService {
     return provider === "ga4" ? (this.config.get<string>("GA4_PROPERTY_ID") ?? "") : siteUrl;
   }
   ga4(businessId: string) { return this.load(businessId, "ga4", 30, "summary"); }
+  configuredGa4Asset(businessId: string) { return this.binding(businessId, "ga4"); }
   searchConsole(businessId: string, days: 7 | 30, view: "summary" | "queries") { return this.load(businessId, "search-console", days, view); }
 
   private failure(businessId: string, provider: Provider, asset: string, error: unknown, old: Envelope | null): Envelope {

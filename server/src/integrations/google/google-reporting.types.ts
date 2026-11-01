@@ -10,6 +10,22 @@ const metadataSchema = z.object({
   sampling: z.array(z.object({ samplesReadCount: z.string().regex(/^\d{1,30}$/), samplingSpaceSize: z.string().regex(/^\d{1,30}$/) }).strict()).max(5),
 }).strict();
 
+export const FACEBOOK_SESSION_SOURCE_PATTERN = "^(facebook|fb|([a-z0-9-]+\\.)*facebook\\.com)$";
+export const ga4FacebookVisitsReportDataSchema = z.object({
+  schemaVersion: z.literal("seo-spy.google-ga4-facebook-visits.v1"), provider: z.literal("google-analytics-data"),
+  propertyId: z.string().regex(/^[1-9]\d{0,19}$/), collectedAt: z.string().datetime(), availability,
+  hostname: z.string().min(1).max(253), sourceDimension: z.literal("sessionSource"),
+  attribution: z.literal("facebook-session-source-v1"), sourcePattern: z.literal(FACEBOOK_SESSION_SOURCE_PATTERN),
+  dateRange: z.object({ startDate: date, endDate: date, timeZone: z.string().min(1).max(100).nullable() }).strict(),
+  sessions: count, metadata: metadataSchema, limitations,
+}).strict().superRefine((value, context) => {
+  const { startDate, endDate } = value.dateRange;
+  const start = Date.parse(`${startDate}T00:00:00.000Z`), end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || new Date(start).toISOString().slice(0, 10) !== startDate ||
+      new Date(end).toISOString().slice(0, 10) !== endDate || end - start !== 29 * 86400000)
+    context.addIssue({ code: "custom", message: "Exactly 30 valid inclusive calendar dates are required." });
+});
+
 export const ga4ReportDataSchema = z.object({
   schemaVersion: z.literal("seo-spy.google-ga4.v1"), provider: z.literal("google-analytics-data"),
   propertyId: z.string().regex(/^[1-9]\d{0,19}$/), collectedAt: z.string().datetime(), availability,
@@ -42,5 +58,6 @@ export const searchConsoleReportDataSchema = z.object({
 });
 
 export type Ga4ReportData = z.infer<typeof ga4ReportDataSchema>;
+export type Ga4FacebookVisitsReportData = z.infer<typeof ga4FacebookVisitsReportDataSchema>;
 export type SearchConsoleReportData = z.infer<typeof searchConsoleReportDataSchema>;
 export type SearchConsoleMetrics = z.infer<typeof searchConsoleMetricsSchema>;

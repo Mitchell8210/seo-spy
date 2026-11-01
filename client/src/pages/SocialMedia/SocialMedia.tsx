@@ -43,7 +43,7 @@ export function SocialMedia() {
         <SocialScoreHero score={score === null ? null : { id: 'social-score', label: 'Social Media Score', value: score, maximum: 100, description: 'Saved social score.' }} summary={view.scoreSummary} benchmark={null} mode="live" scoreCaption={score === null ? undefined : scoreCaption(assessment, 'social')} />
         <section aria-labelledby="social-health-title">
           <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3"><h2 id="social-health-title" className="text-xl font-semibold tracking-tight text-ink">Social Media Health Summary</h2><span className="rounded-md border border-line bg-elevated px-3 py-1.5 text-xs font-medium text-secondary">{view.periodLabel} · Saved live data</span></div>
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">{view.healthMetrics.map(metric => <SocialHealthCard key={metric.id} metric={metric} />)}</div>
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{view.healthMetrics.map(metric => <SocialHealthCard key={metric.id} metric={metric} />)}</div>
         </section>
         <SocialMediaReport key={report.auditId} findings={view.findings} checks={[]} mode="live" evidenceLabel={view.evidenceLabel} />
       </div>}
