@@ -5,6 +5,6 @@ export const navigation = [
   { path: '/website', label: 'Website', icon: Globe },
   { path: '/social-media', label: 'Social Media', icon: Share2 },
   { path: '/analysis', label: 'Analysis', icon: ChartNoAxesCombined },
-  { path: '/recommendations', label: 'Recommendations', icon: ListChecks },
+  { path: '/recommendations', label: 'Smart Planner', icon: ListChecks },
   { path: '/settings', label: 'Connections & Settings', icon: Settings },
 ]
