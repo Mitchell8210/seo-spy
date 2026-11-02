@@ -9,7 +9,7 @@ import { WebsiteFindings } from '../../components/website/WebsiteFindings'
 import { mockBusiness } from '../../data/mockBusiness'
 import { useWebsiteReport } from '../../hooks/useWebsiteReport'
 import { useInvestigation } from '../../hooks/useInvestigation'
-import { mapWebsiteReport, measurementLabel } from '../../services/websiteMapping'
+import { mapWebsiteReport, measurementLabel, pageReportContext } from '../../services/websiteMapping'
 import type { ConnectedWebsite } from '../../types/website'
 import { scoreCaption } from '../../services/savedScore'
 
@@ -36,16 +36,17 @@ export function Website() {
   const active = investigation.audit?.status === 'queued' || investigation.audit?.status === 'running'
     ? investigation.audit : state.dashboard?.activeAudit
   const running = active?.mode === 'live' && (active.scope === 'homepage' || active.scope === 'lighthouse') ? active : null
-  const coverage = record?.results?.lighthouse
+  const pageContext = pageReportContext(record)
+  const coverage = pageContext?.coverage ?? (record?.results?.lighthouse
     ? `Saved homepage HTML audit plus ${measurementLabel(record.results.lighthouse)}. Lab results do not establish field Core Web Vitals or accessibility compliance.`
     : record ? 'Saved homepage HTML audit only. Lighthouse measurements and passed-check totals are not available.'
-      : 'No saved website analysis is available for this website.'
+      : 'No saved website analysis is available for this website.')
   const notice = [coverage, record?.audit.status === 'partial' ? 'Partial coverage.' : '',
-    ...(record?.audit.warnings ?? []), record?.audit.failure?.message ?? '',
+    ...(pageContext ? [] : record?.audit.warnings ?? []), record?.audit.failure?.message ?? '',
     running ? `Investigation ${running.status}: ${running.stage.replaceAll('_', ' ')}. Previous results remain visible.` : '',
     state.latestAttempt?.status === 'failed' ? 'The latest website investigation failed. Previous saved results remain visible when available.' : '',
     investigation.error?.message ?? '', state.error ?? ''].filter(Boolean).join(' ')
-  const evidenceLabel = record?.results?.lighthouse ? measurementLabel(record.results.lighthouse) : 'Saved live homepage HTML evidence · Collection source and time shown above'
+  const evidenceLabel = pageContext?.sourceLabel ?? (record?.results?.lighthouse ? measurementLabel(record.results.lighthouse) : 'Saved live homepage HTML evidence · Collection source and time shown above')
 
   return (
     <div className="space-y-8">

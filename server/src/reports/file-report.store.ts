@@ -173,7 +173,7 @@ function validRecord(value: unknown): value is AuditReportRecord {
       (key) => typeof b[key] === "string",
     ) ||
     !terminal(a.status) ||
-    !["demo", "homepage", "lighthouse", "facebook"].includes(String(a.scope)) ||
+    !["demo", "homepage", "lighthouse", "facebook", "wordpress-page"].includes(String(a.scope)) ||
     !["demo", "live"].includes(String(a.mode)) ||
     !["complete", "failed"].includes(String(a.stage)) ||
     !timestamp(a.createdAt) ||

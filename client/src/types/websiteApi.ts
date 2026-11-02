@@ -29,7 +29,7 @@ export interface WebsiteReport {
   auditId: string
   generatedAt: string
   business: Business
-  audit: AuditSummary
+  audit: Omit<AuditSummary, 'scope'> & { scope: AuditSummary['scope'] | 'wordpress-page' }
   results: {
     websiteAnalysis?: WebsiteAnalysis
     evidenceSummaries?: EvidenceSummaries

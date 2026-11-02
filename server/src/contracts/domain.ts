@@ -97,7 +97,7 @@ export interface Audit {
   report?: ReportFileReference;
   id: string;
   businessId: string;
-  scope: "demo" | "homepage" | "lighthouse" | "facebook";
+  scope: "demo" | "homepage" | "lighthouse" | "facebook" | "wordpress-page";
   strategy?: LighthouseStrategy;
   mode: "demo" | "live";
   status: AuditStatus;

@@ -23,6 +23,16 @@ export function measurementLabel(report: LighthouseReport) {
   return `Google Lighthouse ${report.lighthouseVersion} · ${report.strategy} lab · ${report.fetchedAt}`
 }
 
+/** Fill the existing scope/source slots from the saved page evidence itself. */
+export function pageReportContext(record: WebsiteReport | null) {
+  if (record?.audit.scope !== 'wordpress-page') return null
+  const evidence = record.results?.evidence.find(item => item.checkId === 'image-alt')
+  return {
+    coverage: record.audit.warnings.join(' ') || 'Not available',
+    sourceLabel: evidence ? `${evidence.sourceUrl} · ${evidence.collectedAt}` : 'Not available',
+  }
+}
+
 function category(checkId: string, report?: LighthouseReport): string {
   if (!checkId.startsWith('lighthouse:')) return htmlCategories[checkId] ?? checkId
   const id = checkId.slice('lighthouse:'.length)

@@ -29,10 +29,11 @@ function concise(value: string, limit = 280): string {
   return sentence || `${excerpt.slice(0, excerpt.lastIndexOf(" ") > 0 ? excerpt.lastIndexOf(" ") : excerpt.length)}…`;
 }
 
-function sourceLabel(evidence: Pick<Evidence, "checkId" | "collectedAt">[], results: AuditResults): string {
+function sourceLabel(evidence: (Pick<Evidence, "checkId" | "collectedAt"> & Partial<Pick<Evidence, "observed" | "sourceUrl">>)[], results: AuditResults): string {
   if (!evidence.length) return "Not available";
   const lighthouse = evidence.some((item) => item.checkId.startsWith("lighthouse:"));
-  const source = lighthouse ? `Lighthouse · ${results.lighthouse?.strategy ?? "lab"}` : "Homepage HTML";
+  const pageEvidence = evidence.find(item => item.observed?.wordpressMediaBinding);
+  const source = lighthouse ? `Lighthouse · ${results.lighthouse?.strategy ?? "lab"}` : pageEvidence ? `WordPress page HTML · ${pageEvidence.sourceUrl}` : "Homepage HTML";
   const timestamp = evidence[0]?.collectedAt;
   if (!timestamp || Number.isNaN(Date.parse(timestamp))) return source;
   return `${source} · ${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(timestamp))} UTC`;

@@ -114,7 +114,7 @@ export class AuditSummaryDto implements Omit<Audit, "results"> {
   report?: ReportFileReferenceDto;
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ example: "demo-guzman" }) businessId!: string;
-  @ApiProperty({ enum: ["demo", "homepage", "lighthouse", "facebook"] })
+  @ApiProperty({ enum: ["demo", "homepage", "lighthouse", "facebook", "wordpress-page"] })
   scope!: Audit["scope"];
   @ApiPropertyOptional({
     enum: ["mobile", "desktop"],

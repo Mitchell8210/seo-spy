@@ -93,7 +93,7 @@ export class WordPressService {
     const info = await this.info(businessId);
     const options = object(await this.client.request(connection, "OPTIONS", `/wp-json/wp/v2/media/${mediaId}`));
     const endpoints = Array.isArray(options.endpoints) ? options.endpoints.map(object) : [];
-    if (media.type !== "attachment" || media.media_type !== "image" || media.status !== "inherit" || page.status !== "publish" || object(page.content).protected !== false
+    if (media.type !== "attachment" || media.media_type !== "image" || media.status !== "inherit" || page.type !== (pageResource === "pages" ? "page" : "post") || page.status !== "publish" || object(page.content).protected !== false
       || !info.capabilities.upload_files || !info.capabilities.edit_posts
       || !endpoints.some(endpoint => Array.isArray(endpoint.methods) && endpoint.methods.includes("POST") && Object.hasOwn(object(endpoint.args), "alt_text")))
       throw new ConflictException({ code: "WORDPRESS_ALT_NOT_WRITABLE", message: "Exact image edit permission and supported alt_text update were not established." });
@@ -104,7 +104,14 @@ export class WordPressService {
       return url.href;
     };
     if (typeof media.modified_gmt !== "string" || typeof media.alt_text !== "string" || typeof object(page.content).rendered !== "string") throw new ConflictException("Exact image state unavailable.");
-    return { target: { mediaId, pageResource, pageId, sourceUrl: sameSite(media.source_url), pageUrl: sameSite(page.link), currentAlt: media.alt_text, modified: media.modified_gmt }, pageHtml: String(object(page.content).rendered) };
+    const sizes = Object.values(object(object(media.media_details).sizes));
+    if (sizes.length > 99) throw new ConflictException("Image size metadata exceeds the supported bound.");
+    const sourceUrl = sameSite(media.source_url);
+    const sourceUrls = [...new Set([sourceUrl, ...sizes.map(size => sameSite(object(size).source_url))])].sort();
+    return { target: { mediaId, pageResource, pageId, sourceUrl, pageUrl: sameSite(page.link), currentAlt: media.alt_text, modified: media.modified_gmt },
+      sourceUrls, mediaParentId: Number.isSafeInteger(media.post) ? Number(media.post) : null,
+      pageModified: typeof page.modified_gmt === "string" ? page.modified_gmt : null,
+      metadataCollectedAt: new Date().toISOString(), pageHtml: String(object(page.content).rendered) };
   }
   async rankMath(businessId: string, resource: "pages" | "posts", id?: number) {
     const connection = await this.connection(businessId);

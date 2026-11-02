@@ -112,6 +112,7 @@ describe("demo API", () => {
         "/api/wordpress/browser-session",
         "/api/wordpress/browser-tickets",
         "/api/wordpress/businesses/{businessId}/fix-operator/evidence",
+        "/api/wordpress/businesses/{businessId}/fix-operator/page-evidence",
         "/api/wordpress/businesses/{businessId}/fix-operator/preview",
         "/api/wordpress/businesses/{businessId}/fix-operator/generations",
         "/api/wordpress/businesses/{businessId}/fix-operator/estimates",

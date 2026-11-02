@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { FileReportStore } from "../../reports/file-report.store.js";
 import { MetaMuseProvider } from "../../integrations/ai/meta-muse.provider.js";
-import { verifyImageAlt } from "../../integrations/wordpress/verify-image-alt.js";
+import { matchMediaImages, observeImages } from "../../integrations/wordpress/image-evidence.js";
+import { pageMediaBindingSchema, pageSnapshot } from "./wordpress-page-evidence.service.js";
 import { WordPressService } from "./wordpress.service.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
 import { WordPressFixStore, fixDigest } from "./wordpress-fix.store.js";
@@ -40,9 +41,24 @@ export class WordPressFixService {
   private async current(record: AltEvidence, expected = record.target, allowAltMismatch = false) {
     const fresh = await this.wordpress.altTarget(record.businessId, expected.mediaId, expected.pageResource, expected.pageId);
     if (JSON.stringify(fresh.target) !== JSON.stringify(expected)) throw unavailable("The media or page binding changed; review fresh evidence before proceeding.");
-    const match = verifyImageAlt(fresh.pageHtml, { mediaId: expected.mediaId, sourceUrl: expected.sourceUrl, pageUrl: expected.pageUrl, expectedAlt: expected.currentAlt });
-    if (match.status === "inconclusive" || !allowAltMismatch && match.status !== "verified") throw unavailable("The page image cannot be matched unambiguously to the editable media and stored alternative.");
+    const match = matchMediaImages(observeImages(fresh.pageHtml), expected.pageUrl, [{ mediaId: expected.mediaId, sourceUrls: fresh.sourceUrls }], expected.mediaId);
+    if (match.status !== "matched" || !allowAltMismatch && match.matches.some(image => image.alt !== expected.currentAlt)) throw unavailable("The page image cannot be matched unambiguously to the editable media and stored alternative.");
+    if (!allowAltMismatch) {
+      const source = await this.source(record.businessId, record.source.reportId, record.source.findingId, record.source.evidenceId);
+      this.assertPageBinding(source, fresh, record.siteUrl);
+    }
     return fresh;
+  }
+  private assertPageBinding(source: Awaited<ReturnType<WordPressFixService["source"]>>, fresh: Awaited<ReturnType<WordPressService["altTarget"]>>, siteUrl: string) {
+    const raw = source.evidence.observed.wordpressMediaBinding;
+    if (source.report.audit.scope === "wordpress-page" && !raw) throw unavailable("Page-scoped evidence requires its exact immutable WordPress binding.");
+    if (!raw) return;
+    const binding = pageMediaBindingSchema.parse(JSON.parse(raw));
+    if (source.report.audit.scope !== "wordpress-page" || binding.businessId !== source.report.business.id || binding.siteUrl !== siteUrl
+      || binding.publicCollectedAt !== source.evidence.collectedAt || binding.target.pageUrl !== source.evidence.sourceUrl
+      || !Number.isFinite(Date.parse(binding.metadataCollectedAt)) || Math.abs(Date.parse(binding.metadataCollectedAt) - Date.parse(binding.publicCollectedAt)) > 120000
+      || fixDigest(pageSnapshot(fresh)) !== fixDigest({ target: binding.target, sourceUrls: binding.sourceUrls, mediaParentId: binding.mediaParentId, pageModified: binding.pageModified }))
+      throw unavailable("Saved WordPress media/page metadata no longer matches the current exact target. Explicitly recollect; historical evidence will not be rewritten.");
   }
   /** Private operator attests image purpose/content; browser preferences cannot create evidence. */
   async enroll(businessId: string, actor: string, input: unknown) {
@@ -50,10 +66,18 @@ export class WordPressFixService {
     const siteUrl = await this.wordpress.reportSite(businessId);
     const source = await this.source(businessId, body.reportId, body.findingId, body.evidenceId);
     const fresh = await this.wordpress.altTarget(businessId, body.mediaId, body.pageResource, body.pageId);
-    const images = z.array(z.object({ src: z.string().nullable(), alt: z.string().nullable() })).max(5000).parse(JSON.parse(source.evidence.observed.values ?? "null"));
-    const matching = images.filter(image => {
-      try { return !!image.src && new URL(image.src, source.evidence.sourceUrl).href === fresh.target.sourceUrl; } catch { return false; }
-    });
+    this.assertPageBinding(source, fresh, siteUrl);
+    const images = z.array(z.object({ src: z.string().nullable(), alt: z.string().nullable() }).passthrough()).max(5000).parse(JSON.parse(source.evidence.observed.values ?? "null"));
+    const matching = source.evidence.observed.wordpressMediaBinding
+      ? (() => {
+        const observations = z.array(z.object({ src: z.string().nullable(), alt: z.string().nullable(), attributes: z.record(z.string(), z.string()), attachmentIds: z.array(z.number().int()), pictureSources: z.array(z.record(z.string(), z.string())) }).strict()).max(5000).parse(images);
+        const result = matchMediaImages(observations, source.evidence.sourceUrl, [{ mediaId: body.mediaId, sourceUrls: fresh.sourceUrls }], body.mediaId);
+        if (result.status !== "matched") throw unavailable("Saved image variants or attachment identifiers are ambiguous.");
+        return result.matches;
+      })()
+      : images.filter(image => {
+        try { return !!image.src && new URL(image.src, source.evidence.sourceUrl).href === fresh.target.sourceUrl; } catch { return false; }
+      });
     if (!matching.length || matching.some(image => image.alt !== fresh.target.currentAlt)
       || new URL(source.evidence.sourceUrl).href !== fresh.target.pageUrl) throw unavailable("Saved finding does not establish this exact media source, page and before-value. Filename guesses are not accepted.");
     const record: AltEvidence = altEvidenceSchema.parse({ id: randomUUID(), kind: "evidence", businessId, actor, siteUrl, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 15 * 60000).toISOString(),

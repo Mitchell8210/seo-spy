@@ -1,6 +1,40 @@
 # Fix with AI — exact WordPress alt-text workflow
 
-Implemented offline on November 2, 2026. No real model request, new production AI authorization, live WordPress request/write, budget change, push or deployment was performed. Browser visual signoff remains blocked; do not call this a live demonstration result.
+The workflow was implemented offline on November 2, 2026. A later explicitly requested read-only page/media collection and purpose enrollment established the target below. Saved-source desktop/mobile modal replay now passes with disconnected transports. No live AI proposal or WordPress update has been performed by this work; this is not a completed live fix demonstration.
+
+## Exact page evidence and authoritative variants
+
+The original enrollment failed because homepage evidence belonged to a different page and compared only `img.src` to the original attachment URL. The public page uses a data placeholder, lazy sources and registered responsive variants. The legacy public verifier's dimension-suffix heuristic does **not** establish eligibility. New eligibility uses `image-evidence.ts`: bounded `src`, `srcset`, `data-src`, `data-lazy-src`, `data-original`, `data-srcset`, `data-lazy-srcset` and picture source observations, plus explicit `wp-image-ID`/`data-attachment-id`. An arbitrary widget `data-id`, class alone, filename similarity, URL prefix or guessed dimension suffix is insufficient. Every advertised non-placeholder candidate on a relevant image must belong to the exact authenticated media URL catalog. Conflicting IDs, cross-media URL collisions, malformed candidates, missing identity and unregistered sources reject. Duplicate registered URLs for one ID are allowed; repeated placements must agree on the current alt.
+
+`WordPressService.altTarget` reads authenticated media/page, account capabilities and `OPTIONS` support. Its registered source URLs come from `source_url` and `media_details.sizes.*.source_url`, bounded and checked against the connected HTTPS installation. Collection requires exact parent/page ID, published unprotected page, corroborated authenticated image markup and public markup, exact final page URL and stored/public alt equality. It repeats metadata reads after public collection and rejects changed target/source catalog/page modification state. No image pixels or JavaScript are fetched by this collection.
+
+Private route: `POST /api/wordpress/businesses/:businessId/fix-operator/page-evidence`, body `{confirmed:true,mediaId:5659,pageResource:"pages",pageId:5652}`. Existing Bearer/local Host/exact Origin protections apply. Unknown fields and URL overrides are rejected. It saves one `seo-spy.audit-report.v1` artifact with scope `wordpress-page`, empty scores, original `image-alt` review finding and recommendation. No new queued audit row/schema migration or assessment is created. `homepage-v1` remains only the existing unscored HTML compatibility marker; no scoring arithmetic or policy is changed. Saved report, evidence-summary and website-analysis endpoints read the archive without collection. The client loads it only by explicit saved report ID; default homepage/Lighthouse and Dashboard sources remain unchanged.
+
+`Evidence.observed` remains a string map. `values` is a JSON array of exact matched image observations (source attributes, alt including null-versus-empty, attachment IDs and picture sources). `wordpressMediaBinding` is JSON `wordpress-page-media-v1`: business/site, complete current target, registered URL catalog, media parent ID, page modification time, metadata/public collection timestamps, public HTML SHA-256 and matched rendered URLs. Report/evidence/finding IDs are immutable. Enrollment rejects absent page bindings, changed catalog/alt/modification/page/parent, cross-page/business values and public/metadata timestamp skew over two minutes, retaining the existing seven-day evidence and 15-minute context limits. Private purpose enrollment does not repair or silently recollect stale evidence.
+
+Explicit read-only CLI after build (existing private operator credential in the environment; no secret appears in arguments/output):
+
+```powershell
+node --env-file=.env scripts/collect-wordpress-page-evidence.mjs --confirmed --business-id=demo-guzman --media-id=5659 --page-id=5652 --page-resource=pages --output=new-reviewed-filename.json
+```
+
+Use a lowercase new output filename; existing artifacts are never overwritten. The CLI reuses the operator guard and collection services, blocks WordPress methods other than GET/OPTIONS, instantiates no AI provider/ledger, checks mock/writes-off defaults, and verifies that only one report artifact was added while every prior row and protected configuration/ledger fingerprint remained unchanged. Repeating collection must be deliberate; reads never initiate it automatically.
+
+Recorded real evidence, November 2 UTC:
+
+- Report `e739442b-185f-4b89-ae12-a8273bb6bdbc`; finding `5e02c565-e0ed-4ef2-9665-9a19bcfaaf64`; source evidence `ffb8a1dd-f142-4381-8f62-21744698c05c`.
+- Business `demo-guzman`; site `https://guzmantaxaccounting.com`; media5659; published parent page5652, `https://www.guzmantaxaccounting.com/bookkeeping-en-los-angeles-california/`.
+- Original image `/wp-content/uploads/2026/09/irs-carta.png`; public 1024/768/300/150 and original URLs exactly match the authoritative catalog. Current stored/public alt is empty; media modified `2026-09-25T02:41:39`, page modified `2026-11-02T17:09:54`. Public collection `2026-11-02T18:24:38.610Z`; metadata recheck `2026-11-02T18:25:01.918Z`.
+- User explicitly confirmed **informative: communicate the IRS-letter assistance message**. Existing enrollment context `cf7d394a-440d-4bd2-a5f5-33466fd7ccba` recorded bounded verified context, not proposed alt text. Context expires `2026-11-02T18:41:53.455Z`; expiry or remote state change requires fresh operator enrollment. It is not perpetual eligibility.
+- Exact page recommendation capability was true, writes disabled, no saved generation; original homepage recommendation remained false. Source archive and historical analyses/scores were preserved.
+
+The essential context is the branded Spanish graphic's IRS-letter assistance message, corroborated by inspected pixels and public page text. It is not a guaranteed accessibility defect, service outcome or AI-generated proposal. No thumbnail/vision capability was added: the unchanged modal displays the exact source-image link and existing truthful thumbnail-unavailable treatment.
+
+Saved-source replay through the actual modal, protected session and capability API passed at1440/390/320px, with inspected desktop/mobile screenshots, target/current alt/context/source references visible, no overflow and writes disabled. It copied the saved context into disposable SQLite with every provider transport disconnected; it did not exercise a live browser write or model. Artifacts: `reports/wordpress-page-media-5659-collection.json`, `reports/wordpress-page-media-5659-enrollment.json`, `reports/wordpress-page-source-browser-result.json`. Reproducible fixture: `scripts/serve-saved-page-review-fixture.mjs --offline-confirmed --report-file=PATH --enrollment-file=PATH`; it loads no live credentials/database and blocks generation, proposals and writes.
+
+Next gates: refresh an expired context through existing `fix-operator/evidence` using the exact source IDs and confirmed purpose; prepare exact Muse request/cost with `fix-operator/preview`; review existing-ledger capacity for this task (assessment testing cannot fund it); separately approve the exact hash/reservation before one inference. No allocation/counter change or live authorization was made here. After generation, edited text requires a fresh proposal hash and separate explicit WordPress approval, fresh before-state and one-use execution record. Independent stored/public verification and separately approved restoration remain required. Do not apply merely because capability is true.
+
+Delivery verification: backend `npm run check` passed72 suites,1559 tests and one existing skip, including typecheck/lint/build. The new matcher/page-evidence suites contain91 cases including authenticated HTTP collection and archive read contracts, purpose/ownership/freshness/conflict regressions and no-provider rejection paths. Frontend41 mapping/service tests, opportunity assertions, lint and TypeScript/production build passed. Browser replay checked1440px desktop,390px mobile and320px narrow widths; it created no generation, proposal or write. `reports/wordpress-page-evidence-check-delivery.log` is the final backend result; earlier check logs are preliminary checkpoints.
 
 ## Checkpoint and reused infrastructure
 
@@ -95,7 +129,7 @@ An Apply transport failure triggers at most one local saved-receipt GET, never a
 
 After confirmed stored success, **Prepare restoration** reads the same media afresh and requires both the approved changed alt value and the recorded post-write modification timestamp. It also rejects replaced media/page identities. A different value/timestamp blocks reversal even when an intervening editor restored the same string. It creates a separate proposal with `restorationOf`, new hash/expiry and exact original alt value; no model call or automatic rollback occurs. The user must separately review/approve/apply that reversal, then explicitly verify it. Original and restoration proposals/start/outcome/verification records remain immutable. Historical receipts without a trustworthy stored timestamp cannot be automatically restored through this adapter.
 
-## Guzman readiness — no eligible target established
+## Historical implementation checkpoint — no target established at that time
 
 - Binding: `demo-guzman`, `https://guzmantaxaccounting.com`.
 - Saved WordPress report: `12897672-5152-4f1c-b727-b72cd3cdfe9c`, October31 UTC,20 media items. For example media5659 (`carta del irs`) has saved alt `""`; this is **a candidate for inspection only**, not an approved or eligible target. Its title does not prove the pixels or purpose.

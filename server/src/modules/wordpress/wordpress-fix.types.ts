@@ -5,7 +5,7 @@ export const fixTargetSchema = z.object({ mediaId: z.number().int().positive(), 
   sourceUrl: z.string().url().max(2048), pageUrl: z.string().url().max(2048), currentAlt: z.string().max(2000), modified: z.string().min(1).max(100) }).strict();
 export const enrollAltSchema = z.object({ reportId: z.string().uuid(), findingId: z.string().min(1).max(160), evidenceId: z.string().uuid(),
   mediaId: z.number().int().positive(), pageResource: z.enum(["pages", "posts"]), pageId: z.number().int().positive(),
-  purpose: z.enum(["informative", "decorative", "unknown"]), verifiedDescription: z.string().trim().max(500),
+  purpose: z.enum(["informative", "functional", "decorative", "unknown"]), verifiedDescription: z.string().trim().max(500),
   confirmed: z.literal(true) }).strict();
 export const generateAltSchema = z.object({ evidenceId: z.string().uuid(), instructions: z.string().max(2000).default(""), intentId: z.string().uuid().optional() }).strict();
 export const altOutputSchema = z.object({ schemaVersion: z.literal("wordpress-alt-output-v1"), status: z.enum(["proposed", "insufficient_evidence"]),
@@ -14,7 +14,7 @@ export type AltOutput = z.infer<typeof altOutputSchema>;
 export const altEvidenceSchema = z.object({ id: z.string().uuid(), kind: z.literal("evidence"), businessId: z.string(), actor: fixHash, siteUrl: z.string().url(),
   createdAt: z.string().datetime(), expiresAt: z.string().datetime(), capability: z.literal(ALT_CAPABILITY),
   source: z.object({ reportId: z.string().uuid(), findingId: z.string(), evidenceId: z.string().uuid(), reportHash: fixHash }).strict(),
-  target: fixTargetSchema, purpose: z.enum(["informative", "decorative", "unknown"]), verifiedDescription: z.string().max(500),
+  target: fixTargetSchema, purpose: z.enum(["informative", "functional", "decorative", "unknown"]), verifiedDescription: z.string().max(500),
   descriptionProvenance: z.literal("operator-confirmed-text; no model visual inspection") }).strict();
 export type AltEvidence = z.infer<typeof altEvidenceSchema>;
 export const altInstructions = `Propose alt text for ONE backend-bound image; you cannot select or change a target or execute anything.

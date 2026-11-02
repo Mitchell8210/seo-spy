@@ -1,6 +1,6 @@
 import type { FixReviewRequest } from '../types/fixReview'
 export interface AltEvidence {
-  id: string; expiresAt: string; purpose: 'informative' | 'decorative' | 'unknown'; verifiedDescription: string; descriptionProvenance: string
+  id: string; expiresAt: string; purpose: 'informative' | 'functional' | 'decorative' | 'unknown'; verifiedDescription: string; descriptionProvenance: string
   target: { mediaId: number; pageResource: 'pages' | 'posts'; pageId: number; sourceUrl: string; pageUrl: string; currentAlt: string; modified: string }
 }
 export interface FixCapability { capability: string; fixable: boolean; reason: string; evidence: AltEvidence | null; writesEnabled: boolean; limitations: string[]; savedGeneration?: AltGeneration | null }

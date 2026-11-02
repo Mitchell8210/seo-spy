@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 import { z } from "zod";
 import { WordPressFixService } from "./wordpress-fix.service.js";
+import { WordPressPageEvidenceService, collectPageEvidenceSchema } from "./wordpress-page-evidence.service.js";
 import { WordPressOperatorGuard, operatorIdentity } from "./wordpress.guard.js";
 import { WordPressFixSessionGuard, WordPressFixSessions } from "./wordpress-fix-session.js";
 const exact = z.object({ confirmed: z.literal(true), proposalHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
@@ -49,8 +50,12 @@ export class WordPressFixController {
 }
 @Controller("wordpress/businesses/:businessId/fix-operator") @ApiTags("WordPress private fix operator") @UseGuards(WordPressOperatorGuard)
 export class WordPressFixOperatorController {
-  constructor(private readonly fixes: WordPressFixService) {}
+  constructor(private readonly fixes: WordPressFixService, private readonly pageEvidence: WordPressPageEvidenceService) {}
   private actor(req: Request) { return operatorIdentity(req.get("authorization")!.slice(7)); }
+  @Post("page-evidence") @ApiOperation({ summary: "Explicitly collect ONE registered published page/media target into a separate immutable unscored report; no inference or writes" })
+  collectPage(@Param("businessId") business: string, @Body() input: unknown) {
+    return this.pageEvidence.collect(business, parse(collectPageEvidenceSchema, input));
+  }
   @Post("evidence") @ApiOperation({ summary: "Explicitly confirm reliable image content/purpose and bind an exact saved finding to writable media" })
   async enroll(@Param("businessId") business: string, @Req() req: Request, @Body() input: unknown) {
     const { enrollAltSchema } = await import("./wordpress-fix.types.js"); return this.fixes.enroll(business, this.actor(req), parse(enrollAltSchema, input));
