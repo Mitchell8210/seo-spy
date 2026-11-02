@@ -286,14 +286,59 @@ try {
     mode = 'loaded'; facebookReport.results.facebook.pageName = 'Refreshed Fixture Facebook Page';
     await evaluate('window.dispatchEvent(new Event("focus"))');
     await waitFor(async () => (await categoryText('Social Media Performance')).includes('Refreshed Fixture Facebook Page'), 'Facebook refresh recovery');
-    for (let index = 1; index <= 3; index++) {
-      report.results.findings.push({ ...report.results.findings[0], id: `website-extra-${index}`, title: `Additional saved website issue ${index}` });
-      report.results.recommendations.push({ ...report.results.recommendations[0], id: `website-action-${index}`, findingId: `website-extra-${index}`, title: `Saved website action ${index}` });
+    for (let index = 1; index <= 6; index++) {
+      if (index <= 3) {
+        report.results.findings.push({ ...report.results.findings[0], id: `website-extra-${index}`, title: `Additional saved website issue ${index}` });
+        report.results.recommendations.push({ ...report.results.recommendations[0], id: `website-action-${index}`, findingId: `website-extra-${index}`, title: `Saved website action ${index}` });
+      }
+      facebookReport.results.findings.push({...facebookFinding,id:`facebook-extra-${index}`,title:`Additional saved Facebook issue ${index}`});
+      facebookReport.results.recommendations.push({...facebookReport.results.recommendations[0],id:`facebook-action-${index}`,findingId:`facebook-extra-${index}`,title:`Saved Facebook action ${index}`});
     }
-    await go();
-    await waitFor(async () => (await evaluate('document.querySelector("section[aria-labelledby=findings-title]").innerText')).includes('Additional saved website issue 3'), 'remaining saved opportunities');
-    assert.match(await evaluate('document.querySelector("section[aria-labelledby=recommendations-title]").innerText'), /Saved website action 3/);
-    assert.match(await evaluate('document.querySelector("section[aria-labelledby=findings-title]").innerText'), /Saved website report/);
+    report.results.findings.push({...report.results.findings[0],id:'resolved-extra',title:'Resolved issue must not return',status:'resolved'});
+    const opportunityRows = 'section[aria-labelledby="findings-title"] a';
+    const actionRows = 'section[aria-labelledby="recommendations-title"] a';
+    const expectedRows = [
+      {title:'Additional saved website issue 3',action:'Saved website action 3',findingId:'website-extra-3',href:`/website?businessId=${business.id}`},
+      {title:'Additional saved Facebook issue 3',action:'Saved Facebook action 3',findingId:'facebook-extra-3',href:`/social-media?businessId=${business.id}`},
+      {title:'Additional saved Facebook issue 4',action:'Saved Facebook action 4',findingId:'facebook-extra-4',href:`/social-media?businessId=${business.id}`},
+    ];
+    async function checkNextSteps() {
+      await waitFor(async () => (await evaluate('document.querySelector("section[aria-labelledby=findings-title]").innerText')).includes('5 opportunities'), 'full remaining count');
+      for (const [selector,key] of [[opportunityRows,'title'],[actionRows,'action']]) {
+        const rows = await evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(node=>({title:node.querySelector('h4').textContent,href:node.getAttribute('href'),cursor:getComputedStyle(node).cursor}))`);
+        assert.deepEqual(rows,expectedRows.map(row=>({title:row[key],href:row.href,cursor:'pointer'})),'Only the top three retain their order and source destinations');
+      }
+      assert.doesNotMatch(await evaluate('document.querySelector("section[aria-labelledby=next-steps-title]").innerText'),/Resolved issue must not return|Additional saved website issue [12]/);
+      assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll(${JSON.stringify(opportunityRows)})).map(node=>node.querySelector('h4').textContent)).size`),3);
+    }
+    await go(); await checkNextSteps();
+    for (const width of [320,390,768,1440]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<768});
+      await checkNextSteps();
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),true,`Next Steps overflow at ${width}`);
+    }
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+    for (const selector of [opportunityRows,actionRows]) {
+      for (let index=0; index<expectedRows.length; index++) {
+        await go(); await checkNextSteps();
+        // Activate each entire row through its semantic link, preserving finding context.
+        if (index===0) {
+          const point=await evaluate(`(() => {const row=document.querySelectorAll(${JSON.stringify(selector)})[${index}];row.scrollIntoView({block:'center'});const r=row.getBoundingClientRect();return {x:r.left+5,y:r.top+5};})()`);
+          await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});
+          await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});
+        } else {
+          await evaluate(`document.querySelectorAll(${JSON.stringify(selector)})[${index}].focus()`);
+          const key=index===1 ? 'Enter' : ' ';
+          await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key,code:key==='Enter'?'Enter':'Space',windowsVirtualKeyCode:key==='Enter'?13:32,text:key==='Enter'?'\r':' '});
+          await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key==='Enter'?'Enter':'Space',windowsVirtualKeyCode:key==='Enter'?13:32});
+        }
+        await waitFor(()=>evaluate(`location.pathname+location.search === ${JSON.stringify(expectedRows[index].href)}`),'row destination');
+        assert.equal(await evaluate('history.state.usr.findingId'),expectedRows[index].findingId,'Correct finding context preserved');
+      }
+    }
+    // Restore the original fixture for the existing empty/error/investigation scenarios.
+    report.results.findings.splice(1); report.results.recommendations.splice(1);
+    facebookReport.results.findings.splice(1); facebookReport.results.recommendations.splice(1);
     mode = 'empty'; await go(); await waitFor(async () => (await text()).includes('No saved website report is available.'), 'no live reports');
     assert.equal(await evaluate('document.querySelectorAll("#findings-title ~ div article").length'), 0);
     assert.equal(await evaluate('document.querySelector("section[aria-labelledby=spy-total-title] [role=img]").getAttribute("aria-label")'), 'Score: not available');
@@ -313,7 +358,7 @@ try {
     assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Refresh never submits duplicate jobs.');
     assert.ok(requests.every(item => !/google\/|muse|ai\//i.test(item.path)), 'Dashboard reads never call Google or AI endpoints.');
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ passed: ['both saved channels', 'business identity', 'no invented scores or comparisons', 'existing read-only recommendation previews', 'priority findings and linked remaining recommendations', 'preserved assessment and section order', 'failed attempts retain reports', 'refresh recovery', 'demo exclusion', 'business rejection', 'mobile overflow', 'investigation duplicate protection and fresh results', 'no AI or Google requests'], artifactDirectory: artifacts }, null, 2));
+    console.log(JSON.stringify({ passed: ['both saved channels', 'business identity', 'no invented scores or comparisons', 'existing read-only recommendation previews', 'priority findings and linked remaining recommendations', 'top-three lists preserve full count, order, exclusion, full-row destinations and mouse/Enter/Space navigation at four widths', 'preserved assessment and section order', 'failed attempts retain reports', 'refresh recovery', 'demo exclusion', 'business rejection', 'mobile overflow', 'investigation duplicate protection and fresh results', 'no AI or Google requests'], artifactDirectory: artifacts }, null, 2));
   } else if (savedTarget) {
     const list = await (await fetch(savedTarget + '/api/businesses/demo-guzman/reports')).json();
     const candidate = list.reports.find(item => item.mode === 'live' && ['homepage', 'lighthouse'].includes(item.scope) && ['completed', 'partial'].includes(item.status));

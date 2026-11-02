@@ -117,7 +117,7 @@ export function Dashboard() {
               <StatusBadge label={`${assessment.remaining.length} ${assessment.remaining.length === 1 ? 'opportunity' : 'opportunities'}`} theme="dark" />
             </div>
             <p className="mt-2 text-xs leading-5 text-secondary">Other improvements worth reviewing.</p>
-            <div className="mt-3 divide-y divide-line">{assessment.remaining.map(finding => <Link key={`${finding.category}:${finding.id}`} to={finding.destination} state={{ findingId: finding.id }} onClick={() => openConsistency(finding.category)} className="group relative block rounded-lg py-4 pr-6 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
+            <div className="mt-3 divide-y divide-line">{assessment.remaining.slice(0, 3).map(finding => <Link key={`${finding.category}:${finding.id}`} to={finding.destination} state={{ findingId: finding.id }} onClick={() => openConsistency(finding.category)} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); event.currentTarget.click() } }} className="group relative block cursor-pointer rounded-lg py-4 pr-6 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
               <div className="flex flex-wrap items-center gap-2"><StatusBadge label={finding.severity} tone={findingStatuses[finding.severity].tone} theme="dark" /><span className="text-xs font-medium text-secondary">{finding.source}</span></div>
               <h4 className="mt-2 text-sm font-semibold leading-6 text-ink">{opportunityTitle(finding.title, finding.explanation)}</h4>
               <p className="mt-1 text-sm leading-5 text-secondary">{finding.explanation}</p>
@@ -128,10 +128,10 @@ export function Dashboard() {
             <h3 id="recommendations-title" className="flex items-center gap-2 text-base font-semibold text-ink"><Target size={18} className="text-blue-300" aria-hidden="true" />Recommended Path</h3>
             <p className="mt-2 text-xs leading-5 text-secondary">A simple order for continuing your optimization.</p>
             <ol className="mt-3 divide-y divide-line">
-              {assessment.path.map((issue, index) => {
+              {assessment.path.slice(0, 3).map((issue, index) => {
                 const recommendation = issue.recommendation!
                 return (
-                <li key={`${issue.category}:${issue.id}`}><Link to={issue.destination} state={{ findingId: issue.id }} onClick={() => openConsistency(issue.category)} className="group flex min-h-11 items-start gap-3 rounded-lg py-4 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
+                <li key={`${issue.category}:${issue.id}`}><Link to={issue.destination} state={{ findingId: issue.id }} onClick={() => openConsistency(issue.category)} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); event.currentTarget.click() } }} className="group flex cursor-pointer min-h-11 items-start gap-3 rounded-lg py-4 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
                   <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full bg-elevated text-xs font-semibold text-blue-300">{index + 1}</span>
                   <div className="min-w-0">
                     <h4 className="text-sm font-semibold leading-6 text-ink">{recommendation.title}</h4>
