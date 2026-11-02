@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {estimateRevenue,analyticsTotals} from '../src/pages/Analysis/analysisRevenue.ts';
+import {mockAnalysis} from '../src/data/mockAnalysis.ts';
+const estimate=estimateRevenue(1000,'150','2');
+assert.equal(estimate.customers,20);assert.equal(estimate.revenue,3000);
+assert.deepEqual(estimate.scenarios.map(item=>({visitors:Math.round(item.visitors),revenue:Math.round(item.revenue),difference:Math.round(item.difference)})),[{visitors:1100,revenue:3300,difference:300},{visitors:1200,revenue:3600,difference:600}]);
+assert.equal(estimateRevenue(1000,'200','3').revenue,6000);
+assert.equal(estimateRevenue(1000,'150','0').revenue,0);
+assert.equal(estimateRevenue(0,'150','2').revenue,0);
+for(const args of [[null,'150','2'],[1000,'','2'],[1000,'150',''],[1000,'-1','2'],[1000,'0','2'],[1000,'150','-1'],[1000,'150','101'],[1000,'Infinity','2'],[NaN,'150','2'],[1000,'1e309','2']]) assert.equal(estimateRevenue(...args),null);
+const totals=analyticsTotals(mockAnalysis);
+assert.equal(totals.users,mockAnalysis.daily.reduce((sum,item)=>sum+item.users,0));
+assert.equal(totals.sessions,mockAnalysis.channels.reduce((sum,item)=>sum+item.value,0));
+assert.equal(totals.users,mockAnalysis.devices.reduce((sum,item)=>sum+item.value,0));
+assert.equal(totals.rate,totals.conversions/totals.users*100);
+assert.deepEqual(analyticsTotals({...mockAnalysis,source:'unavailable'}),{users:null,sessions:null,conversions:null,rate:null});
+console.log('PASS: calculator math/scenarios, editing assumptions, zero versus unavailable, empty/invalid input, and coherent labeled demo totals');

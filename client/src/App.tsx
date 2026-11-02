@@ -6,6 +6,7 @@ import { Dashboard } from './pages/Dashboard/Dashboard'
 import { Website } from './pages/Website/Website'
 import { SocialMedia } from './pages/SocialMedia/SocialMedia'
 import { SmartPlanner } from './pages/SmartPlanner/SmartPlanner'
+import { Analysis } from './pages/Analysis/Analysis'
 import { Settings } from './pages/Settings/Settings'
 
 const BackendLab = lazy(() => import('./pages/BackendLab/BackendLab'))
@@ -21,7 +22,7 @@ function App() {
           <Route
             key={path}
             path={path}
-            element={path === '/dashboard' ? <Dashboard /> : path === '/website' ? <Website /> : path === '/social-media' ? <SocialMedia /> : path === '/settings' ? <Settings /> : path === '/recommendations' ? <SmartPlanner /> : <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{label}</h1>}
+            element={path === '/dashboard' ? <Dashboard /> : path === '/website' ? <Website /> : path === '/social-media' ? <SocialMedia /> : path === '/settings' ? <Settings /> : path === '/recommendations' ? <SmartPlanner /> : path === '/analysis' ? <Analysis /> : <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{label}</h1>}
           />
         ))}
         <Route path="*" element={<h1 className="text-2xl font-semibold text-ink">Page not found</h1>} />
