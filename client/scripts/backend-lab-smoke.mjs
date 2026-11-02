@@ -12,6 +12,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
@@ -46,6 +47,20 @@ let plannerSocialResolved = false;
 let plannerFacebookFailure = false;
 let plannerFacebookDelayMs = 0;
 let plannerNewFinding = false;
+let plannerSaveFailure = false;
+let plannerReadFailure = false;
+let plannerSaveDelay = 0;
+let plannerConflict = false;
+let plannerFixtureState;
+const plannerReceipts = new Map();
+let plannerAutoSchedule;
+if (plannerMode) {
+  const v1Source = ts.transpileModule(await readFile(new URL('../../server/src/modules/smart-planner/planner-scheduler.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+  const v1Url = `data:text/javascript;base64,${Buffer.from(v1Source).toString('base64')}`;
+  const source = (await readFile(new URL('../../server/src/modules/smart-planner/planner-scheduler-v2.ts',import.meta.url),'utf8')).replace('"./planner-scheduler.js"',JSON.stringify(v1Url));
+  const js = ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+  plannerAutoSchedule = (await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)).schedulePlannerV2;
+}
 const stageDelayMs = 6500;
 
 function summary(id, { scope = 'lighthouse', mode = 'live', status = 'completed', stage = 'complete', failure = null } = {}) {
@@ -165,8 +180,54 @@ function plannerWebsiteSummaries(report) {
     findings:report.results.findings.map(item=>({id:item.id,evidenceIds:item.evidenceIds,text:item.explanation,sourceLabel:'Saved homepage fixture'}))};
 }
 
+function plannerFixtureResponse() {
+  if (!plannerFixtureState) plannerFixtureState = {businessId,revision:0,preferences:{useWeekends:false,dailyCapacityMinutes:120,maxTasksPerDay:3,horizonWeeks:4,timeZone:null},tasks:[
+    ...plannerWebsiteSeeds.map((item,index)=>({id:`00000000-0000-4000-8000-${String(index+100).padStart(12,'0')}`,taskKey:`website:${item.id}`,title:item.title,explanation:`Saved ${item.id} finding`,guidance:item.change,
+      priority:item.severity==='critical'?'Urgent':item.severity==='low'?'Low':'Medium',category:/hours|contact/.test(item.id)?'Admin':/image/.test(item.id)?'Content':'Search',source:'Website',mode:'saved',status:'Needs Action',schedule:null,destination:'/website',notes:null})),
+    {id:'00000000-0000-4000-8000-000000000200',taskKey:'social:facebook-fixture-finding',title:'Confirm the Facebook contact number',explanation:'Saved contact finding',guidance:'Confirm the correct phone number.',priority:'Medium',category:'Admin',source:'Facebook',mode:'saved',status:'Needs Action',schedule:null,destination:'/social-media',notes:null},
+  ]};
+  return {...plannerFixtureState,sources:[{channel:'website',availability:'available',reportIds:[plannerWebsiteAuditId]},{channel:'social',availability:plannerFacebookFailure?'failed':'available',reportIds:['facebook-fixture-audit']},{channel:'consistency',availability:'empty',reportIds:[]}]};
+}
+async function servePlannerFixture(req,res,route) {
+  if (plannerFacebookDelayMs) await delay(plannerFacebookDelayMs);
+  const state=plannerFixtureResponse();
+  if(req.method==='GET'&&plannerReadFailure)return reply(res,503,{error:{message:'Planner read temporarily unavailable. Use Re-scan to retry.'}});
+  if(req.method==='GET')return reply(res,200,state);
+  const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks).toString());
+  if(plannerSaveDelay)await delay(plannerSaveDelay);
+  if(plannerSaveFailure)return reply(res,503,{error:{message:'Planner save temporarily unavailable. Your changes were not saved.'}});
+  if(plannerReceipts.has(body.mutationId))return reply(res,200,plannerReceipts.get(body.mutationId));
+  if(plannerConflict){plannerConflict=false;plannerFixtureState.revision++;}
+  if(body.expectedRevision!==plannerFixtureState.revision)return reply(res,409,{error:{message:'Planner revision changed.'}});
+  let planning;
+  if(route.endsWith('/preferences')){
+    for(const key of ['useWeekends','dailyCapacityMinutes','maxTasksPerDay','horizonWeeks','timeZone'])if(key in body)plannerFixtureState.preferences[key]=body[key];
+    if(body.useWeekends===false)for(const task of plannerFixtureState.tasks)if(task.schedule&&[0,6].includes(new Date(`${task.schedule.day}T12:00:00`).getDay()))task.schedule=null;
+  } else if(route.endsWith('/auto-plan')){
+    if(!plannerFixtureState.preferences.timeZone)return reply(res,400,{error:{message:'Confirm a time zone in Planning settings first.'}});
+    const result=plannerAutoSchedule(plannerFixtureState.tasks,{weekStart:body.weekStart,...plannerFixtureState.preferences,now:new Date()});
+    for(const task of plannerFixtureState.tasks)if(result.assignments[task.id]){task.schedule=result.assignments[task.id];task.scheduledBy='auto';}
+    const {assignments,...metadata}=result;planning={...metadata,scheduledCount:Object.keys(assignments).length};
+  } else if(route.endsWith('/reconcile')){
+    // Saved reads must never reopen completed work.
+  } else if(req.method==='POST'&&route.endsWith('/tasks')){
+    const id=crypto.randomUUID();plannerFixtureState.tasks.push({id,taskKey:`custom:${id}`,title:body.title,priority:body.priority,category:body.category,notes:body.notes??'',explanation:body.notes??'',guidance:body.notes||'Complete your described task.',source:'Custom task',mode:'custom',status:'Needs Action',schedule:body.schedule??null,destination:null,estimatedDurationMinutes:body.estimatedDurationMinutes??60,durationEstimateSource:'estimatedDurationMinutes'in body?'user':'default',scheduledBy:body.schedule?'manual':null});
+  } else {
+    const task=plannerFixtureState.tasks.find(task=>route.endsWith(`/tasks/${task.id}`));
+    if(!task)return reply(res,404,{error:{message:'Task not found'}});
+    if('schedule'in body){task.schedule=body.schedule;task.scheduledBy=body.schedule?'manual':null;}if('estimatedDurationMinutes'in body){task.estimatedDurationMinutes=body.estimatedDurationMinutes;task.durationEstimateSource='user';}if(body.status){task.status=body.status;task.completedAt=stamp();}
+  }
+  plannerFixtureState.revision++;const result=structuredClone({...plannerFixtureResponse(),...(planning?{planning}:{})});plannerReceipts.set(body.mutationId,result);return reply(res,200,result);
+}
+
 async function serveFixture(req, res) {
   apiRequests++;
+  if(plannerMode&&req.url.startsWith(`/api/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
+  if(plannerMode&&req.method==='GET'&&req.url==='/api/businesses/planner-other-business/smart-planner')return reply(res,200,{
+    businessId:'planner-other-business',revision:0,preferences:{useWeekends:false,dailyCapacityMinutes:120,maxTasksPerDay:3,horizonWeeks:4,timeZone:null},
+    tasks:[{id:'00000000-0000-4000-8000-000000000300',taskKey:'custom:other-business',title:'Second business task only',explanation:'Isolated fixture',guidance:'Review only this business.',priority:'Low',category:'Review',source:'Custom task',mode:'custom',status:'Needs Action',schedule:null,destination:null,notes:''}],
+    sources:['website','social','consistency'].map(channel=>({channel,availability:'empty',reportIds:[]})),
+  });
   // Saved reports remain readable when the investigation service is unavailable.
   if (req.method === 'GET' && req.url === `/api/businesses/${businessId}/facebook-report`) {
     if (plannerFacebookDelayMs) await delay(plannerFacebookDelayMs);
@@ -490,289 +551,202 @@ async function dashboardScenario(base, backendBase) {
 
 async function plannerScenario(base) {
   await cdp.send('Network.enable');
-  const requestStart = browserRequests.length;
-  const readCount = () => browserRequests.slice(requestStart).filter(item => item.url.includes('/facebook-report')).length;
-  const kpi = label => evaluate(`document.querySelector('[data-kpi="${label}"]').textContent`);
-  async function pressEnter() {
-    await cdp.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});
-    await cdp.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-  }
-  async function setField(id, value) {
-    await evaluate(`(() => { const node = document.getElementById(${JSON.stringify(id)}); const proto = node.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(node, ${JSON.stringify(value)}); node.dispatchEvent(new Event(node.tagName === 'SELECT' ? 'change' : 'input', {bubbles:true})); })()`);
-  }
-  async function clickText(text, container = 'document') {
-    await evaluate(`Array.from(${container}.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(text)}).click()`);
-  }
-  async function fixTask(id, mode) {
-    await evaluate(`document.querySelector('[data-task-id="${id}"] button[aria-label^="${mode === 'ai' ? 'Fix with AI:' : 'Manual Fix:'}"]').click()`);
-    await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`), 'fix dialog');
-    assert.equal(await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).find(button => button.textContent.includes('Mark as Done')).disabled`),true,'Completion needs user confirmation');
-    await evaluate(`document.querySelector('dialog input[type="checkbox"]').click()`);
-    await clickText('Mark as Done', "document.querySelector('dialog')");
-    await waitFor(() => evaluate(`document.querySelector('[data-task-id="${id}"]').innerText.includes('Done')`), 'task Done');
-  }
-  async function dragTask(id, day, hour, fromCalendar = false) {
-    const selector = fromCalendar ? `[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]` : `[data-task-id="${id}"]`;
-    await evaluate(`(() => { window.plannerDragData = new DataTransfer(); document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.plannerDragData})); })()`);
-    await delay(40);
-    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.plannerDragData}))`);
-    await waitFor(() => evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dataset.dropActive === 'true'`),'active calendar drop highlight');
-    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:window.plannerDragData}))`);
-    await evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:window.plannerDragData}))`);
-    assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]').length`),1,'A task has one calendar block');
-    assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]').parentElement.dataset.calendarSlot`),`${day}:${hour}`);
-    assert.equal(await evaluate(`document.querySelectorAll('[data-drop-active="true"]').length`),0);
-  }
-  async function rescan() {
-    await waitFor(() => evaluate(`Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Re-scan' && !button.disabled)`),'Re-scan ready');
-    const reads = readCount(); await clickText('Re-scan');
-    await waitFor(() => readCount() > reads, 'saved findings refresh GET');
-    await waitFor(async () => (await pageText()).includes('Current saved findings refreshed.'), 'refresh completion');
-  }
+  const requestStart=browserRequests.length;
+  const storageKey=`seo-spy:planner:v1:${businessId}`;
+  const oldStorage=JSON.stringify({version:1,businessId,edits:{},completed:{},custom:[],useWeekends:true});
+  plannerFacebookDelayMs=800;
   await navigate(`${base}/recommendations`);
-  await waitFor(async () => (await pageText()).includes('Confirm the Facebook contact number'), 'shared saved Facebook planner source');
-  await waitFor(() => evaluate(`document.querySelectorAll('article[data-task-id]').length === ${plannerExpectedTasks.length}`),'all saved channel findings');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('article[data-task-id]')).map(node=>({id:node.dataset.taskId,title:node.querySelector('h3').textContent})).sort((a,b)=>a.id.localeCompare(b.id))`),[...plannerExpectedTasks].sort((a,b)=>a.id.localeCompare(b.id)));
-  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id^="consistency:"]').length`),0,'No unsupported demo consistency tasks');
-
-  assert.equal(await evaluate('document.querySelector("h1").textContent'),'Smart Planner');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
-  assert.doesNotMatch(await pageText(),/Pending Verification|How It Works|Google Calendar|Microsoft Outlook|Trello/);
-  assert.equal(await evaluate(`document.querySelector('dialog[open]') === null`),true);
-  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Plan Completion (This Week)'),'0%');
-  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false');
-  assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0])).size`),5);
-  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Fix with AI:"]').length`),plannerExpectedTasks.length);
-  assert.equal(await evaluate(`document.querySelectorAll('article[data-task-id] button[aria-label^="Manual Fix:"]').length`),plannerExpectedTasks.length);
-  pass('Smart Planner route, exact sidebar, six KPIs, shared sources, both fix actions, business-day defaults, and no prohibited sections');
-  const businessDays = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()`);
-  await dragTask('website:image-alt',businessDays[2],13);
-  await dragTask('website:image-alt',businessDays[3],14);
-  await dragTask('website:image-alt',businessDays[1],15,true);
-  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length));
-  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),1);
-  pass('Direct recommendation drops assign day/time, calendar moves reuse the same task, active status stays unchanged, and drop highlighting clears');
-  await clickText('Auto Plan (AI)');
-  await waitFor(() => evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === ${plannerExpectedTasks.length}`),'automatic planning');
-  await fixTask('website:image-alt','manual');
-  assert.equal(await kpi('Done'),'1'); assert.equal(await kpi('Plan Completion (This Week)'),`${Math.round(100 / plannerExpectedTasks.length)}%`);
-  assert.ok((await evaluate(`document.querySelector('[data-kpi="Done"]').parentElement.querySelector('span').className`)).includes('text-blue-300'));
-  assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').parentElement.querySelector('span').className`)).includes('text-indigo-300'));
-  assert.ok((await evaluate(`document.querySelector('[data-kpi="Plan Completion (This Week)"]').closest('article').querySelector('.h-full').className`)).includes('bg-indigo-400'));
-  assert.ok((await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').className`)).includes('text-blue-200'));
-  await fixTask('social:facebook-fixture-finding','ai');
-  assert.equal(await kpi('Done'),'2');
-  await rescan();
-  await waitFor(async () => await kpi('Done') === '0','unresolved findings reopen');
-  await fixTask('social:facebook-fixture-finding','manual');
-  plannerSocialResolved = true; await rescan();
-  assert.equal(await kpi('Done'),'1','A source-resolved task stays completed');
-  plannerSocialResolved = false; await rescan();
-  await waitFor(async () => await kpi('Done') === '0','returning source issue reopens');
-  pass('Manual/AI preview confirmation, derived completion, source refresh, unresolved reopen, and resolved completion retention');
-  await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Add Custom Task').focus()`);
-  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'keyboard custom task');
-  await setField('planner-task-name','Review local business notes');
-  await setField('planner-priority','Urgent');
-  await clickText('Add Task',"document.querySelector('dialog')");
-  await waitFor(async () => (await pageText()).includes('Review local business notes'),'custom task created');
-  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
-  for (const [priority,color] of [['Urgent','red'],['Medium','amber'],['Low','emerald']]) {
-    const badge = await evaluate(`(() => { const row = Array.from(document.querySelectorAll('[data-task-id]')).find(node => node.querySelector('div > span:last-child')?.textContent === '${priority}'); const badge = row.querySelector('div > span:first-child'); return {classes:badge.className,iconColor:getComputedStyle(badge.querySelector('svg')).color,badgeColor:getComputedStyle(badge).color}; })()`);
-    for (const token of [`border-${color}-400/40`,`bg-${color}-400/15`,`text-${color}-300`]) assert.ok(badge.classes.includes(token),`${priority} badge uses ${token}`);
-    assert.equal(badge.iconColor,badge.badgeColor,'Icon inherits the urgency color');
+  await waitFor(async()=>/Loading saved planner/.test(await pageText()),'planner loading feedback');
+  await screenshot('smart-planner-loading-1440.png');
+  await waitFor(()=>evaluate(`document.querySelectorAll('[data-task-id]').length === ${plannerExpectedTasks.length}`),'saved planner tasks');
+  plannerFacebookDelayMs=0;
+  await evaluate(`localStorage.setItem(${JSON.stringify(storageKey)},${JSON.stringify(oldStorage)});localStorage.setItem('planner-test-unrelated','keep')`);
+  const kpi=label=>evaluate(`document.querySelector('[data-kpi="${label}"]').textContent`);
+  const ready=()=>waitFor(()=>evaluate(`Array.from(document.querySelectorAll('button')).some(button=>button.textContent.trim()==='Re-scan'&&!button.disabled)`),'planner idle');
+  async function clickText(text,container='document') { await evaluate(`Array.from(${container}.querySelectorAll('button')).find(button=>button.textContent.trim()===${JSON.stringify(text)}).click()`); }
+  async function setField(id,value) { await evaluate(`(()=>{const node=document.getElementById(${JSON.stringify(id)});const proto=node.tagName==='SELECT'?HTMLSelectElement.prototype:node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`); }
+  const dialogClosed=()=>waitFor(()=>evaluate(`!document.querySelector('dialog[open]')`),'save acknowledged and dialog closed');
+  const openSchedule=async id=>{await evaluate(`(document.querySelector('[data-task-id="${id}"] button[aria-label^="Schedule or reschedule:"]')??document.querySelector('[data-calendar-task="${id}"]')).click()`);await waitFor(()=>evaluate(`Boolean(document.querySelector('dialog[open]'))`),'task details and schedule dialog');};
+  const reload=async()=>{await evaluate('window.plannerReloadPending=true');await cdp.send('Page.reload');await waitFor(()=>evaluate(`!window.plannerReloadPending&&document.querySelector('p[role="status"]')?.textContent.startsWith('Planner loaded from the backend.')`),'planner reload');await ready();for(let attempt=0;attempt<6;attempt++){const first=await evaluate(`document.querySelector('[data-calendar-slot]').dataset.calendarSlot.split(':')[0]`);if(first===days[0])break;await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);}};
+  assert.equal(await evaluate(`document.querySelector('h1').textContent`),'Smart Planner');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node=>node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length));assert.equal(await kpi('Done'),'0');
+  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false','Old localStorage is not imported');
+  assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node=>node.dataset.calendarSlot.split(':')[0])).size`),5);
+  assert.doesNotMatch(await pageText(),/Website & consistency: demo|Saved Facebook report|saved on this browser|Pending Verification|How It Works/);
+  pass('Existing route, navigation, six KPIs, saved source labels and weekdays preserved; legacy browser state is not imported');
+  await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);
+  await clickText('Planning settings');await waitFor(()=>evaluate(`Boolean(document.getElementById('planner-time-zone'))`),'planning settings');
+  assert.equal(await evaluate(`document.getElementById('planner-daily-budget').value`),'120');
+  await setField('planner-time-zone','UTC');await clickText('Save Settings',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(plannerFixtureState.preferences.timeZone,'UTC','Time zone is explicitly confirmed');
+  await clickText('Planning settings');await waitFor(()=>evaluate(`Boolean(document.getElementById('planner-time-zone'))`),'reopen planning settings');
+  await setField('planner-daily-budget','180');await setField('planner-daily-tasks','5');await setField('planner-horizon','6');await setField('planner-time-zone','America/Los_Angeles');
+  plannerSaveFailure=true;await clickText('Save Settings',"document.querySelector('dialog')");
+  await waitFor(()=>evaluate(`Boolean(document.querySelector('dialog [role="alert"]')?.textContent.includes('not saved'))`),'settings save failure');
+  assert.equal(await evaluate(`document.getElementById('planner-daily-budget').value`),'180','Failed settings save retains the edited budget');
+  plannerSaveFailure=false;await clickText('Save Settings',"document.querySelector('dialog')");await dialogClosed();
+  assert.deepEqual(plannerFixtureState.preferences,{useWeekends:false,dailyCapacityMinutes:180,maxTasksPerDay:5,horizonWeeks:6,timeZone:'America/Los_Angeles'});
+  await cdp.send('Page.reload');await waitFor(()=>evaluate(`document.querySelector('p[role="status"]')?.textContent.startsWith('Planner loaded from the backend.')`),'settings reload');await ready();
+  await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);
+  await clickText('Planning settings');await waitFor(()=>evaluate(`Boolean(document.getElementById('planner-time-zone'))`),'saved settings after reload');
+  assert.deepEqual(await evaluate(`['planner-daily-budget','planner-daily-tasks','planner-horizon','planner-time-zone'].map(id=>document.getElementById(id).value)`),['180','5','6','America/Los_Angeles']);
+  await setField('planner-daily-budget','120');await setField('planner-daily-tasks','3');await setField('planner-horizon','4');await setField('planner-time-zone','UTC');
+  await clickText('Save Settings',"document.querySelector('dialog')");await dialogClosed();
+  await openSchedule('website:image-alt');assert.equal(await evaluate(`document.getElementById('planner-day').value`),'','Unscheduled task edits do not preselect a date');
+  await setField('planner-duration','30');await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt').schedule,null,'A duration-only edit leaves the task unscheduled');
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),true);
+  const days=await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node=>node.dataset.calendarSlot.split(':')[0]))).sort()`);
+  async function drag(id,day,hour,fromCalendar=false) {
+    const selector=fromCalendar?`[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]`:`[data-task-id="${id}"]`;
+    await evaluate(`(()=>{window.plannerDragData=new DataTransfer();document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.plannerDragData}));})()`);
+    await delay(30);
+    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.plannerDragData}))`);
+    await evaluate(`document.querySelector('[data-calendar-slot="${day}:${hour}"]').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:window.plannerDragData}))`);
+    await waitFor(()=>evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]')?.parentElement.dataset.calendarSlot==='${day}:${hour}'`),'schedule persisted after drop');
+    assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task="${id}"]').length`),1);
+    await ready();
   }
-  pass('Urgent, Medium, and Low badges use matching icon, background, and border colors while preserving urgency pills');
-
-  const customId = await evaluate(`Array.from(document.querySelectorAll('[data-task-id]')).find(node => node.innerText.includes('Review local business notes')).dataset.taskId`);
-  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').focus()`);
-  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'keyboard scheduling');
-  const originalDay = await evaluate(`document.getElementById('planner-day').value`);
-  await setField('planner-hour','15'); await clickText('Save Schedule',"document.querySelector('dialog')");
-  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/15:00/);
-  const secondDay = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()[1]`);
-  await dragTask(customId,secondDay,14,true);
-  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/14:00/);
-  await clickText('Plan Manually'); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'manual planning alternative');
+  await drag('website:image-alt',days[2],13);await drag('website:image-alt',days[1],15,true);
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),false,'Scheduled tasks leave the left list');
+  await openSchedule('website:meta-description');await setField('planner-day',days[1]);await setField('planner-hour','15');await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
+  assert.notEqual(plannerFixtureState.tasks.find(task=>task.taskKey==='website:meta-description').durationEstimateSource,'user','Rescheduling without changing duration preserves its default provenance');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-slot="${days[1]}:15"] [data-calendar-task]').length`),2,'Manual overlap preserved');
+  await clickText('Auto Plan (AI)');await ready();
+  await waitFor(()=>evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === ${plannerExpectedTasks.length}`),'automatic planning');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),0,'The left list is empty when every task is planned');
+  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length),'Summary still includes scheduled tasks');
+  pass('Recommendation dragging, calendar moves, manual overlap and deterministic Auto Plan save through the backend');
+  await openSchedule('website:image-alt');
+  const imageTask=plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt');
+  const details=await evaluate(`document.querySelector('[aria-label="Task details"]').textContent`);
+  for(const value of [imageTask.title,imageTask.explanation,imageTask.guidance,imageTask.priority,imageTask.category,imageTask.status])assert.ok(details.includes(value),`Calendar dialog contains complete task field: ${value}`);
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Task details"] a').getAttribute('href')`),imageTask.destination);
+  await evaluate(`document.querySelector('dialog input[type="checkbox"]').click()`);
+  await setField('planner-task-choice','website:meta-description');
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Task details"] h3').textContent`),'Clarify your search summary','Changing the selected task updates its details');
+  assert.equal(await evaluate(`document.querySelector('dialog input[type="checkbox"]').checked`),false,'Completion confirmation resets when changing tasks');
+  await setField('planner-task-choice','website:image-alt');
+  assert.equal(await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).find(button=>button.textContent.includes('Mark as Done')).disabled`),true);
+  await evaluate(`document.querySelector('dialog input[type="checkbox"]').click()`);plannerSaveDelay=1000;
+  await clickText('Mark as Done',"document.querySelector('dialog')");assert.equal(await kpi('Done'),'0');assert.equal(await evaluate(`Boolean(document.querySelector('dialog[open]'))`),true,'Dialog waits for acknowledgement');
+  await screenshot('smart-planner-completion-saving-1440.png');
+  await dialogClosed();plannerSaveDelay=0;assert.equal(await kpi('Done'),'1');
+  const completedAt=plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt').completedAt;
+  await clickText('Re-scan');await ready();assert.equal(await kpi('Done'),'1');assert.equal(plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt').completedAt,completedAt);
+  await reload();assert.equal(await kpi('Done'),'1');
+  assert.equal(await kpi('Plan Completion (This Week)'),'0%','Current-week completion is not replaced by a future planning horizon');
+  pass('Completion requires confirmation and server acknowledgement; saved reconciliation and browser reload preserve Done and its original timestamp');
+  await clickText('Add Custom Task');await setField('planner-task-name','Review local business notes');await setField('planner-notes','Review the full appointment notes.\nKeep the follow-up instructions available from the calendar.');
+  plannerSaveFailure=true;await clickText('Add Task',"document.querySelector('dialog')");await waitFor(async()=>/not confirmed/.test(await pageText()),'save failure shown');
+  assert.doesNotMatch(await evaluate(`document.querySelector('p[role="status"]').textContent`),/Saving planner changes/,'A failed save must not leave stale saving feedback');
+  await screenshot('smart-planner-create-error-1440.png');
+  assert.equal(await evaluate(`Boolean(document.querySelector('dialog[open]'))`),true);assert.equal(await evaluate(`document.getElementById('planner-task-name').value`),'Review local business notes');
+  assert.equal(plannerFixtureState.tasks.filter(task=>task.mode==='custom').length,0);
+  plannerSaveFailure=false;await clickText('Add Task',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(plannerFixtureState.tasks.filter(task=>task.mode==='custom').length,1);
+  assert.equal(plannerFixtureState.tasks.find(task=>task.mode==='custom').durationEstimateSource,'default','Untouched custom duration keeps default provenance');
+  const customId=plannerFixtureState.tasks.find(task=>task.mode==='custom').taskKey;
+  await openSchedule(customId);
+  assert.ok((await evaluate(`document.querySelector('[aria-label="Task details"]').textContent`)).includes(plannerFixtureState.tasks.find(task=>task.taskKey===customId).notes),'Calendar task details include complete multiline custom notes');
+  await setField('planner-hour','14');plannerConflict=true;
+  await clickText('Save Schedule',"document.querySelector('dialog')");await waitFor(async()=>/conflicted with this action/.test(await pageText()),'conflict feedback');
+  assert.equal(await evaluate(`document.getElementById('planner-hour').value`),'14');assert.equal(await evaluate(`Boolean(document.querySelector('dialog[open]'))`),true);
+  await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(plannerFixtureState.tasks.find(task=>task.taskKey===customId).schedule.hour,14);
+  pass('Failed custom saves retain form entries; deliberate retry creates one task; revision conflicts preserve scheduling intent without automatic replay');
+  await evaluate(`document.querySelector('button[role="switch"]').click()`);await ready();
+  const saturday=await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node=>node.dataset.calendarSlot.split(':')[0]))).sort()[5]`);
+  await drag(customId,saturday,11,true);await evaluate(`document.querySelector('button[role="switch"]').click()`);await ready();
+  assert.equal(plannerFixtureState.tasks.find(task=>task.taskKey===customId).schedule,null);
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-task-id="${customId}"]'))`),true,'Unscheduling returns a task to the left list');
+  await openSchedule(customId);await setField('planner-day',saturday);await clickText('Save Schedule',"document.querySelector('dialog')");assert.match(await pageText(),/Enable Use Weekends before scheduling/);
   await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  const saturday = await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0]))).sort()[5]`);
-  assert.ok(saturday);
-  await dragTask(customId,saturday,11);
-  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').click()`);
-  await setField('planner-day',saturday); await clickText('Save Schedule',"document.querySelector('dialog')");
-  assert.ok((await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`)).includes(saturday));
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node => node.dataset.calendarSlot.split(':')[0])).size`),5);
-  assert.ok(!(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`)).includes(saturday));
-  await evaluate(`document.querySelector('[data-task-id="${customId}"] button[aria-label^="Schedule or reschedule:"]').click()`);
-  await setField('planner-day',saturday); await clickText('Save Schedule',"document.querySelector('dialog')");
-  assert.match(await pageText(),/Enable Use Weekends before scheduling/);
-  await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);
-  await clickText('Auto Plan (AI)');
-  const range = await elementText('planner-date-range');
-  await evaluate(`document.querySelector('button[aria-label="Next week"]').click()`);
-  assert.notEqual(await elementText('planner-date-range'),range);
-  await evaluate(`document.querySelector('button[aria-label="Previous week"]').click()`);
-  assert.equal(await elementText('planner-date-range'),range);
-  assert.ok(originalDay);
-  pass('Custom tasks, keyboard creation, manual scheduling, native drop handlers, week controls, and weekend restrictions without data loss');
-  async function setView(view) {
-    await evaluate(`(() => { const node = document.querySelector('select[aria-label="Calendar view"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(node,${JSON.stringify(view)}); node.dispatchEvent(new Event('change',{bubbles:true})); })()`);
-  }
-  async function monthDrop(id, day, fromCalendar = false, allowed = true) {
-    const source = fromCalendar ? `[data-testid="monthly-calendar"] [data-calendar-task="${id}"]` : `[data-task-id="${id}"]`;
-    const previous = await evaluate(`document.querySelector('[data-task-id="${id}"]').innerText`);
-    await evaluate(`(() => { window.plannerDragData = new DataTransfer(); document.querySelector(${JSON.stringify(source)}).dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.plannerDragData})); })()`);
-    await delay(40);
-    await evaluate(`document.querySelector('[data-month-day="${day}"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.plannerDragData}))`);
-    assert.equal(await evaluate(`document.querySelector('[data-month-day="${day}"]').dataset.dropActive === 'true'`),allowed);
-    await evaluate(`document.querySelector('[data-month-day="${day}"]').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:window.plannerDragData}))`);
-    if (allowed) {
-      assert.equal(await evaluate(`document.querySelectorAll('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').length`),1);
-      assert.equal(await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').parentElement.dataset.monthDay`),day);
-    } else assert.equal(await evaluate(`document.querySelector('[data-task-id="${id}"]').innerText`),previous);
-  }
-  assert.equal(await evaluate(`document.querySelector('select[aria-label="Calendar view"]').value`),'weekly');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelector('select[aria-label="Calendar view"]').options).map(option=>option.textContent)`),['Weekly View','Monthly View']);
-  await setView('monthly');
-  const monthInfo = await evaluate(`(() => { const nodes = Array.from(document.querySelectorAll('[data-month-day]')); const inside=nodes.filter(node=>node.dataset.inMonth === 'true').map(node=>node.dataset.monthDay); const [year,month]=inside[0].split('-').map(Number); return {count:nodes.length,inside,expected:new Date(year,month,0).getDate(),start:new Date(nodes[0].dataset.monthDay+'T12:00:00').getDay(),end:new Date(nodes.at(-1).dataset.monthDay+'T12:00:00').getDay()}; })()`);
-  assert.equal(monthInfo.count % 7,0); assert.equal(monthInfo.inside.length,monthInfo.expected); assert.equal(new Set(monthInfo.inside).size,monthInfo.expected); assert.equal(monthInfo.start,1); assert.equal(monthInfo.end,0);
-  for (const [id,color] of [['website:image-alt','amber'],['website:meta-description','emerald'],[customId,'red']]) {
-    assert.ok((await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${id}"]').className`)).includes(`text-${color}-300`));
-  }
-  await monthDrop('website:image-alt',businessDays[2]);
-  assert.match(await evaluate(`document.querySelector('[data-task-id="website:image-alt"]').innerText`),/15:00/);
-  await monthDrop('website:image-alt',businessDays[3],true);
-  const weekend = await evaluate(`document.querySelector('[data-month-day][data-in-month="true"][data-drop-disabled="true"]').dataset.monthDay`);
-  await monthDrop('website:image-alt',weekend,false,false);
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  await monthDrop('website:image-alt',weekend);
-  await monthDrop('website:image-alt',businessDays[2],true);
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  assert.equal(await kpi('Done'),'0'); assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length + 1));
-  await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="website:image-alt"]').focus()`);
-  await pressEnter(); await waitFor(() => evaluate(`Boolean(document.querySelector('dialog[open]'))`),'monthly keyboard editing');
-  assert.equal(await evaluate(`document.getElementById('planner-day').value`),businessDays[2]);
-  await setField('planner-hour','16'); await clickText('Save Schedule',"document.querySelector('dialog')");
+  await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'closed schedule dialog unmounted');
+  await openSchedule(customId);await clickText('Unschedule',"document.querySelector('dialog')");await dialogClosed();
+  pass('Weekend preference persists, disabling weekends clears assignments atomically, and unscheduling retains the custom task');
+  plannerFacebookFailure=true;await clickText('Re-scan');await ready();assert.doesNotMatch(await pageText(),/Some saved sources are not ready/);assert.equal(await kpi('Done'),'1');
+  await screenshot('smart-planner-source-error-1440.png');
+  plannerFacebookFailure=false;await clickText('Re-scan');await ready();await reload();assert.equal(await kpi('Done'),'1');
+  plannerReadFailure=true;await cdp.send('Page.reload');
+  await waitFor(async()=>/Planner read temporarily unavailable/.test(await pageText()),'initial planner read failure');
+  assert.doesNotMatch(await evaluate(`document.querySelector('p[role="status"]').textContent`),/Loading saved planner/,'A failed read must not leave stale loading feedback');
+  await screenshot('smart-planner-load-error-1440.png');
+  plannerReadFailure=false;await clickText('Re-scan');await ready();
+  assert.equal(await kpi('Done'),'1','Retry after a failed initial read restores persisted completion');
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(storageKey)})`),oldStorage);assert.equal(await evaluate(`localStorage.getItem('planner-test-unrelated')`),'keep');
+  const storageFailure=await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('Storage blocked','SecurityError')}})`});
+  await reload();await drag('website:meta-description',days[2],10,true);await cdp.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:storageFailure.identifier});
+  pass('Failed saved sources retain completion and assignments; original localStorage stays untouched and blocked storage does not affect backend persistence');
+  async function setView(view){await evaluate(`(()=>{const node=document.querySelector('select[aria-label="Calendar view"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(node,${JSON.stringify(view)});node.dispatchEvent(new Event('change',{bubbles:true}));})()`);}
+  await setView('monthly');const month=await elementText('planner-date-range');await evaluate(`document.querySelector('[aria-label="Next month"]').click()`);assert.notEqual(await elementText('planner-date-range'),month);await evaluate(`document.querySelector('[aria-label="Previous month"]').click()`);assert.equal(await elementText('planner-date-range'),month);
   await setView('weekly');
-  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:16`);
-  await dragTask('website:image-alt',businessDays[1],14,true);
-  await setView('monthly');
-  assert.equal(await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="website:image-alt"]').parentElement.dataset.monthDay`),businessDays[1]);
-  const monthLabel = await elementText('planner-date-range');
-  await evaluate(`document.querySelector('[aria-label="Next month"]').click()`);
-  assert.notEqual(await elementText('planner-date-range'),monthLabel);
-  await evaluate(`document.querySelector('[aria-label="Previous month"]').click()`);
-  assert.equal(await elementText('planner-date-range'),monthLabel);
-  await fixTask(customId,'manual');
-  assert.ok((await evaluate(`document.querySelector('[data-testid="monthly-calendar"] [data-calendar-task="${customId}"]').className`)).includes('text-blue-200'));
-  pass('Full monthly grid, urgency/completion colors, shared weekly/monthly state, date moves without duplicates, weekend rejection/enablement, and keyboard editing');
-  await setView('weekly');
-  for (const width of [1440,768,390,320]) {
+  for(let attempt=0;attempt<6;attempt++){const first=await evaluate(`document.querySelector('[data-calendar-slot]').dataset.calendarSlot.split(':')[0]`);if(first===days[0])break;await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);}
+  for(const width of [1440,768,390,320]){
     await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<768});
-    await evaluate('window.scrollTo(0,0)'); await delay(150);
-    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),true,`Planner has no overflow at ${width}`);
-    assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-testid="${width<768 ? 'mobile-day-grid' : 'desktop-week-grid'}"]')).display !== 'none'`),true);
-    await screenshot(`smart-planner-${width}.png`);
-    await setView('monthly');
-    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'),true,`Monthly planner has no page overflow at ${width}`);
-    assert.equal(await evaluate(`document.querySelectorAll('[data-month-day]').length % 7`),0);
-    await screenshot(`smart-planner-monthly-${width}.png`);
-    await setView('weekly');
+    for(const view of ['weekly','monthly']){
+      await setView(view);await evaluate('window.scrollTo(0,0)');await delay(100);
+      assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,`${view} no page overflow at ${width}`);
+      if(view==='weekly')assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-testid="${width<768?'mobile-day-grid':'desktop-week-grid'}"]')).display!=='none'`),true);
+      else assert.equal(await evaluate(`document.querySelectorAll('[data-month-day]').length%7`),0);
+      await screenshot(`smart-planner-${view}-${width}.png`);
+    }
   }
-  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
-  const storageKey = `seo-spy:planner:v1:${businessId}`;
-  const savedState = () => evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(storageKey)}))`);
-  async function awaitSource() {
-    await waitFor(() => evaluate(`Boolean(document.querySelector('[data-task-id="social:facebook-fixture-finding"]')) && Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Re-scan' && !button.disabled) && !document.querySelector('[role="alert"]')`),'saved Facebook source ready');
+  for(const width of [1440,390,320]){
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<768});
+    await clickText('Add Custom Task');await waitFor(()=>evaluate(`Boolean(document.querySelector('dialog[open]'))`),'custom creation dialog');
+    await screenshot(`smart-planner-create-dialog-${width}.png`);
+    await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'creation dialog unmounted');
+    await openSchedule(customId);await screenshot(`smart-planner-schedule-dialog-${width}.png`);
+    await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'schedule dialog unmounted');
+    await openSchedule('website:meta-description');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Task details"] h3').textContent`),'Clarify your search summary');
+    assert.ok((await evaluate(`document.querySelector('[aria-label="Task details"]').textContent`)).includes(plannerWebsiteSeeds[1].change),'Full guidance remains readable from calendar tasks at every width');
+    await screenshot(`smart-planner-guidance-dialog-${width}.png`);
+    await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'guidance dialog unmounted');
   }
-  async function visitDashboardAndReturn() {
-    await evaluate(`document.querySelector('#primary-navigation a[href="/dashboard"]').click()`);
-    await waitFor(() => evaluate(`location.pathname === '/dashboard' && document.querySelector('h1')?.textContent === 'Dashboard'`),'Dashboard navigation and Planner unmount');
-    await evaluate(`document.querySelector('#primary-navigation a[href="/recommendations"]').click()`);
-    await waitFor(() => evaluate(`location.pathname === '/recommendations' && Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),'Planner remount');
-    await awaitSource();
-  }
-  async function reloadPlanner() {
-    await evaluate(`window.plannerReloadPending = true`);
-    await cdp.send('Page.reload');
-    await waitFor(() => evaluate(`!window.plannerReloadPending && Boolean(document.querySelector('[data-task-id="website:image-alt"]'))`),'Planner document reload');
-  }
-  // Monthly navigation selected a different week; remount restores the normal current-week cursor.
-  await visitDashboardAndReturn();
-  await dragTask('website:image-alt',businessDays[2],10);
-  await waitFor(async () => (await savedState()).edits['website:image-alt']?.schedule.hour === 10,'schedule persisted');
-  await visitDashboardAndReturn();
-  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:10`);
-  await reloadPlanner(); await awaitSource();
-  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:10`);
-  await dragTask('website:image-alt',businessDays[3],13,true);
-  await waitFor(async () => (await savedState()).edits['website:image-alt']?.schedule.hour === 13,'moved schedule persisted');
-  await reloadPlanner(); await awaitSource();
-  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').length`),1);
-  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="website:image-alt"]').parentElement.dataset.calendarSlot`),`${businessDays[3]}:13`);
-  await fixTask('website:image-alt','manual');
-  await visitDashboardAndReturn();
-  assert.match(await evaluate(`document.querySelector('[data-task-id="website:image-alt"]').innerText`),/Done/);
-  await reloadPlanner(); await awaitSource();
-  assert.equal((await savedState()).completed['website:image-alt'].status,'Done');
-  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id="${customId}"]').length`),1);
-  assert.match(await evaluate(`document.querySelector('[data-task-id="${customId}"]').innerText`),/Done/);
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  await visitDashboardAndReturn();
-  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'true');
-  await reloadPlanner(); await awaitSource();
-  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'true');
-  await evaluate(`document.querySelector('button[role="switch"]').click()`);
-  await visitDashboardAndReturn();
-  assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false');
-  pass('Schedules, moves without duplication, custom tasks, Done, and both weekend preferences survive navigation and browser reload');
-  await dragTask('social:facebook-fixture-finding',businessDays[2],11);
-  await waitFor(async () => (await savedState()).edits['social:facebook-fixture-finding']?.schedule.hour === 11,'Facebook assignment persisted');
-  plannerFacebookDelayMs = 600;
-  await reloadPlanner();
-  assert.equal((await savedState()).edits['social:facebook-fixture-finding'].schedule.hour,11,'Loading must retain saved Facebook assignments');
-  await awaitSource(); plannerFacebookDelayMs = 0;
-  plannerFacebookFailure = true;
-  await reloadPlanner();
-  await waitFor(async () => (await pageText()).includes('Saved Facebook findings could not be refreshed.'),'Facebook failure feedback');
-  assert.equal((await savedState()).edits['social:facebook-fixture-finding'].schedule.hour,11,'Failure must retain saved Facebook assignments');
-  plannerFacebookFailure = false;
-  await reloadPlanner(); await awaitSource();
-  assert.equal(await evaluate(`document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="social:facebook-fixture-finding"]').parentElement.dataset.calendarSlot`),`${businessDays[2]}:11`);
-  plannerNewFinding = true; await rescan();
-  await waitFor(() => evaluate(`Boolean(document.querySelector('[data-task-id="social:planner-new-finding"]'))`),'new source finding');
-  assert.match(await evaluate(`document.querySelector('[data-task-id="social:planner-new-finding"]').innerText`),/Schedule task/);
-  assert.equal(await evaluate(`document.querySelectorAll('[data-calendar-task="social:planner-new-finding"]').length`),0);
-  plannerSocialResolved = true; await rescan();
-  await waitFor(() => evaluate(`!document.querySelector('[data-task-id="social:facebook-fixture-finding"]')`),'stale active finding removed');
-  await waitFor(async () => !(await savedState()).edits['social:facebook-fixture-finding'],'stale source association pruned');
-  await reloadPlanner();
-  await waitFor(() => evaluate(`Boolean(document.querySelector('button[role="switch"]')) && !document.querySelector('button[role="switch"]').disabled`),'Planner loaded');
-  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id="social:facebook-fixture-finding"]').length`),0);
-  plannerSocialResolved = false; plannerNewFinding = false; await rescan(); await awaitSource();
-  assert.match(await evaluate(`document.querySelector('[data-task-id="social:facebook-fixture-finding"]').innerText`),/Schedule task/,'Pruned assignments do not resurrect with a returning finding');
-  pass('Facebook assignments survive loading/failure; new findings start unscheduled and successfully removed findings cannot resurrect stale assignments');
-  // Corrupt only this planner entry; unrelated storage must survive.
-  await evaluate(`localStorage.setItem('planner-test-unrelated','keep'); localStorage.setItem(${JSON.stringify(storageKey)},'{invalid json')`);
-  await reloadPlanner(); await awaitSource();
-  assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length)); assert.equal(await kpi('Done'),'0');
-  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),0);
-  assert.equal(await evaluate(`localStorage.getItem('planner-test-unrelated')`),'keep');
-  const storageFailureScript = await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('Storage blocked','SecurityError')}})`});
-  await reloadPlanner(); await awaitSource();
-  await dragTask('website:image-alt',businessDays[2],10);
-  await clickText('Auto Plan (AI)');
-  assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length`),plannerExpectedTasks.length);
-  await cdp.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:storageFailureScript.identifier});
-  pass('Malformed planner storage resets safely without touching other keys; denied storage leaves scheduling and Auto Plan usable in memory');
-  assert.equal(browserRequests.slice(requestStart).filter(request=>request.method==='POST').length,0,'Planner actions must not write externally or start provider scans');
+  pass('Creation, scheduling and guidance dialogs render at desktop and two mobile widths; save and error states use existing UI locations');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:true});
+  await openSchedule(customId);plannerFacebookDelayMs=700;
+  await clickText('Re-scan');
+  await evaluate(`history.pushState({},'', '/recommendations?businessId=planner-other-business');window.dispatchEvent(new PopStateEvent('popstate'));`);
+  await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-task-id="custom:other-business"]'))`),'second business planner loaded');
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),1);
+  assert.equal(await evaluate(`Boolean(document.querySelector('dialog'))`),false,'Previous business dialog does not leak');
+  await delay(850);plannerFacebookDelayMs=0;
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),1,'Delayed original business response cannot replace current tasks');
+  assert.doesNotMatch(await pageText(),/Review local business notes|Confirm the Facebook contact number/);
+  await screenshot('smart-planner-business-switch-390.png');
+  await evaluate(`history.pushState({},'', '/recommendations?businessId=demo-guzman');window.dispatchEvent(new PopStateEvent('popstate'));`);
+  await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-calendar-task="website:image-alt"]'))`),'original business planner restored');await ready();
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-task-id="custom:other-business"]'))`),false);
+  pass('Business switching hides previous dialogs and tasks and ignores a delayed response from the prior business');
+  if(await evaluate(`Boolean(document.querySelector('dialog'))`)){await evaluate(`document.querySelector('button[aria-label="Close planner dialog"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'restored business dialog closed');}
+  const rolloverTasks=Array.from({length:12},(_,index)=>({id:crypto.randomUUID(),taskKey:`custom:rollover-${index}`,title:`Future workload ${index+1}`,explanation:'Offline duration fixture',guidance:'Review the saved task.',priority:'Medium',category:'Review',source:'Custom task',mode:'custom',status:'Needs Action',schedule:null,destination:null,notes:'',estimatedDurationMinutes:60,durationEstimateSource:'user'}));
+  const oversized={...rolloverTasks[0],id:crypto.randomUUID(),taskKey:'custom:oversized',title:'Task larger than daily budget',estimatedDurationMinutes:240};
+  plannerFixtureState.tasks.push(...rolloverTasks,oversized);plannerFixtureState.revision++;await reload();
+  await clickText('Auto Plan (AI)');await ready();
+  await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-task-id="custom:oversized"]'))`),'duration overflow remains visible');
+  assert.ok(rolloverTasks.every(task=>plannerFixtureState.tasks.find(item=>item.id===task.id).schedule),'Feasible tasks are assigned through the horizon');
+  const nextWeek=new Date(`${days[0]}T12:00:00`);nextWeek.setDate(nextWeek.getDate()+7);const nextWeekKey=`${nextWeek.getFullYear()}-${String(nextWeek.getMonth()+1).padStart(2,'0')}-${String(nextWeek.getDate()).padStart(2,'0')}`;
+  assert.ok(rolloverTasks.some(task=>plannerFixtureState.tasks.find(item=>item.id===task.id).schedule.day>=nextWeekKey),'Workload carries into later weeks');
+  assert.match(await pageText(),/duration exceeds the daily budget/);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),1,'Only unscheduled overflow remains on the left');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});await setView('monthly');await screenshot('smart-planner-multiweek-1440.png');
+  await openSchedule(customId);await setField('planner-day',days[0]);await setField('planner-hour','9.5');await setField('planner-duration','90');await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
+  const adjusted=plannerFixtureState.tasks.find(task=>task.taskKey===customId);assert.equal(adjusted.schedule.minute,30);assert.equal(adjusted.estimatedDurationMinutes,90);
+  await setView('weekly');const interval=await evaluate(`(()=>{const button=document.querySelector('[data-testid="desktop-week-grid"] [data-calendar-task="${customId}"]');return {label:button.getAttribute('aria-label'),top:button.parentElement.style.top,height:button.parentElement.style.height}})()`);
+  assert.match(interval.label,/09:30–11:00/);assert.equal(interval.top,'42px');assert.equal(interval.height,'116px');
+  await screenshot('smart-planner-duration-1440.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:true});await screenshot('smart-planner-duration-390.png');
+  await clickText('Planning settings');await screenshot('smart-planner-settings-390.png');await evaluate(`document.querySelector('[aria-label="Close planning settings"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'settings dialog closed');
+  pass('Planning settings persist confirmed time zone and workload limits; duration-aware Auto Plan rolls forward, leaves oversized work visible, and renders exact half-hour intervals');
+  const writes=browserRequests.slice(requestStart).filter(request=>request.method!=='GET');assert.ok(writes.length>0);assert.ok(writes.every(request=>request.url.includes('/smart-planner/')),'Only planner persistence writes are allowed');
   assert.deepEqual(browserErrors,[]);
-  pass('Four responsive widths, selected-day mobile layout, no runtime errors, and no external write/AI calls');
+  pass('Weekly/monthly calendars retain responsive behavior at four widths with no runtime errors or provider/AI/fix requests');
   console.log(JSON.stringify({passed:results.length,scenarios:results,artifactDirectory:artifactDir},null,2));
 }
-
 async function settingsScenario(base) {
   await cdp.send('Network.enable');
   const requestStart = browserRequests.length;

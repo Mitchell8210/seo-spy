@@ -1,14 +1,16 @@
 import { Injectable, type OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, writeFileSync, fsyncSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, writeFileSync, fsyncSync, readFileSync, copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { dirname, resolve, join, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { activateTesting, testingExists, testingAllocation, testingIntent, testingStatus, testingMetadataSchema, verifyTestingBudget, saveTestingReceipt, readTestingReceipts, testingFail } from "./muse-testing-ledger.js";
 import { MUSE_HELLO_HASH, MUSE_HELLO_SCOPE, MUSE_HELLO_V1_HASH, MUSE_HELLO_V1_SCOPE, prepareMuseHello, MUSE_MINIMAL_HELLO_HASH, MUSE_MINIMAL_HELLO_SCOPE, prepareMinimalMuseHello } from "./muse-hello-request.js";
 import { AiUsageError, type AiDemoAuthorization, type AiUsageAuthorization, type AiUsageEstimateInput, type AiUsageIntent, type AiUsageLimits, type AiUsageReservation, type AiUsageSettlement, type AiUsageSummary } from "./ai-usage.types.js";
+import { prepareWordPressAltFunding, activateWordPressAltFunding, wordPressAltFunding, wordPressAltIntent, wordPressAltStatus, validateWordPressAltEstimate, linkWordPressAltIntent, verifyWordPressAltBudget, saveWordPressAltReceipt, readWordPressAltReceipts } from "./muse-wordpress-alt-ledger.js";
 
 const DEFAULT_LIMITS: AiUsageLimits = { budgetMicros: 2_000_000, dailyMicros: 500_000, maxCalls: 10 };
 const MAX_DEMO_MICROS = 148_000_000;
@@ -282,12 +284,14 @@ export class AiUsageStore implements OnModuleDestroy {
     return limits;
   }
   private totals(database: DatabaseSync, mode: "poc" | "demo", today: string) {
-    const excludeTesting = testingExists(database) ? " AND intent_id NOT IN (SELECT intent_id FROM muse_testing_intents)" : "";
+    const excludeTesting = (testingExists(database) ? " AND intent_id NOT IN (SELECT intent_id FROM muse_testing_intents)" : "")
+      + (wordPressAltFunding(database) ? " AND intent_id NOT IN (SELECT intent_id FROM muse_wordpress_alt_intents)" : "");
     const row = database.prepare("SELECT COALESCE(SUM(charged_micros),0) charged, COALESCE(SUM(CASE WHEN substr(reserved_at,1,10)=? THEN charged_micros ELSE 0 END),0) daily, COUNT(*) calls FROM attempts WHERE mode=?" + excludeTesting).get(today, mode)!;
     if (![row.charged, row.daily, row.calls].every(safeInteger)) throw fail();
     return { chargedMicros: Number(row.charged), todayChargedMicros: Number(row.daily), calls: Number(row.calls) };
   }
   private verifyBudget(database: DatabaseSync, intent: AiUsageIntent, limits?: AiUsageLimits): void {
+    if (wordPressAltIntent(database, intent.id)) { verifyWordPressAltBudget(database, intent.id); return; }
     if (testingIntent(database,intent.id)) { verifyTestingBudget(database,intent.requestHash,intent.reserveMicros); return; }
     const hello = this.helloAmendment(database);
     if (intent.mode === "poc" && hello && (intent.id !== hello.intentId || intent.requestHash !== hello.requestHash || intent.scope !== hello.scope || intent.actor !== hello.actor))
@@ -327,6 +331,8 @@ export class AiUsageStore implements OnModuleDestroy {
     if (typeof adminActor !== "string" || !adminActor || adminActor.length > 256) throw fail("AI_APPROVAL_REQUIRED", "An authenticated administrator must approve this exact request.");
     return this.transaction(database => {
       const intent = this.intent(database, id);
+      const alt = wordPressAltIntent(database, id);
+      if (alt && adminActor !== alt.adminActor) throw fail("AI_APPROVAL_MISMATCH", "The exact funding administrator must approve this request.");
       if (Date.parse(intent.expiresAt) <= Date.now() || intent.consumedAt || intent.approvedAt) throw fail("AI_APPROVAL_STALE", "This approval is expired, consumed or already recorded; it cannot authorize another call.");
       this.verifyBudget(database, intent);
       const approvedAt = new Date(Date.now()).toISOString();
@@ -335,7 +341,7 @@ export class AiUsageStore implements OnModuleDestroy {
     });
   }
   async reserve(id: string, authorization: AiUsageAuthorization, limits?: AiUsageLimits): Promise<AiUsageReservation> {
-    const controlledTesting = this.transaction(database => !!testingIntent(database,id));
+    const controlledTesting = this.transaction(database => !!testingIntent(database,id) || !!wordPressAltIntent(database,id));
     if (authorization?.mode === "poc" && !controlledTesting) this.transaction(database => { const hello = this.helloAmendment(database); if (hello && (id !== hello.intentId || authorization.actor !== hello.actor || authorization.requestHash !== hello.requestHash || authorization.scope !== hello.scope)) throw fail("AI_DIAGNOSTIC_SCOPE_LOCKED", "Only the exact fixed diagnostic authorization may reserve this capacity."); });
     // Persist reductions even if this particular request is subsequently rejected;
     // restoring a larger environment value cannot silently restore old capacity.
@@ -406,6 +412,7 @@ export class AiUsageStore implements OnModuleDestroy {
       return {
         schemaVersion: "seo-spy.ai-usage.v1", development: { ...limits, ...this.totals(database, "poc", today) }, demo: { ...this.totals(database, "demo", today), authorization: this.demo(database) },
         ...(testingExists(database) ? { testing: testingStatus(database) } : {}),
+        ...(wordPressAltFunding(database) ? { wordPressAlt: wordPressAltStatus(database) } : {}),
         activeAttemptId: active ? String(active.id) : null, halted: database.prepare("SELECT halted FROM policy WHERE id=1").get()?.halted !== 0,
         lastReservedAt: latest ? date(latest.reserved_at) : null,
         recentAttempts: attempts.map(row => ({ id: String(row.id), intentId: String(row.intent_id), mode: row.mode as "poc" | "demo", model: row.model as "muse-spark-1.3" | "muse-spark-1.2", status: String(row.status), reservedAt: date(row.reserved_at), completedAt: row.completed_at === null ? null : date(row.completed_at), reserveMicros: Number(row.reserve_micros), chargedMicros: Number(row.charged_micros), inputTokens: row.input_tokens === null ? null : Number(row.input_tokens), outputTokens: row.output_tokens === null ? null : Number(row.output_tokens), requestId: row.request_id === null ? null : String(row.request_id), errorCode: row.error_code === null ? null : String(row.error_code) })),
@@ -432,4 +439,64 @@ export class AiUsageStore implements OnModuleDestroy {
   async testingAttempt(intentId: string) { return this.transaction(database=>{if(!testingIntent(database,intentId))return testingFail();const row=database.prepare("SELECT * FROM attempts WHERE intent_id=?").get(intentId);return row??null;}); }
   async completeTestingReceipt(actor: string,intentId: string,receipt: unknown) { return this.transaction(database=>{if(this.intent(database,intentId).actor!==actor)return testingFail("AI_APPROVAL_MISMATCH");return saveTestingReceipt(database,intentId,receipt);}); }
   async testingReceipts() { return this.transaction(database=>readTestingReceipts(database)); }
+  /** A stable private copy is inspected; this never opens or initializes the source ledger. */
+  async prepareWordPressAltFunding(adminActor: string, request: unknown) {
+    const paths = [this.path, this.path + ".initialized", this.path + "-wal", this.path + "-shm", this.path + "-journal"];
+    const fingerprints = () => paths.map((path, index) => {
+      if (!existsSync(path)) { if (index < 2) throw fail(); return null; }
+      const stat = lstatSync(path); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024 * 1024) throw fail();
+      return digest(readFileSync(path).toString("base64"));
+    });
+    const before = fingerprints(), directory = mkdtempSync(join(tmpdir(), "seo-spy-alt-funding-preview-")), copy = join(directory, "usage.sqlite");
+    let database: DatabaseSync | undefined;
+    try {
+      paths.forEach((path, index) => { if (before[index] !== null && index !== 3) copyFileSync(path, copy + path.slice(this.path.length)); });
+      database = new DatabaseSync(copy, { readOnly: true });
+      const preview = prepareWordPressAltFunding(database, adminActor, request, testingStatus(database));
+      if (JSON.stringify(fingerprints()) !== JSON.stringify(before)) throw fail("AI_USAGE_UNAVAILABLE", "Ledger changed during read-only funding preparation; no authorization was created.");
+      return preview;
+    } finally {
+      database?.close();
+      if (resolve(directory).startsWith(resolve(tmpdir()) + sep)) rmSync(directory, { recursive: true });
+    }
+  }
+  /** Future explicit funding-only activation. Does not estimate, approve, reserve or dispatch. */
+  async activateWordPressAltFunding(adminActor: string, request: unknown, confirmation: { confirmed: boolean; policyHash: string; fundingHash: string }) {
+    return this.transaction(database => activateWordPressAltFunding(database, adminActor, request, confirmation, testingStatus(database)));
+  }
+  async estimateWordPressAlt(input: AiUsageEstimateInput) {
+    const prepared = inputSchema.parse(input);
+    return this.transaction(database => {
+      const grant = validateWordPressAltEstimate(database, prepared);
+      if (database.prepare("SELECT id FROM intents WHERE approved_at IS NOT NULL AND consumed_at IS NULL LIMIT 1").get()) throw fail("AI_TESTING_REVIEW_REQUIRED");
+      const now = Date.now(), id = randomUUID(), createdAt = new Date(now).toISOString(), expiresAt = new Date(now + 15 * 60000).toISOString(), payload = JSON.stringify(prepared);
+      database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,NULL)").run(id, payload, digest(payload), createdAt, expiresAt);
+      linkWordPressAltIntent(database, id, grant);
+      verifyWordPressAltBudget(database, id);
+      return this.intent(database, id);
+    });
+  }
+  async wordPressAltAttempt(intentId: string) { return this.transaction(database => {
+    if (!wordPressAltIntent(database, intentId)) throw fail("AI_WORDPRESS_ALT_UNAVAILABLE");
+    return database.prepare("SELECT * FROM attempts WHERE intent_id=?").get(intentId) ?? null;
+  }); }
+  async wordPressAltApproval(actor: string, scope: string, requestHash: string) {
+    return this.transaction(database => {
+      const grant = wordPressAltFunding(database);
+      if (!grant || grant.request.actor !== actor || grant.scope !== scope || grant.request.requestHash !== requestHash)
+        return { status: "pending_approval" as const };
+      const row = database.prepare("SELECT intent_id FROM muse_wordpress_alt_intents WHERE grant_id=1").get();
+      if (!row) return { status: "pending_approval" as const };
+      const intent = this.intent(database, String(row.intent_id));
+      if (intent.consumedAt) return { status: "used" as const };
+      if (Date.parse(intent.expiresAt) <= Date.now()) return { status: "expired" as const };
+      return intent.approvedAt ? { status: "approved" as const, intentId: intent.id } : { status: "pending_approval" as const };
+    });
+  }
+  async completeWordPressAltReceipt(actor: string, intentId: string, receipt: unknown) { return this.transaction(database => {
+    const grant = wordPressAltIntent(database, intentId);
+    if (!grant || actor !== grant.adminActor) throw fail("AI_APPROVAL_MISMATCH");
+    return saveWordPressAltReceipt(database, intentId, receipt);
+  }); }
+  async wordPressAltReceipts() { return this.transaction(database => readWordPressAltReceipts(database)); }
 }

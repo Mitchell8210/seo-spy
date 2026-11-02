@@ -2,44 +2,67 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, X } from 'lucide-react'
 import type { FixReviewRequest } from '../../types/fixReview'
-import { wordpressFix, type FixCapability, type AltGeneration, type AltProposal, type AltVerification } from '../../services/wordpressFix'
+import { wordpressFix, fixReviewState, fixStatusLabel, fixGenerationPending, notifyWordPressFixChanged, WordPressFixError, type FixCapability, type FixCandidate, type AltGeneration, type AltProposal, type AltVerification, type AltEvidence } from '../../services/wordpressFix'
 
 const primary = 'min-h-11 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300'
 const secondary = 'min-h-11 rounded-lg border border-line px-4 py-2 text-sm font-medium text-secondary hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-300'
 
-export function FixReviewDialog({ review, capability, onClose }: { review: FixReviewRequest; capability?: FixCapability | null; onClose: () => void }) {
+export function FixReviewDialog({ review, capability: initialCapability, candidate, onClose }: { review: FixReviewRequest; capability?: FixCapability | null; candidate?: FixCandidate; onClose: () => void }) {
+  const [capability, setCapability] = useState(initialCapability)
   const dialog = useRef<HTMLDialogElement>(null)
   const titleId = useId(), descriptionId = useId(), notesId = useId()
-  const [step, setStep] = useState<'review' | 'confirm' | 'confirmed'>('review')
+  const initial = fixReviewState(capability)
+  const [step, setStep] = useState<'review' | 'confirm' | 'confirmed'>(initial.step)
   const [notes, setNotes] = useState('')
   const [acknowledged, setAcknowledged] = useState(false)
-  const [generation, setGeneration] = useState<AltGeneration | null>(capability?.savedGeneration ?? null)
-  const [text, setText] = useState(capability?.savedGeneration?.output.altText ?? '')
-  const [proposal, setProposal] = useState<AltProposal | null>(null)
-  const [outcome, setOutcome] = useState<Record<string, unknown> | null>(null)
-  const [verification, setVerification] = useState<AltVerification | null>(null)
+  const [generation, setGeneration] = useState<AltGeneration | null>(initial.generation)
+  const [text, setText] = useState(initial.text)
+  const [proposal, setProposal] = useState<AltProposal | null>(initial.proposal)
+  const [outcome, setOutcome] = useState<Record<string, unknown> | null>(initial.outcome)
+  const [verification, setVerification] = useState<AltVerification | null>(initial.verification)
   const [busy, setBusy] = useState('')
   const busyRef = useRef(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
+  const [purposeReviewed, setPurposeReviewed] = useState(!candidate?.requiresPurposeConfirmation)
+  const [purpose, setPurpose] = useState<AltEvidence['purpose']>('unknown')
+  const [description, setDescription] = useState('')
+  const [language, setLanguage] = useState<'es' | 'en' | ''>(candidate?.pageLanguage ?? '')
+  const [essentialTerms, setEssentialTerms] = useState('')
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer) }, [])
-  const supported = capability?.fixable === true && !!review.businessId
+  const supported = (capability?.fixable === true || !!capability?.workflow?.proposal) && !!review.businessId
   const evidence = capability?.evidence
-  const target = evidence?.target
+  const target = evidence?.target ?? candidate?.target
   const businessId = review.businessId ?? ''
+  const generationApproval = capability?.workflow?.generationApproval
+  const requireLive = candidate ? !candidate.isMock : review.isMock === false
+  const generationPending = fixGenerationPending(capability, requireLive)
   async function run(label: string, work: () => Promise<void>) {
     if (busyRef.current) return
     busyRef.current = true; setBusy(label); setError('')
-    try { await work() } catch (failure) { setError(failure instanceof Error ? failure.message : 'The operation failed. No automatic retry was made.') }
+    try { await work() } catch (failure) { setError(failure instanceof WordPressFixError && failure.status === 401 ? 'Pending Approval: an authorized local operator session is required for this action. No model request or WordPress write was made.' : failure instanceof Error ? failure.message : 'The operation failed. No automatic retry was made.') }
     finally { busyRef.current = false; setBusy('') }
   }
   const generate = () => run('Preparing AI proposal…', async () => {
-    const value = await wordpressFix.generate(businessId, evidence!.id, notes)
+    const value = await wordpressFix.generate(businessId, evidence!.id, notes, generationApproval?.status === 'approved' ? generationApproval.intentId : undefined, requireLive)
     setGeneration(value); setText(value.output.altText ?? ''); setProposal(null); setAcknowledged(false)
+    notifyWordPressFixChanged()
+  })
+  const confirmPurpose = () => run('Confirming image purpose…', async () => {
+    if (!candidate || !language) return
+    const confirmed = await wordpressFix.confirmPurpose(businessId, candidate, purpose, description, language, essentialTerms.split(',').map(value => value.trim()).filter(Boolean))
+    if (purpose === 'decorative') {
+      setCapability({ ...candidate.capability, fixable: false, evidence: confirmed, reason: 'The owner confirmed this image is decorative or fully redundant. Its empty alternative is retained; no fix is needed.' })
+      setPurposeReviewed(true); notifyWordPressFixChanged(); return
+    }
+    const updated = (await wordpressFix.candidates(businessId)).items.find(item => item.reportId === candidate.reportId && item.findingId === candidate.findingId)
+    if (!updated) throw new Error('The reviewed target is no longer an outstanding candidate. Refresh the saved recommendations.')
+    setCapability(updated.capability); setPurposeReviewed(true); notifyWordPressFixChanged()
   })
   const prepare = () => run('Preparing exact change…', async () => {
     const value = await wordpressFix.propose(businessId, generation!.id, text)
     setProposal(value); setAcknowledged(false); setStep('confirm')
+    notifyWordPressFixChanged()
   })
   const apply = () => run('Applying the approved change…', async () => {
     setStep('confirmed')
@@ -49,6 +72,7 @@ export function FixReviewDialog({ review, capability, onClose }: { review: FixRe
       const saved = await wordpressFix.read(businessId, proposal!.id)
       setOutcome(saved.outcome ?? { status: saved.executionStarted ? 'outcome_unknown' : 'not_dispatched', message: 'No successful response. Inspect the saved operation; no retry was made.' })
     }
+    notifyWordPressFixChanged()
   })
   useEffect(() => {
     const element = dialog.current!
@@ -84,14 +108,29 @@ export function FixReviewDialog({ review, capability, onClose }: { review: FixRe
         </section>
         <dl className="grid grid-cols-2 gap-4 rounded-lg border border-line p-4"><div><dt className="text-muted">Effort</dt><dd>{review.effort && review.effort !== 'unknown' ? review.effort : 'Not assessed'}</dd></div><div><dt className="text-muted">Risk</dt><dd>{review.risk && review.risk !== 'unknown' ? review.risk : 'Not assessed'}</dd></div></dl>
       </>}
-      <section className="rounded-xl border border-blue-400/25 bg-blue-400/5 p-4"><h3 className="font-semibold">Recommended action</h3><p className="mt-2 whitespace-pre-wrap text-secondary">{review.recommendation || 'No saved recommendation is available for this issue.'}</p><p className="mt-3 text-xs text-muted">Affected area: {target ? `WordPress media ${target.mediaId} · alt_text` : review.target || category}.{!supported && ' No supported editable target has been established.'}</p></section>
-      {supported && target && <section className="space-y-2 rounded-lg border border-line p-4"><h3 className="font-semibold">Exact WordPress resource</h3>
-        <p>Media {target.mediaId} · {target.pageResource} {target.pageId}</p><p className="break-all text-secondary">{target.pageUrl}</p>
+      <section className="rounded-xl border border-blue-400/25 bg-blue-400/5 p-4"><h3 className="font-semibold">Recommended action</h3><p className="mt-2 whitespace-pre-wrap text-secondary">{review.recommendation || 'No saved recommendation is available for this issue.'}</p><p className="mt-3 text-xs text-muted">Affected area: {target ? `WordPress media ${target.mediaId} · alt_text` : review.target || category}.{!supported && !target && ' No supported editable target has been established.'}</p></section>
+      {(supported || candidate) && target && <section className="space-y-2 rounded-lg border border-line p-4"><h3 className="font-semibold">Exact WordPress resource</h3>
+        {candidate && <img src={candidate?.thumbnailUrl ?? target.sourceUrl} alt="" referrerPolicy="no-referrer" className="max-h-64 w-full rounded-lg bg-elevated object-contain" />}
+        {candidate?.pageTitle && <p className="font-semibold">{candidate.pageTitle}</p>}
+        <p>Media {target.mediaId} · {target.pageResource} {target.pageId}</p><a href={target.pageUrl} target="_blank" rel="noreferrer" className="break-all text-secondary">{target.pageUrl}</a>
         <a href={target.sourceUrl} target="_blank" rel="noreferrer" className="break-all text-blue-300">View the source image</a>
-        <p className="text-xs text-muted">No thumbnail pixels were collected. Image retrieval and visual Muse input are not enabled.</p>
+        <p className="text-xs text-muted">{candidate ? 'The preview is the verified WordPress image. Muse receives reviewed text context, not image pixels.' : 'No thumbnail pixels were collected. Image retrieval and visual Muse input are not enabled.'}</p>
         <p className="text-secondary">Confirmed image context: {evidence?.verifiedDescription || evidence?.purpose}</p>
         <p className="text-xs text-muted">{evidence?.descriptionProvenance}. Context expires {evidence?.expiresAt}.</p>
         <p>Alt text recorded at review: <span className="whitespace-pre-wrap">{target.currentAlt === '' ? '(empty)' : target.currentAlt}</span></p>
+      </section>}
+      {candidate && !purposeReviewed && step === 'review' && <section className="space-y-3 rounded-lg border border-line p-4">
+        <h3 className="font-semibold">Review image purpose</h3>
+        <p className="text-secondary">Empty alt text is not automatically a defect. Review the image and nearby page text before confirming its purpose.</p>
+        <label className="block font-semibold">Image purpose<select aria-label="Image purpose" value={purpose} onChange={event => setPurpose(event.target.value as AltEvidence['purpose'])} className="mt-2 block min-h-11 w-full rounded-lg border border-line bg-elevated p-3 text-ink">
+          <option value="unknown">Not yet established</option><option value="informative">Informative — adds essential meaning</option><option value="decorative">Decorative or fully redundant — keep empty alt</option>
+        </select></label>
+        <label className="block font-semibold">Reviewed image description<textarea aria-label="Reviewed image description" maxLength={500} rows={3} value={description} onChange={event => setDescription(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 text-ink" /></label>
+        <p className="text-xs text-muted">Describe only content you can reliably verify. Do not infer content from the filename or add promotional claims.</p>
+        <label className="block font-semibold">Page and description language<select aria-label="Page and description language" value={language} onChange={event => setLanguage(event.target.value as 'es' | 'en' | '')} className="mt-2 block min-h-11 w-full rounded-lg border border-line bg-elevated p-3 text-ink"><option value="">Review and choose language</option><option value="es">Spanish</option><option value="en">English</option></select></label>
+        {purpose === 'informative' && language === 'es' && <label className="block font-semibold">Essential Spanish words<textarea aria-label="Essential Spanish words" maxLength={200} rows={2} value={essentialTerms} onChange={event => setEssentialTerms(event.target.value)} placeholder="Comma-separated words from the reviewed description" className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 text-ink" /></label>}
+        <button type="button" className={primary} disabled={!!busy || purpose === 'unknown' || !language || purpose === 'informative' && (!description.trim() || language === 'es' && !essentialTerms.trim())} onClick={confirmPurpose}>Confirm image purpose</button>
+        <p className="text-xs text-muted">This confirms image context only. It does not authorize AI spending or a WordPress update.</p>
       </section>}
       {step === 'review' && <>
         {!!review.verificationSteps?.length && <section><h3 className="font-semibold">How to check the result</h3><ul className="mt-2 list-disc space-y-2 pl-5 text-secondary">{review.verificationSteps.map((item, index) => <li key={index}>{item}</li>)}</ul></section>}
@@ -99,7 +138,8 @@ export function FixReviewDialog({ review, capability, onClose }: { review: FixRe
         <div><label htmlFor={notesId} className="font-semibold">Instructions for this fix <span className="font-normal text-muted">(optional)</span></label><textarea id={notesId} maxLength={2000} value={notes} onChange={event => { setNotes(event.target.value); setGeneration(null); setProposal(null); setAcknowledged(false) }} rows={3} className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 text-sm text-ink focus:outline-2 focus:outline-blue-300" placeholder="Add context or preferences for the proposed work." /></div>
       </>}
       {step !== 'review' && notes.trim() && <section><h3 className="font-semibold">Your instructions</h3><p className="mt-1 whitespace-pre-wrap text-secondary">{notes}</p></section>}
-      {supported && step === 'review' && <section className="space-y-3"><button type="button" className={primary} disabled={!!busy} onClick={generate}>Generate AI proposal</button>
+      {supported && step === 'review' && <section className="space-y-3"><button type="button" className={primary} disabled={!!busy || generationPending} onClick={generate}>Generate AI proposal</button>
+        {generationPending && <p role="status" className="text-xs text-muted">Pending administrator approval. A fresh exact request authorization is required before another live generation.</p>}
         {generation && <><p className="text-xs text-muted">{generation.isMock ? 'Mock AI proposal · local fixture · zero paid calls' : 'Live Meta Muse proposal'} · {generation.output.reason}</p>
           {generation.output.status === 'insufficient_evidence' ? <p role="status">Insufficient image evidence. No executable proposal was prepared.</p> : <>
             <p className="whitespace-pre-wrap text-secondary">AI-proposed alt text: {generation.output.altText === '' ? '(empty, decorative)' : generation.output.altText}</p>
@@ -110,16 +150,16 @@ export function FixReviewDialog({ review, capability, onClose }: { review: FixRe
       </section>}
       <section className="rounded-lg border border-amber-400/30 bg-amber-400/5 p-4 text-secondary"><h3 className="font-semibold text-amber-200">Before a fix can be applied</h3>
         <p className="mt-2">{supported ? 'Review and explicitly approve the exact alt_text update. All other WordPress fields remain outside this workflow.' : review.category === 'social' ? 'Facebook recommendations remain manual. WordPress access cannot publish or change Facebook content.' : capability?.reason || 'A trusted local operator must establish an exact current image target and connect this browser with a one-use session link. This recommendation remains informational.'}</p>
-        <p className="mt-2 text-xs text-muted">{supported ? `${capability?.writesEnabled ? 'The write gate is enabled for this operator process.' : 'WordPress writes are disabled. Proposals can be reviewed, but Apply is blocked.'} No score or ranking improvement is established.` : 'No AI generation, website change or verification is triggered by this informational review.'}</p>
+        <p className="mt-2 text-xs text-muted">{supported ? `${capability?.writesEnabled ? 'The write gate is enabled for this operator process.' : step === 'confirmed' ? 'WordPress writes are disabled. Saved receipts remain available.' : 'Pending administrator approval: WordPress writes are disabled. Proposals can be reviewed, but Apply is blocked.'} No score or ranking improvement is established.` : 'No AI generation, website change or verification is triggered by this informational review.'}</p>
         {capability?.limitations.map(item => <p key={item} className="mt-2 text-xs text-muted">{item}</p>)}
       </section>
-      {step === 'confirm' && proposal && <>
+      {step !== 'review' && proposal && <>
         <section className="space-y-2 rounded-lg border border-line p-4"><h3 className="font-semibold">{proposal.restorationOf ? 'Restoration proposal' : 'Exact before/after update'}</h3><p>WordPress media {proposal.resourceId} · alt_text</p><p>Before: <span className="whitespace-pre-wrap">{proposal.before.altText || '(empty)'}</span></p><p>After: <span className="whitespace-pre-wrap">{proposal.changes.altText || '(empty)'}</span></p><p className="text-xs text-muted">Proposal: {proposal.id}<br />Hash: {proposal.hash}<br />Expires: {proposal.expiresAt}</p></section>
-        <label className="flex items-start gap-3 rounded-lg border border-line p-4"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} className="mt-1 size-4 shrink-0 accent-blue-500" /><span>I approve this exact media resource and before/after alt_text update. Apply will execute it once.</span></label>
+        {step === 'confirm' && <label className="flex items-start gap-3 rounded-lg border border-line p-4"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} className="mt-1 size-4 shrink-0 accent-blue-500" /><span>I approve this exact media resource and before/after alt_text update. Apply will execute it once.</span></label>}
       </>}
-      {step === 'confirmed' && proposal && <section className="space-y-3"><p role="status" className="flex items-start gap-2 text-blue-200"><Check size={20} className="mt-1 shrink-0" />{verification?.status ?? String(outcome?.status ?? 'Waiting for saved receipt')}</p>
+      {step === 'confirmed' && proposal && <section className="space-y-3"><p role="status" className="flex items-start gap-2 text-blue-200"><Check size={20} className="mt-1 shrink-0" />{fixStatusLabel(verification?.status ?? String(outcome?.status ?? capability?.workflow?.status ?? 'Waiting for saved receipt'))}</p>
         <p className="text-xs text-muted">Proposal receipt: {proposal.id}</p><pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-line p-3 text-xs">{JSON.stringify(verification ?? outcome, null, 2)}</pre>
-        {outcome?.status === 'applied' && <><button type="button" className={secondary} disabled={!!busy} onClick={() => run('Verifying stored and public values…', async () => { setVerification(await wordpressFix.verify(businessId, proposal.id)) })}>Verify stored and public result</button>
+        {outcome?.status === 'applied' && <><button type="button" className={secondary} disabled={!!busy} onClick={() => run('Verifying stored and public values…', async () => { setVerification(await wordpressFix.verify(businessId, proposal.id)); notifyWordPressFixChanged() })}>Verify stored and public result</button>
           {!proposal.restorationOf && outcome.verification === 'verified_stored_fields' && <button type="button" className={secondary} disabled={!!busy} onClick={() => run('Preparing separately approved restoration…', async () => { setProposal(await wordpressFix.restore(businessId, proposal.id)); setOutcome(null); setVerification(null); setAcknowledged(false); setStep('confirm') })}>Prepare restoration</button>}</>}
         {outcome?.status !== 'applied' && <p className="text-secondary">Stop and inspect the saved receipt. Uncertain outcomes require explicit operator reconciliation; no automatic retry or rollback is available.</p>}
       </section>}

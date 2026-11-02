@@ -75,6 +75,7 @@ export interface AiUsageSummary {
   halted: boolean;
   lastReservedAt: string | null;
   testing?: ReturnType<typeof import("./muse-testing-ledger.js").testingStatus>;
+  wordPressAlt?: ReturnType<typeof import("./muse-wordpress-alt-ledger.js").wordPressAltStatus>;
   recentAttempts: { id: string; intentId: string; mode: AiLiveMode; model: AiModel; status: string; reservedAt: string; completedAt: string | null; reserveMicros: number; chargedMicros: number; inputTokens: number | null; outputTokens: number | null; requestId: string | null; errorCode: string | null }[];
 }
 

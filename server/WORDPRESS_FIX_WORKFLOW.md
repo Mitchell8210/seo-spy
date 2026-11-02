@@ -1,5 +1,7 @@
 # Fix with AI — exact WordPress alt-text workflow
 
+Current follow-up: [evidence-bound purpose validity](WORDPRESS_PURPOSE_VALIDITY.md) separates durable owner decisions from fresh execution checks. The original Spanish decision is preserved with a verified technical dependency binding. Its new v3 request exceeds the unchanged old funding ceiling; no funding or inference/write is authorized. [Spanish proposal preparation](MUSE_WORDPRESS_ALT_PREPARATION.md) remains the historical v2 checkpoint.
+
 The workflow was implemented offline on November 2, 2026. A later explicitly requested read-only page/media collection and purpose enrollment established the target below. Saved-source desktop/mobile modal replay now passes with disconnected transports. No live AI proposal or WordPress update has been performed by this work; this is not a completed live fix demonstration.
 
 ## Exact page evidence and authoritative variants

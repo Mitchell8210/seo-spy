@@ -22,6 +22,9 @@ import { WordPressFixService } from "../src/modules/wordpress/wordpress-fix.serv
 import { WordPressFixStore } from "../src/modules/wordpress/wordpress-fix.store.js";
 import { operatorIdentity } from "../src/modules/wordpress/wordpress.guard.js";
 import { validateAltOutput } from "../src/modules/wordpress/wordpress-fix.types.js";
+import { WordPressFixSessions } from "../src/modules/wordpress/wordpress-fix-session.js";
+import { WordPressService } from "../src/modules/wordpress/wordpress.service.js";
+import type { Request, Response } from "express";
 
 const businessId = "demo-guzman", operator = "offline-wordpress-operator-fixture-32-characters";
 const prefix = `/api/wordpress/businesses/${businessId}`, origin = "http://localhost:5173";
@@ -208,6 +211,103 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     await enroll(); app.get(AppDatabase).connection().prepare("UPDATE wordpress_fix_records SET payload='{}'").run();
     expect(() => app.get(WordPressFixStore).list(businessId, operatorIdentity(operator))).toThrow();
   });
+  it("restores the verified human edit and saved receipts on read-only reload even after evidence expiry", async () => {
+    const { generation, evidence } = await prepare();
+    const edited = await post("/fixes/proposals", { generationId: generation.id, altText: "A blue calculator" });
+    config.set("WORDPRESS_WRITES_ENABLED", true);
+    expect((await post(`/fixes/proposals/${edited.body.id}/apply`, { confirmed: true, proposalHash: edited.body.hash })).body.status).toBe("applied");
+    const verified = await post(`/fixes/proposals/${edited.body.id}/verifications`, { confirmed: true });
+    expect(verified.body.status).toBe("public_verified");
+    config.set("WORDPRESS_WRITES_ENABLED", false);
+    const calls = transport.mock.calls.length, modelCalls = muse.mock.calls.length;
+    const listed = await get("/fixes");
+    expect(listed.status).toBe(200);
+    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.items[0]).toMatchObject({ reportId, findingId: "exact-image-review", evidenceId: evidence.id, workflow: {
+      status: "public_verified", pageUrl: "https://example.com/page/", proposal: { id: edited.body.id, before: { altText: "" }, changes: { altText: "A blue calculator" }, textOrigin: "human-edited" },
+      generation: { id: generation.id }, verification: verified.body,
+    } });
+    const capability = await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`);
+    expect(capability.body).toMatchObject({ fixable: false, writesEnabled: false, workflow: { status: "public_verified", proposal: { id: edited.body.id } } });
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 8 * 86400000);
+    const restored = await app.get(WordPressFixService).workflows(businessId, operatorIdentity(operator));
+    expect(restored.items[0].workflow).toMatchObject({ status: "public_verified", proposal: { id: edited.body.id }, verification: verified.body });
+    expect(transport).toHaveBeenCalledTimes(calls); expect(muse).toHaveBeenCalledTimes(modelCalls); expect(writes).toBe(1);
+  });
+  it("restores an exact pending proposal after reload and marks its expiry without authorization or dispatch", async () => {
+    const { proposal } = await prepare(), calls = transport.mock.calls.length;
+    const listed = await get("/fixes");
+    expect(listed.status).toBe(200);
+    expect(listed.body.items[0].workflow).toMatchObject({ status: "pending_approval", approvalRequired: true, proposal: { id: proposal.id, hash: proposal.hash } });
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 16 * 60000);
+    const expired = await app.get(WordPressFixService).workflows(businessId, operatorIdentity(operator));
+    expect(expired.items[0].workflow).toMatchObject({ status: "expired", proposal: { id: proposal.id, hash: proposal.hash } });
+    expect(transport).toHaveBeenCalledTimes(calls); expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+  });
+  it("reports pending administrator generation approval in the browser without creating spending authority", async () => {
+    const evidence = await enroll(), ledger = app.get(AiUsageStore);
+    const estimate = jest.spyOn(ledger, "estimateWordPressAlt"), approve = jest.spyOn(ledger, "approve"), reserve = jest.spyOn(ledger, "reserve");
+    config.set("MOCK_AI", false); config.set("AI_MODE", "poc"); config.set("AI_ENABLED", true);
+    const calls = transport.mock.calls.length;
+    const listed = await get("/fixes");
+    expect(listed.status).toBe(200);
+    expect(listed.body.items[0].workflow.generationApproval).toMatchObject({ status: "pending_approval" });
+    expect(transport).toHaveBeenCalledTimes(calls);
+    expect((await post("/fixes/generations", { evidenceId: evidence.id })).status).toBeGreaterThanOrEqual(400);
+    expect(estimate).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
+    expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+  });
+  it("prefers an executed fix over a newer unexecuted proposal for the same evidence", async () => {
+    const { generation, proposal } = await prepare();
+    expect((await post("/fixes/proposals", { generationId: generation.id, altText: "A blue calculator" })).status).toBe(201);
+    config.set("WORDPRESS_WRITES_ENABLED", true);
+    await post(`/fixes/proposals/${proposal.id}/apply`, { confirmed: true, proposalHash: proposal.hash });
+    await post(`/fixes/proposals/${proposal.id}/verifications`, { confirmed: true });
+    const listed = await get("/fixes");
+    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.items[0].workflow).toMatchObject({ status: "public_verified", proposal: { id: proposal.id } });
+    expect(writes).toBe(1);
+  });
+  it.each(["public-mismatch", "public-absent", "stored-mismatch"])("replays the actual saved %s status without recollecting", async kind => {
+    const { proposal } = await prepare(); config.set("WORDPRESS_WRITES_ENABLED", true);
+    await post(`/fixes/proposals/${proposal.id}/apply`, { confirmed: true, proposalHash: proposal.hash });
+    if (kind === "public-mismatch") publicAlt = "stale alternative";
+    if (kind === "public-absent") publicHtml = "<p>No matching image</p>";
+    if (kind === "stored-mismatch") { alt = "changed remotely"; publicAlt = description; }
+    const verification = await post(`/fixes/proposals/${proposal.id}/verifications`, { confirmed: true });
+    const calls = transport.mock.calls.length;
+    const listed = await get("/fixes");
+    expect(listed.body.items[0].workflow).toMatchObject({ status: verification.body.status, verification: verification.body });
+    expect(transport).toHaveBeenCalledTimes(calls); expect(writes).toBe(1); expect(muse).not.toHaveBeenCalled();
+  });
+  it("restores uncertain execution status and never treats it as a fresh action", async () => {
+    const { proposal } = await prepare(); config.set("WORDPRESS_WRITES_ENABLED", true); failure = "network";
+    expect((await post(`/fixes/proposals/${proposal.id}/apply`, { confirmed: true, proposalHash: proposal.hash })).body.status).toBe("outcome_unknown");
+    const calls = transport.mock.calls.length;
+    const listed = await get("/fixes");
+    expect(listed.body.items[0].workflow).toMatchObject({ status: "outcome_unknown", proposal: { id: proposal.id, executionStarted: true, outcome: { status: "outcome_unknown" } } });
+    const capability = await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`);
+    expect(capability.body.fixable).toBe(false); expect(capability.body.workflow.status).toBe("outcome_unknown");
+    expect(transport).toHaveBeenCalledTimes(calls); expect(writes).toBe(1);
+  });
+  it("keeps saved workflow status business/operator scoped and rejects corrupt immutable proposal records", async () => {
+    const { proposal } = await prepare();
+    expect([401, 403]).toContain((await request(app.getHttpServer()).get("/api/wordpress/businesses/foreign/fixes").set("Host", "localhost:5173").set("Cookie", cookie)).status);
+    expect((await app.get(WordPressFixService).workflows(businessId, operatorIdentity("different operator"))).items).toEqual([]);
+    const calls = transport.mock.calls.length;
+    app.get(AppDatabase).connection().prepare("UPDATE wordpress_fix_records SET checksum=? WHERE id=?").run("f".repeat(64), proposal.id);
+    expect((await get("/fixes")).status).toBeGreaterThanOrEqual(400);
+    expect(transport).toHaveBeenCalledTimes(calls); expect(writes).toBe(0); expect(muse).not.toHaveBeenCalled();
+  });
+  it("does not claim a saved verification succeeded when its immutable receipt checksum fails", async () => {
+    const { proposal } = await prepare(); config.set("WORDPRESS_WRITES_ENABLED", true);
+    await post(`/fixes/proposals/${proposal.id}/apply`, { confirmed: true, proposalHash: proposal.hash });
+    const verified = await post(`/fixes/proposals/${proposal.id}/verifications`, { confirmed: true });
+    const calls = transport.mock.calls.length;
+    app.get(AppDatabase).connection().prepare("UPDATE artifacts SET checksum=? WHERE kind='wordpress-verification' AND id=?").run("f".repeat(64), verified.body.receipt.id);
+    expect((await get("/fixes")).status).toBeGreaterThanOrEqual(400);
+    expect(transport).toHaveBeenCalledTimes(calls); expect(writes).toBe(1);
+  });
   it("retains immutable fix evidence across application SQLite restarts", async () => {
     const settings = new ConfigService({ NODE_ENV: "test", DATABASE_PATH: join(directory, "restart.sqlite") });
     const first = new AppDatabase(settings), record = { id: randomUUID(), businessId, actor: operatorIdentity(operator), kind: "evidence", createdAt: new Date().toISOString(), verifiedDescription: description };
@@ -229,9 +329,69 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect((await redeem()).status).toBe(401);
     config.set("WORDPRESS_OPERATOR_KEY", "rotated-offline-operator-fixture-32-characters"); expect((await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`)).status).toBe(401);
   });
+  it("allows local saved fix reads without a browser connection but grants no mutation access", async () => {
+    const { proposal } = await prepare();
+    const local = `/api/wordpress/local/businesses/${businessId}/fixes`;
+    const reads = transport.mock.calls.length;
+    const saved = await request(app.getHttpServer()).get(local).set("Host", "localhost:5173");
+    expect(saved.status).toBe(200); expect(saved.body.items.some((item: { workflow: { proposal: { id: string } | null } }) => item.workflow.proposal?.id === proposal.id)).toBe(true);
+    expect((await request(app.getHttpServer()).get(local + `/proposals/${proposal.id}`).set("Host", "localhost:5173")).status).toBe(200);
+    expect(transport).toHaveBeenCalledTimes(reads); expect(muse).not.toHaveBeenCalled();
+    expect((await request(app.getHttpServer()).post(local + `/proposals/${proposal.id}/apply`).set("Host", "localhost:5173").send({ confirmed: true, proposalHash: proposal.hash })).status).toBe(404);
+    expect((await request(app.getHttpServer()).post(prefix + `/fixes/proposals/${proposal.id}/apply`).set("Host", "localhost:5173").set("Origin", origin).send({ confirmed: true, proposalHash: proposal.hash })).status).toBe(401);
+    for (const header of [{ Host: "evil.example" }, { Host: "localhost:5173", Origin: "https://evil.example" }, { Host: "localhost:5173", "X-Forwarded-For": "203.0.113.1" }]) {
+      const result = await request(app.getHttpServer()).get(local).set(header); expect(result.status).toBe(403);
+    }
+    expect([403, 404]).toContain((await request(app.getHttpServer()).get('/api/wordpress/local/businesses/foreign/fixes').set("Host", "localhost:5173")).status);
+  });
+  it("does not silently use a mock for an explicitly real Dashboard generation", async () => {
+    const evidence = await enroll(); const reads = transport.mock.calls.length;
+    const rejected = await post("/fixes/generations", { evidenceId: evidence.id, requireLive: true });
+    expect(rejected.status).toBe(409); expect(rejected.body.error.code).toBe("AI_APPROVAL_REQUIRED");
+    expect(transport).toHaveBeenCalledTimes(reads); expect(muse).not.toHaveBeenCalled();
+  });
   it("expires browser sessions and refuses proxy-host or originless mutations", async () => {
     expect((await request(app.getHttpServer()).post(prefix + "/fixes/generations").set("Host", "localhost:5173").set("Cookie", cookie).set("x-wordpress-csrf", csrf).send({ evidenceId: randomUUID() })).status).toBe(403);
-    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 21 * 60000); expect((await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`)).status).toBe(401);
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 31 * 86400000); expect((await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`)).status).toBe(401);
+  });
+  it("persists only signed hashed-token grants across service/database restart and beyond twenty minutes", async () => {
+    config.set("DATABASE_PATH", join(directory, "persistent-session.sqlite"));
+    const initialDb = new AppDatabase(config), initial = new WordPressFixSessions(config, app.get(WordPressService), initialDb);
+    const req = { method: "POST", params: { businessId }, get: (name: string) => ({ host: "localhost:5173", origin,
+      authorization: `Bearer ${operator}` } as Record<string, string>)[name] } as unknown as Request;
+    const ticket = await initial.issue(req, businessId), code = new URLSearchParams(new URL(ticket.url).hash.slice(1)).get("wordpress-session")!;
+    let rawToken = "";
+    const response = { cookie: (_name: string, value: string) => { rawToken = value; }, setHeader() {} } as unknown as Response;
+    const connected = await initial.redeem(req, response, code); initialDb.close();
+    const restartedDb = new AppDatabase(config);
+    try {
+      const restarted = new WordPressFixSessions(config, app.get(WordPressService), restartedDb);
+      const read = { method: "GET", params: { businessId }, get: (name: string) => ({ host: "localhost:5173", cookie: `seo_spy_wordpress=${rawToken}` } as Record<string, string>)[name] } as unknown as Request;
+      const stored = String(restartedDb.connection().prepare("SELECT payload FROM wordpress_browser_sessions WHERE token_hash=?").get(operatorIdentity(rawToken))?.payload);
+      expect(stored).not.toContain(rawToken); expect(stored).not.toContain(connected.csrf);
+      jest.spyOn(Date, "now").mockReturnValue(Date.now() + 21 * 60000);
+      expect(await restarted.authorize(read)).toMatchObject({ businessId, csrf: connected.csrf });
+      expect(transport).not.toHaveBeenCalled(); expect(muse).not.toHaveBeenCalled();
+      restartedDb.connection().prepare("UPDATE wordpress_browser_sessions SET payload=replace(payload,?,?) WHERE token_hash=?").run(businessId, "other-business", operatorIdentity(rawToken));
+      await expect(restarted.authorize(read)).rejects.toThrow();
+    } finally { restartedDb.close(); }
+  });
+  it("issues a persistent host-only HttpOnly cookie and revokes it using exact browser CSRF", async () => {
+    const ticket = await operatorPost("/api/wordpress/browser-tickets", { businessId });
+    const code = new URLSearchParams(new URL(ticket.body.url).hash.slice(1)).get("wordpress-session");
+    const session = await request(app.getHttpServer()).post("/api/wordpress/browser-session").set("Host", "localhost:5173").set("Origin", origin).send({ code });
+    const header = String(session.headers["set-cookie"][0]);
+    expect(header).toContain("Max-Age=2592000"); expect(header).toContain("HttpOnly"); expect(header).toContain("SameSite=Strict"); expect(header).not.toContain("Domain=");
+    const revoke = () => request(app.getHttpServer()).post("/api/wordpress/browser-session/revoke").set("Host", "localhost:5173").set("Origin", origin).set("Cookie", cookie);
+    expect((await revoke()).status).toBe(403);
+    const revoked = await revoke().set("x-wordpress-csrf", csrf); expect(revoked.status).toBe(201); expect(revoked.body.revoked).toBe(true);
+    expect(String(revoked.headers["set-cookie"][0])).toContain("Expires=Thu, 01 Jan 1970");
+    expect((await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`)).status).toBe(401);
+  });
+  it("invalidates persistent grants when the exact frontend origin changes", async () => {
+    config.set("WORDPRESS_FRONTEND_ORIGIN", "http://localhost:5174");
+    const result = await request(app.getHttpServer()).get("/api/wordpress/browser-session").set("Host", "localhost:5174").set("Cookie", cookie);
+    expect(result.status).toBe(401);
   });
 });
 describe("bounded proposal text contract", () => {

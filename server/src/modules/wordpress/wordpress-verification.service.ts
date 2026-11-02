@@ -28,6 +28,18 @@ const publicReceipt = (receipt: Receipt): WordPressPublicVerification => {
 export class WordPressVerificationService {
   constructor(private readonly wordpress: WordPressService, private readonly store: WordPressActionsStore, private readonly collector: WebsiteCollector) {}
 
+  async latest(businessId: string, actor: string, proposalId: string): Promise<WordPressPublicVerification | null> {
+    await this.wordpress.getProposal(businessId, actor, proposalId);
+    const siteUrl = await this.wordpress.reportSite(businessId);
+    const rows = this.store.savedVerifications(businessId, proposalId).map(value => {
+      const parsed = receiptSchema.safeParse(value);
+      if (!parsed.success || parsed.data.businessId !== businessId || parsed.data.actor !== actor
+        || parsed.data.siteUrl !== siteUrl || parsed.data.proposalId !== proposalId) throw unavailable();
+      return parsed.data;
+    }).sort((a, b) => b.completedAt.localeCompare(a.completedAt) || b.id.localeCompare(a.id));
+    return rows[0] ? publicReceipt(rows[0]) : null;
+  }
+
   async verify(businessId: string, actor: string, proposalId: string, pageResource: "pages" | "posts", pageId: number): Promise<WordPressPublicVerification> {
     // The trusted adapter binds both resources to this installation and requires
     // an applied media-alt proposal. Callers never supply a collection URL.

@@ -1,4 +1,6 @@
-import { Body, ConflictException, Controller, Get, HttpException, Param, ParseUUIDPipe, Post, Req, ServiceUnavailableException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Get, HttpException, Param, ParseUUIDPipe, Post, Req, ServiceUnavailableException, UseGuards } from "@nestjs/common";
+import { z } from "zod";
+import { wordPressAltFundingRequestSchema } from "../../integrations/ai/muse-wordpress-alt-ledger.js";
 import { ConfigService } from "@nestjs/config";
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
@@ -42,6 +44,21 @@ export class AiAdminController {
   @ApiOperation({ summary: "Review the immutable target, necessity reason and maximum reserved cost before administrator approval" })
   @ApiOkResponse({ schema: { type: "object", description: "Intent ID, actor/scope, exact request hash, model/mode, input/output bounds, frozen price version, reserveMicros, reason, expiry, approval/consumption timestamps. No prompt or credential." } })
   intent(@Param("intentId", new ParseUUIDPipe({ version: "4" })) intentId: string) { return this.safe(() => this.usage.readIntent(intentId)); }
+  @Post("wordpress-alt-funding/preview")
+  @ApiOperation({ summary: "Read-only exact one-attempt WordPress-alt funding proposal; creates no grant, intent, approval or reservation" })
+  fundingPreview(@Req() request: Request, @Body() body: unknown) {
+    const parsed = wordPressAltFundingRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Invalid exact WordPress-alt funding request.");
+    return this.safe(() => this.usage.prepareWordPressAltFunding(this.actor(request), parsed.data));
+  }
+  @Post("wordpress-alt-funding/activate")
+  @ApiOperation({ summary: "Separate explicit administrator funding approval only; earmarks one exact task and reduces assessment headroom, never dispatches or approves a model request" })
+  activateFunding(@Req() request: Request, @Body() body: unknown) {
+    const parsed = z.object({ request: wordPressAltFundingRequestSchema, confirmed: z.literal(true), policyHash: z.string().regex(/^[a-f0-9]{64}$/), fundingHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Explicit exact funding confirmation is required.");
+    const { request: target, ...confirmation } = parsed.data;
+    return this.safe(() => this.usage.activateWordPressAltFunding(this.actor(request), target, confirmation));
+  }
   @Post("intents/:intentId/approve")
   @ApiOperation({ summary: "Approve one exact estimated real request; this does not dispatch it", description: "Requires the separate AI_ADMIN_KEY, explicit confirmation and exact hash/reservation from the reviewed intent. Single-use approval expires with its intent. A normal analysis confirmed:true flag cannot substitute for this approval." })
   @ApiCreatedResponse({ schema: { type: "object", description: "The persisted approved intent; no provider call or budget reset." } })

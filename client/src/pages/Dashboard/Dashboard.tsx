@@ -9,6 +9,8 @@ import { DashboardAssessment } from '../../components/dashboard/DashboardAssessm
 import { opportunityTitle } from '../../services/dashboardOpportunityCopy'
 import { useDashboardAssessment } from '../../hooks/useDashboardAssessment'
 import { useOverallInvestigation as useInvestigation } from '../../hooks/useOverallInvestigation'
+import { SavedWordPressFixes } from '../../components/dashboard/SavedWordPressFixes'
+import { RecommendedWordPressFixes } from '../../components/dashboard/RecommendedWordPressFixes'
 
 function statusLabel(status: string) {
   return status.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())
@@ -104,6 +106,8 @@ export function Dashboard() {
       </section>
 
       <DashboardAssessment key={businessId} model={assessment} />
+      <RecommendedWordPressFixes key={`recommendations:${businessId}`} businessId={businessId} />
+      <SavedWordPressFixes key={`fixes:${businessId}`} businessId={businessId} />
 
       <section aria-labelledby="next-steps-title" className="overflow-hidden rounded-2xl border border-blue-500/40 bg-surface shadow-sm">
         <header className="border-b border-line px-5 py-5 sm:px-6">

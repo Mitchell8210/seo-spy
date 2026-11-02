@@ -1,4 +1,5 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
+import { load, loadBuffer } from "cheerio";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Audit } from "../../contracts/domain.js";
@@ -9,6 +10,7 @@ import { FileReportStore } from "../../reports/file-report.store.js";
 import { fixDigest } from "./wordpress-fix.store.js";
 import { fixHash, fixTargetSchema } from "./wordpress-fix.types.js";
 import { WordPressService } from "./wordpress.service.js";
+import { WordPressImageContent } from "../../integrations/wordpress/image-content.js";
 
 export const collectPageEvidenceSchema = z.object({ confirmed: z.literal(true), mediaId: z.number().int().positive(),
   pageResource: z.enum(["pages", "posts"]), pageId: z.number().int().positive() }).strict();
@@ -25,7 +27,7 @@ const rejected = () => new ConflictException({ code: "WORDPRESS_PAGE_EVIDENCE_UN
 @Injectable()
 export class WordPressPageEvidenceService {
   constructor(private readonly wordpress: WordPressService, private readonly collector: WebsiteCollector, private readonly reports: FileReportStore,
-    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository) {}
+    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository, @Optional() private readonly images?: WordPressImageContent) {}
 
   async collect(businessId: string, input: unknown) {
     const body = collectPageEvidenceSchema.parse(input);
@@ -42,6 +44,14 @@ export class WordPressPageEvidenceService {
     const html = charset ? new TextDecoder(charset, { fatal: true }).decode(page.body) : page.body;
     const publicMatch = matchMediaImages(observeImages(html), page.finalUrl, catalog, body.mediaId);
     if (publicMatch.status !== "matched" || publicMatch.matches.some(image => image.alt !== before.target.currentAlt)) throw rejected();
+    const $ = typeof html === "string" ? load(html) : loadBuffer(html);
+    const pageTitle = load(before.pageTitle ?? "").text().replace(/\s+/g, " ").trim().slice(0, 300);
+    const language = ($("html").attr("lang") ?? "").trim().toLowerCase();
+    const pageLanguage = /^(es|en)(?:-|$)/.exec(language)?.[1] ?? "";
+    // Content fingerprints strengthen durable review; an unavailable/oversized source
+    // must not fabricate one or invalidate otherwise exact page/media evidence.
+    let image: Awaited<ReturnType<WordPressImageContent["fingerprint"]>> | null = null;
+    if (this.images) { try { image = await this.images.fingerprint(before.target.sourceUrl, siteUrl); } catch { /* No durable hash is claimed. */ } }
     // Bound changes during collection without pretending WordPress offers an atomic read snapshot.
     const after = await this.wordpress.altTarget(businessId, body.mediaId, body.pageResource, body.pageId);
     if (fixDigest(pageSnapshot(before)) !== fixDigest(pageSnapshot(after))) throw rejected();
@@ -51,9 +61,11 @@ export class WordPressPageEvidenceService {
     const title = "Review this image alternative";
     const explanation = "The exact published page image is bound to authenticated WordPress media metadata. Its alternative requires contextual review; an empty value is not a confirmed defect.";
     const audit: Audit = { id: reportId, businessId, scope: "wordpress-page", mode: "live", status: "completed", stage: "complete", createdAt: now, startedAt: now, completedAt: now,
-      scoringVersion: "homepage-v1", failure: null, warnings: ["Explicit single-page media evidence only; no scores, AI generation, image download or WordPress write. Image purpose is not confirmed by URL matching."],
+      scoringVersion: "homepage-v1", failure: null, warnings: ["Explicit single-page media evidence only; optional bounded raster fingerprint, no scores, AI generation or WordPress write. Image purpose is not confirmed by URL matching."],
       results: { scores: [], evidence: [{ id: evidenceId, auditId: reportId, checkId: "image-alt", sourceUrl: page.finalUrl, collectedAt: page.collectedAt, mode: "live",
-        observed: { values: JSON.stringify(publicMatch.matches), wordpressMediaBinding: JSON.stringify(binding), count: String(publicMatch.matches.length),
+        observed: { values: JSON.stringify(publicMatch.matches), wordpressMediaBinding: JSON.stringify(binding), pageTitle, pageLanguage,
+          sourceImageFingerprintStatus: image ? "verified" : "unavailable",
+          ...(image ? { sourceImageSha256: image.sha256, sourceImageBytes: String(image.bytes), sourceImageCollectedAt: image.collectedAt } : {}), count: String(publicMatch.matches.length),
           missingCount: String(publicMatch.matches.filter(image => image.alt === null).length), emptyCount: String(publicMatch.matches.filter(image => image.alt === "").length) } }],
       findings: [{ id: findingId, auditId: reportId, checkId: "image-alt", evidenceIds: [evidenceId], source: "website", severity: "low", status: "needs_review", title, explanation }],
       recommendations: [{ id: randomUUID(), auditId: reportId, findingId, title, explanation, recommendedChange: "Confirm this image's purpose and whether its current alternative communicates the essential meaning. Keep empty alt when intentionally decorative or redundant.", purpose: "Review the exact image in its published page context.", status: "needs_review" }] } };

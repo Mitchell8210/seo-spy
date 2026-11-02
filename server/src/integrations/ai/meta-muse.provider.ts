@@ -236,8 +236,16 @@ export class MetaMuseProvider {
     void _payload;
     try {
       const mode = this.mode() === "demo" ? "demo" : "poc";
+      if (["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(object(input.input)?.schemaVersion))) {
+        if (mode !== "poc") throw failure("AI_APPROVAL_REQUIRED", "The exact WordPress-alt funding path cannot borrow demo authorization.");
+        return await this.ledger.estimateWordPressAlt({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode });
+      }
       return await this.ledger.estimate({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode }, mode === "poc" ? this.developmentLimits() : undefined);
     } catch (error) { throw this.accountingError(error); }
+  }
+  async wordPressAltApproval(input: MetaMuseInput, context: { actor: string; scope: string }) {
+    try { return await this.ledger.wordPressAltApproval(context.actor, context.scope, this.prepare(input).requestHash); }
+    catch { return { status: "pending_approval" as const }; }
   }
 
   async generate(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization): Promise<MetaMuseGeneration> {

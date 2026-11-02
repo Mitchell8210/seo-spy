@@ -1,5 +1,7 @@
 # Meta Muse provider
 
+Spanish alt input v2 now routes its estimates only through an exact task-specific funded intent in the same central ledger, provider, administrator approval and atomic reservation path. Legacy inputs are unchanged. See the [prepared funding/request handoff](WORDPRESS_ALT_FUNDING.md); funding is NOT activated and no live generation occurred. WordPress remains independently writes-off.
+
 The separate [WordPress alt-text proposal task](WORDPRESS_FIX_WORKFLOW.md#narrow-muse-task) is implemented offline through the same `MetaMuseProvider`/ledger. It accepts only a bounded excerpt of operator-confirmed image context or explicit insufficient evidence; optional user preferences are untrusted, and targets/approval/WordPress execution remain backend-owned. No visual API input/retrieval is enabled. Mock/live records and caches retain distinct provenance. Pure private-operator preview creates no intent. A real generation requires independent exact request/cost approval and existing funded central-ledger capacity; current assessment testing capacity cannot be borrowed for this new scope. No real request, production intent/approval or budget change accompanied this implementation.
 
 ## Single authorized v5 result — November 2, 2026 UTC

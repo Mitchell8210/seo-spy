@@ -20,6 +20,13 @@ export class WordPressService {
   constructor(private readonly config: ConfigService, private readonly client: WordPressClient, private readonly store: WordPressActionsStore,
     @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository) {}
 
+  async businessIdentity(businessId: string) {
+    await this.reportSite(businessId);
+    const business = await this.businesses.findById(businessId);
+    if (!business) throw new NotFoundException("Business not found.");
+    return { id: business.id, name: business.name, website: business.website };
+  }
+
   async reportSite(businessId: string): Promise<string> {
     const business = await this.businesses.findById(businessId);
     if (!business) throw new NotFoundException({ code: "BUSINESS_NOT_FOUND", message: "Business not found." });
@@ -110,6 +117,7 @@ export class WordPressService {
     const sourceUrls = [...new Set([sourceUrl, ...sizes.map(size => sameSite(object(size).source_url))])].sort();
     return { target: { mediaId, pageResource, pageId, sourceUrl, pageUrl: sameSite(page.link), currentAlt: media.alt_text, modified: media.modified_gmt },
       sourceUrls, mediaParentId: Number.isSafeInteger(media.post) ? Number(media.post) : null,
+      pageTitle: typeof object(page.title).rendered === "string" ? String(object(page.title).rendered).slice(0, 1000) : null,
       pageModified: typeof page.modified_gmt === "string" ? page.modified_gmt : null,
       metadataCollectedAt: new Date().toISOString(), pageHtml: String(object(page.content).rendered) };
   }

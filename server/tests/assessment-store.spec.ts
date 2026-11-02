@@ -97,7 +97,7 @@ describe("immutable business-scoped assessment SQLite records and additive v3 mi
     try { store.write("assessment", original, assessmentHash("valid")); } catch (error) { expect(String(error)).not.toContain(databasePath); expect(String(error)).not.toContain("INSERT"); }
   });
 
-  it("migrates v2 to v3 without rewriting application history, Google caches or any protected AI ledger file", async () => {
+  it("migrates v2 to the current schema without rewriting application history, Google caches or any protected AI ledger file", async () => {
     const protectedFiles = ["", ".initialized", "-wal", "-shm", "-journal"];
     const protectedBytes = protectedFiles.map((suffix, index) => Buffer.from(`protected-${suffix}-${index}-must-never-be-opened-as-a-database`));
     for (const [index, suffix] of protectedFiles.entries()) await writeFile(ledgerPath + suffix, protectedBytes[index]);
@@ -110,11 +110,11 @@ describe("immutable business-scoped assessment SQLite records and additive v3 mi
     new GoogleCacheStore(database).write(cached);
     const priorMigrations = database.connection().prepare("SELECT * FROM schema_migrations WHERE version IN (1,2) ORDER BY version").all();
     const priorCounts = database.connection().prepare("SELECT (SELECT COUNT(*) FROM suggestions) suggestions,(SELECT COUNT(*) FROM findings) findings,(SELECT COUNT(*) FROM artifacts) artifacts").get();
-    database.connection().exec("BEGIN IMMEDIATE; DROP TABLE assessment_records; DELETE FROM schema_migrations WHERE version=3; PRAGMA user_version=2; COMMIT;");
+    database.connection().exec("BEGIN IMMEDIATE; DROP TABLE smart_planner_mutations; DROP TABLE smart_planner_tasks; DROP TABLE smart_planners; DROP TABLE assessment_records; DELETE FROM schema_migrations WHERE version IN (3,4,5,6); PRAGMA user_version=2; COMMIT;");
     database.close(); open();
-    expect(database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+    expect(database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(6);
     expect(database.connection().prepare("SELECT * FROM schema_migrations WHERE version IN (1,2) ORDER BY version").all()).toEqual(priorMigrations);
-    expect(database.connection().prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    expect(database.connection().prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }, { version: 6 }]);
     expect(await new SQLiteBusinessRepository(database).findById(businessId)).toEqual(originalBusiness);
     expect(await new SQLiteAuditRepository(database).latestCompleted(businessId)).toEqual(originalAudit);
     expect(database.readArtifact(artifact.kind, artifact.id)).toEqual(artifact);

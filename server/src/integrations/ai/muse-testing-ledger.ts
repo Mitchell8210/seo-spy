@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AiUsageError } from "./ai-usage.types.js";
 import { transparencySelectionSchema } from "../assessment-ai/assessment-muse.types.js";
+import { wordPressAltStatus } from "./muse-wordpress-alt-ledger.js";
 
 export const MUSE_TESTING_POLICY = { version: "muse-controlled-testing-v1", budgetMicros: 5_000_000, dailyReservationMicros: 2_000_000, maxCalls: 10, perRequestMicros: 500_000, concurrency: 1, retries: 0,
   protectedDemoMicros: 148_000_000, promotionalPoolMicros: 150_000_000 } as const;
@@ -78,12 +79,15 @@ export function testingStatus(db: DatabaseSync) {
   const allocation = testingAllocation(db); if (!allocation) return null;
   const today = new Date().toISOString().slice(0, 10);
   const rows = db.prepare("SELECT a.* FROM attempts a JOIN muse_testing_intents t ON t.intent_id=a.intent_id ORDER BY a.rowid").all();
-  return { policy: MUSE_TESTING_POLICY, allocation, calls: rows.length, chargedMicros: rows.reduce((n,r)=>n+Number(r.charged_micros),0), dailyReservedMicros: rows.filter(r=>String(r.reserved_at).startsWith(today)).reduce((n,r)=>n+Number(r.reserve_micros),0),
-    incompleteReceipts: rows.filter(r=>!db.prepare("SELECT intent_id FROM muse_testing_receipts WHERE intent_id=?").get(String(r.intent_id))).length };
+  const alt = wordPressAltStatus(db);
+  return { policy: MUSE_TESTING_POLICY, allocation, calls: rows.length, chargedMicros: rows.reduce((n,r)=>n+Number(r.charged_micros),0), dailyReservedMicros: rows.filter(r=>String(r.reserved_at).startsWith(today)).reduce((n,r)=>n+Number(r.reserve_micros),0) + (alt?.dailyReservedMicros ?? 0),
+    incompleteReceipts: rows.filter(r=>!db.prepare("SELECT intent_id FROM muse_testing_receipts WHERE intent_id=?").get(String(r.intent_id))).length + (alt?.incompleteReceipts ?? 0),
+    ...(alt ? { effectiveFundedMicros: allocation.fundedMicros - alt.funding.request.reserveMicros, effectiveMaxCalls: 9, earmarkedWordPressAltMicros: alt.funding.request.reserveMicros } : {}) };
 }
 export function verifyTestingBudget(db: DatabaseSync, requestHash: string, reserve: number) {
   const status = testingStatus(db); if (!status) return testingFail("AI_TESTING_NOT_ACTIVATED");
-  if (reserve > 500000 || status.calls >= 10 || status.chargedMicros + reserve > Math.min(5000000,status.allocation.fundedMicros) || status.dailyReservedMicros + reserve > 2000000) return testingFail("AI_TESTING_LIMIT");
+  if (status.earmarkedWordPressAltMicros !== undefined && db.prepare("SELECT halted FROM policy WHERE id=1").get()?.halted !== 0) return testingFail("AI_USAGE_HALTED");
+  if (reserve > 500000 || status.calls >= (status.effectiveMaxCalls ?? 10) || status.chargedMicros + reserve > Math.min(5000000,status.effectiveFundedMicros ?? status.allocation.fundedMicros) || status.dailyReservedMicros + reserve > 2000000) return testingFail("AI_TESTING_LIMIT");
   if (status.incompleteReceipts) return testingFail("AI_TESTING_REVIEW_REQUIRED");
   if (status.calls === 0 && (requestHash !== status.allocation.firstRequestHash || reserve !== status.allocation.firstMaximumMicros)) return testingFail("AI_APPROVAL_MISMATCH");
 }

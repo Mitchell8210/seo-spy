@@ -89,6 +89,14 @@ Current routes, relative to the local server origin:
 | GET    | `/api/audits/:auditId/report`           | Download a durable JSON report                                           |
 | GET    | `/api/audits/:auditId/evidence-summary` | Versioned concise Website evidence summaries derived from a saved report |
 | GET    | `/api/audits/:auditId/website-analysis` | Current versioned Website priorities/recommendations from saved evidence |
+| GET    | `/api/businesses/:businessId/smart-planner` | Saved-source task projection and durable planner choices |
+| POST   | `/api/businesses/:businessId/smart-planner/tasks` | Create a custom planner task |
+| PATCH  | `/api/businesses/:businessId/smart-planner/tasks/:taskId` | Persist schedule or user-asserted completion |
+| PATCH  | `/api/businesses/:businessId/smart-planner/preferences` | Save weekend preference and atomically clear weekend schedules when disabled |
+| POST   | `/api/businesses/:businessId/smart-planner/auto-plan` | Persist deterministic scheduling without AI |
+| POST   | `/api/businesses/:businessId/smart-planner/reconcile` | Reconcile saved Website/Facebook/consistency sources without reopening completed tasks |
+
+Smart Planner uses application SQLite schema 6 (including the early schema-5 receipt repair) and durable business-scoped revision/mutation receipts, including checksummed planning results. The `planner-balanced-v2` policy supports estimated duration, half-hour starts, daily minutes/task limits and multiweek rollover; Auto Plan requires an explicitly confirmed planning time zone and never backdates work. Preserve completed guidance/provenance/timestamps, existing schedules, manual overlaps and untouched legacy localStorage. Limit UI changes to the approved duration, Planning settings and accurate interval rendering additions. Reads/reconciliation never collect, generate AI or execute fixes; pending/unavailable/failed sources retain saved choices. Public identity/ownership, optional browser import and cross-report semantic matching remain separate work. See [planner contracts and verification](SMART_PLANNER_PLAN.md).
 
 Website performance priorities follow [WEBSITE_PRIORITY_RULES.md](WEBSITE_PRIORITY_RULES.md). Keep policy versions separate from Lighthouse category scoring. New reports persist derived analysis; old source archives remain immutable and the Website page consumes current analysis through the read-only endpoint. Do not restore blanket low severity or promote all findings solely from a category score.
 

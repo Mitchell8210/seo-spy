@@ -1,4 +1,7 @@
 import type { Audit, Business, Connection } from "../contracts/domain.js";
+export type { PlannerRepository } from "../modules/smart-planner/planner.types.js";
+
+export const SMART_PLANNER_REPOSITORY = Symbol("SMART_PLANNER_REPOSITORY");
 
 export const BUSINESS_REPOSITORY = Symbol("BUSINESS_REPOSITORY");
 export const AUDIT_REPOSITORY = Symbol("AUDIT_REPOSITORY");

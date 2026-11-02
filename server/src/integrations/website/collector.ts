@@ -102,7 +102,7 @@ export class WebsiteDns {
 
 @Injectable()
 export class WebsiteTransport {
-  fetch(url: URL, address: string, signal: AbortSignal): Promise<PageResponse> {
+  fetch(url: URL, address: string, signal: AbortSignal, kind: "html" | "raster-image" = "html"): Promise<PageResponse> {
     return new Promise((resolve, reject) => {
       const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
         url,
@@ -116,12 +116,12 @@ export class WebsiteTransport {
             callback(null, address, isIP(address)),
           headers: {
             "user-agent": "SEO-Spy/0.1 (single-page audit)",
-            accept: "text/html",
+            accept: kind === "raster-image" ? "image/png,image/jpeg,image/webp,image/gif" : "text/html",
             "accept-encoding": "identity",
           },
         },
         (response) => {
-          void readPageResponse(response, address).then(resolve, reject);
+          void readPageResponse(response, address, kind).then(resolve, reject);
         },
       );
       // Give other validated addresses a chance without limiting a healthy response's body time.
@@ -151,6 +151,7 @@ export class WebsiteTransport {
 export function readPageResponse(
   response: IncomingMessage,
   address: string,
+  kind: "html" | "raster-image" = "html",
 ): Promise<PageResponse> {
   return new Promise((resolve, reject) => {
     response.on("error", reject);
@@ -196,11 +197,12 @@ export function readPageResponse(
       response.destroy();
       return;
     }
-    if (!/^text\/html(?:\s*;|\s*$)/i.test(contentType)) {
+    const supportedType = kind === "raster-image" ? /^image\/(?:png|jpeg|webp|gif)(?:\s*;|\s*$)/i : /^text\/html(?:\s*;|\s*$)/i;
+    if (!supportedType.test(contentType)) {
       reject(
         new CollectionError(
           "UNSUPPORTED_CONTENT_TYPE",
-          "The homepage did not return HTML.",
+          kind === "raster-image" ? "The resource did not return a supported raster image." : "The homepage did not return HTML.",
         ),
       );
       response.destroy();
