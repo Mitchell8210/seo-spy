@@ -34,5 +34,5 @@ export function useSmartPlanner() {
   function savePreferences(preferences: Omit<PlannerPreferences, 'useWeekends'>) {
     return session.mutate('PATCH', '/preferences', preferences, 'Planning settings saved. Existing schedules were kept.')
   }
-  return { ...view, businessId, loading: view.loading || view.saving, complete, schedule, addCustom, toggleWeekends, autoPlan, savePreferences, rescan: () => session.refresh() }
+  return { ...view, businessId, loading: view.loading || view.saving, complete, schedule, addCustom, toggleWeekends, autoPlan, savePreferences, rescan: () => session.refresh(), reload: () => session.reload(), serverId: (key: string) => session.serverId(key) }
 }

@@ -72,8 +72,9 @@ export class PlannerTaskResponseDto {
   @ApiProperty({ enum: ["demo", "saved", "custom"] }) mode!: "demo" | "saved" | "custom";
   @ApiProperty({ enum: statuses }) status!: typeof statuses[number];
   @ApiProperty({ enum: durationOptions, description: "Planning estimate, never actual time spent" }) estimatedDurationMinutes!: number;
-  @ApiProperty({ enum: ["default", "legacy-default", "user"] }) durationEstimateSource!: "default" | "legacy-default" | "user";
-  @ApiProperty({ enum: ["manual", "auto", "legacy-unknown"], nullable: true }) scheduledBy!: "manual" | "auto" | "legacy-unknown" | null;
+  @ApiPropertyOptional({ description: "Original finding severity, never model-estimated impact" }) sourceSeverity?: string;
+  @ApiProperty({ enum: ["default", "legacy-default", "user", "muse-estimate", "offline-estimate"] }) durationEstimateSource!: "default" | "legacy-default" | "user" | "muse-estimate" | "offline-estimate";
+  @ApiProperty({ enum: ["manual", "auto", "legacy-unknown", "muse", "offline-preview"], nullable: true }) scheduledBy!: "manual" | "auto" | "legacy-unknown" | "muse" | "offline-preview" | null;
   @ApiProperty({ type: PlannerScheduleDto, nullable: true }) schedule!: PlannerScheduleDto | null;
   @ApiProperty({ type: String, nullable: true }) destination!: string | null;
   @ApiProperty({ type: String, nullable: true }) notes!: string | null;

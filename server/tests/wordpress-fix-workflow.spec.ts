@@ -14,7 +14,7 @@ import { WebsiteCollector } from "../src/integrations/website/collector.js";
 import { BUSINESS_REPOSITORY } from "../src/persistence/repositories.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
 import type { AuditReportRecord } from "../src/reports/report.types.js";
-import { MetaMuseTransport } from "../src/integrations/ai/meta-muse.provider.js";
+import { MetaMuseError, MetaMuseProvider, MetaMuseTransport } from "../src/integrations/ai/meta-muse.provider.js";
 import { AiUsageStore } from "../src/integrations/ai/ai-usage.store.js";
 import { AppDatabase } from "../src/persistence/sqlite/app-database.js";
 import { WordPressActionsStore } from "../src/modules/wordpress/wordpress-actions.store.js";
@@ -24,6 +24,7 @@ import { operatorIdentity } from "../src/modules/wordpress/wordpress.guard.js";
 import { validateAltOutput } from "../src/modules/wordpress/wordpress-fix.types.js";
 import { WordPressFixSessions } from "../src/modules/wordpress/wordpress-fix-session.js";
 import { WordPressService } from "../src/modules/wordpress/wordpress.service.js";
+import { MUSE_TESTING_POLICY_HASH } from "../src/integrations/ai/muse-testing-ledger.js";
 import type { Request, Response } from "express";
 
 const businessId = "demo-guzman", operator = "offline-wordpress-operator-fixture-32-characters";
@@ -33,12 +34,14 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
   let app: INestApplication, directory: string, config: ConfigService, report: AuditReportRecord, reportId: string, evidenceId: string;
   let alt: string, modified: string, publicAlt: string | null, pageAlt: string | null, publicHtml: string | null, transport: ReturnType<typeof jest.fn<WordPressClient["request"]>>;
   let muse: ReturnType<typeof jest.fn<MetaMuseTransport["post"]>>, cookie: string, csrf: string, writable: boolean, imageSource: string, failure: string, writes: number;
+  let mediaId: number, pageId: number;
   const operatorPost = (path: string, body: unknown) => request(app.getHttpServer()).post(path).set("Host", "localhost:3001").set("Authorization", `Bearer ${operator}`).send(body as object);
   const post = (path: string, body: unknown) => request(app.getHttpServer()).post(prefix + path).set("Host", "localhost:5173").set("Origin", origin).set("Cookie", cookie).set("x-wordpress-csrf", csrf).send(body as object);
   const get = (path: string) => request(app.getHttpServer()).get(prefix + path).set("Host", "localhost:5173").set("Cookie", cookie);
   const patchCalls = () => transport.mock.calls.filter(row => row[1] === "POST");
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "seo-spy-fix-workflow-"));
+    mediaId = 7; pageId = 9;
     config = new ConfigService({ NODE_ENV: "test", DATABASE_PATH: ":memory:", WORDPRESS_BUSINESS_ID: businessId, WORDPRESS_SITE_URL: "https://example.com", WORDPRESS_USERNAME: "offline-user",
       WORDPRESS_APPLICATION_PASSWORD: "offline-password", WORDPRESS_OPERATOR_KEY: operator, WORDPRESS_FRONTEND_ORIGIN: origin, WORDPRESS_WRITES_ENABLED: false,
       WORDPRESS_ACTIONS_DIR: join(directory, "actions"), AI_USAGE_DB: join(directory, "usage.sqlite"), AI_ADMIN_KEY: "offline-admin-fixture-at-least-32-characters", MOCK_AI: true, AI_MODE: "mock", AI_ENABLED: false,
@@ -53,8 +56,8 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     transport = jest.fn<WordPressClient["request"]>().mockImplementation(async (_connection, method, path, body) => {
       if (path.startsWith("/wp-json/wp/v2/users/me")) return { id: 1, roles: ["editor"], capabilities: { upload_files: writable, edit_posts: writable } };
       if (method === "OPTIONS") return { endpoints: writable ? [{ methods: ["POST"], args: { alt_text: { type: "string" } } }] : [] };
-      if (path.startsWith("/wp-json/wp/v2/pages/9")) return { id: 9, type: "page", status: "publish", link: "https://example.com/page/", content: { protected: false, rendered: `<img class="wp-image-7" src="${imageSource}" alt="${pageAlt ?? alt}">` } };
-      if (path.startsWith("/wp-json/wp/v2/media/7")) {
+      if (path.startsWith(`/wp-json/wp/v2/pages/${pageId}`)) return { id: pageId, type: "page", status: "publish", link: "https://example.com/page/", content: { protected: false, rendered: `<img class="wp-image-${mediaId}" src="${imageSource}" alt="${pageAlt ?? alt}">` } };
+      if (path.startsWith(`/wp-json/wp/v2/media/${mediaId}`)) {
         if (method === "POST") {
           writes++;
           if (failure === "network") throw new Error("Offline uncertain transport");
@@ -62,7 +65,7 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
           expect(Object.keys(body!)).toEqual(["alt_text"]);
           alt = String((body as Record<string, unknown>).alt_text); modified = `2026-11-02T00:0${writes}:00`;
         }
-        return { id: 7, type: "attachment", media_type: "image", status: "inherit", post: 9, source_url: imageSource, alt_text: alt, modified_gmt: modified };
+        return { id: mediaId, type: "attachment", media_type: "image", status: "inherit", post: pageId, source_url: imageSource, alt_text: alt, modified_gmt: modified };
       }
       throw new Error("Unexpected offline WordPress request");
     });
@@ -72,7 +75,7 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
       .overrideProvider(MetaMuseTransport).useValue({ post: muse })
       .overrideProvider(FileReportStore).useValue({ read: async (id: string) => id === reportId ? structuredClone(report) : null })
       .overrideProvider(BUSINESS_REPOSITORY).useValue({ findById: async (id: string) => id === businessId ? { ...report.business } : null, connections: async () => [] })
-      .overrideProvider(WebsiteCollector).useValue({ collect: async () => ({ requestedUrl: "https://example.com/page/", finalUrl: "https://example.com/page/", status: 200, contentType: "text/html; charset=utf-8", collectedAt: new Date().toISOString(), body: Buffer.from(publicHtml ?? `<img class="wp-image-7" src="${imageSource}" alt="${publicAlt ?? alt}">`) }) }).compile();
+      .overrideProvider(WebsiteCollector).useValue({ collect: async () => ({ requestedUrl: "https://example.com/page/", finalUrl: "https://example.com/page/", status: 200, contentType: "text/html; charset=utf-8", collectedAt: new Date().toISOString(), body: Buffer.from(publicHtml ?? `<img class="wp-image-${mediaId}" src="${imageSource}" alt="${publicAlt ?? alt}">`) }) }).compile();
     app = configureApp(module.createNestApplication()); app.useLogger(false); await app.init();
     const ticket = await operatorPost("/api/wordpress/browser-tickets", { businessId }); expect(ticket.status).toBe(201);
     const code = new URLSearchParams(new URL(ticket.body.url).hash.slice(1)).get("wordpress-session");
@@ -90,6 +93,96 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     const proposal = await post("/fixes/proposals", { generationId: generation.body.id, altText: generation.body.output.altText });
     expect(proposal.status).toBe(201); return { evidence, generation: generation.body, proposal: proposal.body };
   }
+  it("keeps purpose checks within the real WordPress two-request concurrency limit", async () => {
+    const original = transport.getMockImplementation()!;
+    let active = 0, peak = 0;
+    transport.mockImplementation(async (...args) => {
+      active++; peak = Math.max(peak, active);
+      try {
+        if (active > 2) throw new Error("WordPress request concurrency limit reached");
+        await Promise.resolve(); return await original(...args);
+      } finally { active--; }
+    });
+    await enroll(); expect(peak).toBe(2); expect(writes).toBe(0);
+  });
+  it("accepts an informative topic without requiring the customer to compose Spanish alt text", async () => {
+    transport.mockClear();
+    const result = await post("/fixes/purpose", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId, mediaId, pageResource: "pages", pageId,
+      purpose: "informative", verifiedDescription: "Taxes", proposalLanguage: "es", requiredTerms: ["Taxes"] });
+    expect(result.status).toBe(201); expect(result.body.verifiedDescription).toBe("Taxes");
+    expect(transport).toHaveBeenCalledTimes(4); expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+  });
+  it("confirms image purpose with one authenticated target snapshot and rechecks for later generation", async () => {
+    transport.mockClear();
+    const response = await post("/fixes/purpose", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId,
+      mediaId, pageResource: "pages", pageId, purpose: "informative", verifiedDescription: description });
+    expect(response.status).toBe(201);
+    expect(transport.mock.calls.map(([, method, path]) => [method, path])).toEqual(expect.arrayContaining([
+      ["GET", `/wp-json/wp/v2/media/${mediaId}?context=edit`],
+      ["GET", `/wp-json/wp/v2/pages/${pageId}?context=edit`],
+      ["GET", "/wp-json/wp/v2/users/me?context=edit"],
+      ["OPTIONS", `/wp-json/wp/v2/media/${mediaId}`],
+    ]));
+    expect(transport.mock.calls).toHaveLength(4);
+    expect(writes).toBe(0); expect(muse).not.toHaveBeenCalled();
+    writable = false;
+    expect((await post("/fixes/generations", { evidenceId: response.body.id })).status).toBe(409);
+    expect(transport.mock.calls).toHaveLength(8);
+    expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+  });
+  it("runs the three-step customer flow under one fixture allowance while global mock and write defaults stay disabled", async () => {
+    mediaId = 5658; pageId = 5652;
+    const ledger = app.get(AiUsageStore), admin = "a".repeat(64), actor = operatorIdentity(operator);
+    jest.useFakeTimers({ now: Date.now() - 6 * 60000, doNotFake: ["nextTick", "setImmediate", "setTimeout"] });
+    try {
+      for (const [index, reserveMicros] of [131460, 6544, 6544, 8196].entries()) {
+        const requestHash = String(index + 1).repeat(64);
+        const intent = await ledger.estimate({ actor: admin, scope: "offline-history", requestHash, cacheKey: requestHash, mode: "poc", model: "muse-spark-1.3", maxInputTokens: 10, maxOutputTokens: 128,
+          reserveMicros, priceVersion: "offline-price", reason: "Disposable historical fixture only" });
+        await ledger.approve(intent.id, admin);
+        const attempt = await ledger.reserve(intent.id, { actor: admin, requestHash, mode: "poc" });
+        await ledger.settle(attempt.id, index === 3 ? { status: "success", inputTokens: 10, outputTokens: 105, actualMicros: 460 } : { status: "failed", errorCode: "OFFLINE_FIXTURE" });
+        jest.setSystemTime(Date.now() + 61000);
+      }
+      await expect(ledger.estimate({ actor: admin, scope: "offline-history", requestHash: "e".repeat(64), cacheKey: "e".repeat(64), mode: "poc", model: "muse-spark-1.3", maxInputTokens: 1, maxOutputTokens: 16,
+        reserveMicros: 1000, priceVersion: "offline-price", reason: "Narrow disposable historical policy" }, { budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4 })).rejects.toBeDefined();
+      await ledger.activateTestingAllocation(admin, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: "f".repeat(64), maximumMicros: 10000 });
+    } finally { jest.useRealTimers(); }
+    const text = "Ayuda para entender y responder cartas del IRS.";
+    const evidence = await operatorPost(prefix + "/fix-operator/evidence", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId, mediaId, pageResource: "pages", pageId,
+      purpose: "informative", verifiedDescription: text, proposalLanguage: "es", requiredTerms: ["ayuda", "cartas", "IRS"] });
+    expect(evidence.status).toBe(201);
+    const blocked = await post("/fixes/customer-generations", { evidenceId: evidence.body.id });
+    expect(blocked.status).toBe(409); expect(blocked.body.error).toMatchObject({ code: "AI_WORDPRESS_ALLOWANCE_REQUIRED", message: "Complete the one-time Fix with AI setup before continuing." }); expect(muse).not.toHaveBeenCalled();
+    const scope = { actor, businessId, siteUrl: "https://example.com/", mediaIds: [5658] };
+    const preview = await ledger.prepareWordPressAllowance(admin, scope);
+    await ledger.activateWordPressAllowance(admin, scope, { confirmed: true, policyHash: preview.policyHash, fundingHash: preview.fundingHash });
+    const authorize = jest.spyOn(app.get(MetaMuseProvider), "authorizeAllowedWordPressAlt");
+    for (const [code, message] of [["AI_RATE_LIMIT", "Please wait a minute before requesting a suggestion."], ["AI_USAGE_UNCERTAIN", "We could not confirm this request. Review its saved status before trying again."]]) {
+      authorize.mockRejectedValueOnce(new MetaMuseError(code!, "Private provider diagnostics must not escape"));
+      const denied = await post("/fixes/customer-generations", { evidenceId: evidence.body.id });
+      expect(denied.status).toBe(409); expect(denied.body.error).toMatchObject({ code, message }); expect(muse).not.toHaveBeenCalled();
+    }
+    muse.mockResolvedValue({ status: 200, requestId: "offline-customer-response", body: JSON.stringify({ status: "completed", model: "muse-spark-1.3", usage: { input_tokens: 100, output_tokens: 50 },
+      output: [{ type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: JSON.stringify({ schemaVersion: "wordpress-alt-output-v2", status: "proposed", altText: text, reason: "CONTEXT_DRAFT" }) }] }] }) });
+    const generated = await post("/fixes/customer-generations", { evidenceId: evidence.body.id });
+    expect(generated.status).toBe(201); expect(generated.body).toMatchObject({ isMock: false, provider: "meta", output: { altText: text } });
+    const cached = await post("/fixes/customer-generations", { evidenceId: evidence.body.id }); expect(cached.body.id).toBe(generated.body.id); expect(muse).toHaveBeenCalledTimes(1);
+    const proposed = await post("/fixes/proposals", { generationId: generated.body.id, altText: text }); expect(proposed.status).toBe(201);
+    expect((await request(app.getHttpServer()).post(prefix + "/fixes/customer-generations").set("Host", "localhost:5173").set("Origin", origin).send({ evidenceId: evidence.body.id })).status).toBe(401);
+    expect((await request(app.getHttpServer()).post(prefix + `/fixes/proposals/${proposed.body.id}/customer-apply`).set("Host", "localhost:5173").set("Origin", origin).set("Cookie", cookie).send({ confirmed: true, proposalHash: proposed.body.hash })).status).toBe(403);
+    expect((await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: "0".repeat(64) })).status).toBe(409); expect(writes).toBe(0);
+    const applied = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(applied.status).toBe(201); expect(applied.body).toMatchObject({ outcome: { status: "applied", verification: "verified_stored_fields" }, verification: null }); expect(writes).toBe(1);
+    const replay = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(replay.body.outcome).toEqual(applied.body.outcome); expect(writes).toBe(1); expect(muse).toHaveBeenCalledTimes(1);
+    const beforeVerificationReads = transport.mock.calls.length;
+    const verified = await post(`/fixes/proposals/${proposed.body.id}/verifications`, { confirmed: true });
+    expect(verified.body).toMatchObject({ status: "public_verified", receipt: { storedFieldMatches: true } });
+    expect(transport.mock.calls.length - beforeVerificationReads).toBe(2);
+    const saved = await get("/fixes"); expect(saved.body.items[0].workflow).toMatchObject({ status: "public_verified", proposal: { changes: { altText: text } } });
+    expect(config.get("MOCK_AI")).toBe(true); expect(config.get("AI_ENABLED")).toBe(false); expect(config.get("WORDPRESS_WRITES_ENABLED")).toBe(false);
+  });
   it("completes generation, edited proposals, exact approval, stored/public verification and separately approved restoration", async () => {
     const ledger = app.get(AiUsageStore), before = await ledger.status();
     const { evidence, generation, proposal } = await prepare();

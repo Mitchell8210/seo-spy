@@ -5,6 +5,7 @@ import { PlannerDialog, type PlannerDialogRequest } from '../../components/plann
 import { PlannerKpis } from '../../components/planner/PlannerKpis'
 import { PlannerTasks } from '../../components/planner/PlannerTasks'
 import { PlannerSettingsDialog } from '../../components/planner/PlannerSettingsDialog'
+import { PlannerAiDialog } from '../../components/planner/PlannerAiDialog'
 import { useSmartPlanner } from '../../hooks/useSmartPlanner'
 import { dateKey, mondayOf } from '../../services/smartPlanner'
 
@@ -22,6 +23,7 @@ export function SmartPlanner() {
   const [dialog, setDialog] = useState<PlannerDialogRequest | null>(null)
   const [dialogBusiness, setDialogBusiness] = useState(planner.businessId)
   const [settingsBusiness, setSettingsBusiness] = useState<string | null>(null)
+  const [aiBusiness, setAiBusiness] = useState<string | null>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   function open(request: PlannerDialogRequest) { previousFocus.current = document.activeElement as HTMLElement | null; setDialogBusiness(planner.businessId); setDialog(request) }
   function close() {
@@ -39,9 +41,10 @@ export function SmartPlanner() {
     {planner.error && <p role="alert" className="rounded-lg border border-amber-400/25 p-3 text-xs leading-5 text-amber-200">{planner.error}</p>}
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,0.4fr)_minmax(0,0.6fr)]">
       <PlannerTasks dragging={dragging} onDragStart={startDrag} onDragEnd={endDrag} tasks={planner.tasks.filter(task => !task.schedule)} loading={planner.loading} onRescan={planner.rescan} onFix={(task, kind) => open({ kind, task })} onSchedule={task => open({ kind: 'editor', task })} onCreate={() => open({ kind: 'editor' })} />
-      <PlannerCalendar dragging={dragging} onDragStart={startDrag} onDragEnd={endDrag} tasks={planner.tasks} monday={monday} useWeekends={planner.useWeekends} onWeek={direction => setMonday(current => { const next = new Date(current); next.setDate(next.getDate() + direction * 7); return next })} onWeekends={planner.toggleWeekends} onAutoPlan={() => planner.preferences.timeZone ? planner.autoPlan(monday) : setSettingsBusiness(planner.businessId)} onSettings={() => setSettingsBusiness(planner.businessId)} onManual={() => open({ kind: 'editor' })} onEdit={task => open({ kind: 'editor', task })} onMove={planner.schedule} />
+      <PlannerCalendar dragging={dragging} onDragStart={startDrag} onDragEnd={endDrag} tasks={planner.tasks} monday={monday} useWeekends={planner.useWeekends} onWeek={direction => setMonday(current => { const next = new Date(current); next.setDate(next.getDate() + direction * 7); return next })} onWeekends={planner.toggleWeekends} onAutoPlan={() => planner.preferences.timeZone ? planner.autoPlan(monday) : setSettingsBusiness(planner.businessId)} onAiPlan={() => setAiBusiness(planner.businessId)} onSettings={() => setSettingsBusiness(planner.businessId)} onManual={() => open({ kind: 'editor' })} onEdit={task => open({ kind: 'editor', task })} onMove={planner.schedule} />
     </div>
     {dialog && dialogBusiness === planner.businessId && <PlannerDialog key={planner.businessId} request={dialog} tasks={planner.tasks} monday={dateKey(monday)} useWeekends={planner.useWeekends} onClose={close} onComplete={planner.complete} onSchedule={planner.schedule} onCreate={planner.addCustom} />}
     {settingsBusiness === planner.businessId && <PlannerSettingsDialog key={`settings:${planner.businessId}`} preferences={planner.preferences} onSave={planner.savePreferences} onClose={() => setSettingsBusiness(null)} />}
+    {aiBusiness === planner.businessId && <PlannerAiDialog key={`ai:${planner.businessId}`} businessId={planner.businessId} weekStart={dateKey(monday)} tasks={planner.tasks.map(task => ({ ...task, id: planner.serverId(task.id) ?? task.id }))} onClose={() => setAiBusiness(null)} onReload={planner.reload} />}
   </div>
 }

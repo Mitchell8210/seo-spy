@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AiUsageError } from "./ai-usage.types.js";
 import { transparencySelectionSchema } from "../assessment-ai/assessment-muse.types.js";
 import { wordPressAltStatus } from "./muse-wordpress-alt-ledger.js";
+import { wordPressAllowanceAccounting } from "./muse-wordpress-allowance.js";
 
 export const MUSE_TESTING_POLICY = { version: "muse-controlled-testing-v1", budgetMicros: 5_000_000, dailyReservationMicros: 2_000_000, maxCalls: 10, perRequestMicros: 500_000, concurrency: 1, retries: 0,
   protectedDemoMicros: 148_000_000, promotionalPoolMicros: 150_000_000 } as const;
@@ -80,9 +81,10 @@ export function testingStatus(db: DatabaseSync) {
   const today = new Date().toISOString().slice(0, 10);
   const rows = db.prepare("SELECT a.* FROM attempts a JOIN muse_testing_intents t ON t.intent_id=a.intent_id ORDER BY a.rowid").all();
   const alt = wordPressAltStatus(db);
-  return { policy: MUSE_TESTING_POLICY, allocation, calls: rows.length, chargedMicros: rows.reduce((n,r)=>n+Number(r.charged_micros),0), dailyReservedMicros: rows.filter(r=>String(r.reserved_at).startsWith(today)).reduce((n,r)=>n+Number(r.reserve_micros),0) + (alt?.dailyReservedMicros ?? 0),
-    incompleteReceipts: rows.filter(r=>!db.prepare("SELECT intent_id FROM muse_testing_receipts WHERE intent_id=?").get(String(r.intent_id))).length + (alt?.incompleteReceipts ?? 0),
-    ...(alt ? { effectiveFundedMicros: allocation.fundedMicros - alt.funding.request.reserveMicros, effectiveMaxCalls: 9, earmarkedWordPressAltMicros: alt.funding.request.reserveMicros } : {}) };
+  const allowance = wordPressAllowanceAccounting(db);
+  return { policy: MUSE_TESTING_POLICY, allocation, calls: rows.length, chargedMicros: rows.reduce((n,r)=>n+Number(r.charged_micros),0), dailyReservedMicros: rows.filter(r=>String(r.reserved_at).startsWith(today)).reduce((n,r)=>n+Number(r.reserve_micros),0) + (alt?.dailyReservedMicros ?? 0) + (allowance?.dailyReservedMicros ?? 0),
+    incompleteReceipts: rows.filter(r=>!db.prepare("SELECT intent_id FROM muse_testing_receipts WHERE intent_id=?").get(String(r.intent_id))).length + (alt?.incompleteReceipts ?? 0) + (allowance?.incompleteReceipts ?? 0),
+    ...(alt || allowance ? { effectiveFundedMicros: allocation.fundedMicros - (alt?.funding.request.reserveMicros ?? 0) - (allowance ? 150000 : 0), effectiveMaxCalls: 10 - (alt ? 1 : 0) - (allowance ? 3 : 0), earmarkedWordPressAltMicros: (alt?.funding.request.reserveMicros ?? 0) + (allowance ? 150000 : 0) } : {}) };
 }
 export function verifyTestingBudget(db: DatabaseSync, requestHash: string, reserve: number) {
   const status = testingStatus(db); if (!status) return testingFail("AI_TESTING_NOT_ACTIVATED");

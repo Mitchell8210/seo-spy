@@ -30,8 +30,9 @@ export const taskSchema = z.object({
   sourceChannel: z.enum(["website", "social", "consistency"]).nullable(), sourcePresent: z.boolean(),
   completedAt: z.string().datetime().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   payloadVersion: z.literal(2).optional(), estimatedDurationMinutes: z.number().refine(value => (durationOptions as readonly number[]).includes(value)).optional(),
-  durationEstimateSource: z.enum(["default", "legacy-default", "user"]).optional(),
-  scheduledBy: z.enum(["manual", "auto", "legacy-unknown"]).nullable().optional(),
+  durationEstimateSource: z.enum(["default", "legacy-default", "user", "muse-estimate", "offline-estimate"]).optional(),
+  scheduledBy: z.enum(["manual", "auto", "legacy-unknown", "muse", "offline-preview"]).nullable().optional(),
+  sourceSeverity: z.string().max(40).optional(),
 }).strict().superRefine((task, context) => {
   if ((task.status === "Done") !== (task.completedAt !== null)) context.addIssue({ code: "custom", message: "Completion timestamp mismatch" });
   if ((task.estimatedDurationMinutes === undefined) !== (task.durationEstimateSource === undefined) || task.payloadVersion === 2 && task.estimatedDurationMinutes === undefined) context.addIssue({ code: "custom", message: "Duration estimate provenance mismatch" });

@@ -41,7 +41,7 @@ describe("Smart Planner schema 4 to 5 migration and legacy history", () => {
   });
   function downgrade(database: AppDatabase) {
     // Reconstruct exactly the supported previous schema, only in this temporary DB.
-    database.connection().exec(`BEGIN IMMEDIATE;
+    database.connection().exec(`BEGIN IMMEDIATE; DROP TABLE smart_planner_ai_proposals; DROP TABLE smart_planner_ai_preferences;
       ALTER TABLE smart_planner_mutations DROP COLUMN result_json;
       ALTER TABLE smart_planner_mutations DROP COLUMN result_checksum;
       ALTER TABLE smart_planner_tasks DROP COLUMN scheduled_minute;
@@ -49,7 +49,7 @@ describe("Smart Planner schema 4 to 5 migration and legacy history", () => {
       ALTER TABLE smart_planners DROP COLUMN max_tasks_per_day;
       ALTER TABLE smart_planners DROP COLUMN horizon_weeks;
       ALTER TABLE smart_planners DROP COLUMN time_zone;
-      DELETE FROM schema_migrations WHERE version IN (5,6);
+      DELETE FROM schema_migrations WHERE version IN (5,6,7);
       PRAGMA user_version=4; COMMIT;`);
   }
 
@@ -73,7 +73,7 @@ describe("Smart Planner schema 4 to 5 migration and legacy history", () => {
     first.database.close();
 
     const migrated = open();
-    expect(migrated.database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(migrated.database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(7);
     expect(migrated.database.connection().prepare("SELECT * FROM schema_migrations ORDER BY version").all().slice(0, 4)).toEqual(migrationHistory);
     expect(migrated.database.connection().prepare("SELECT * FROM audits ORDER BY id").all()).toEqual(audits);
     expect(migrated.database.connection().prepare("SELECT * FROM businesses ORDER BY id").all()).toEqual(businesses);
@@ -101,7 +101,7 @@ describe("Smart Planner schema 4 to 5 migration and legacy history", () => {
     const restarted = open();
     expect(await restarted.repository.read(businessId)).toEqual(saved);
     expect(restarted.database.connection().prepare("SELECT scheduled_minute FROM smart_planner_tasks WHERE id=?").get(pending.id)?.scheduled_minute).toBe(30);
-    expect(restarted.database.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(6);
+    expect(restarted.database.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(7);
     for (const [index, suffix] of protectedSuffixes.entries()) expect(await readFile(ledgerPath + suffix)).toEqual(protectedContent[index]);
   });
 
@@ -112,16 +112,16 @@ describe("Smart Planner schema 4 to 5 migration and legacy history", () => {
     await first.repository.mutate(businessId, mutation, "original-request", state => { state.tasks.push(task); });
     const db = first.database.connection();
     const tasks = db.prepare("SELECT * FROM smart_planner_tasks").all();
-    db.exec(`BEGIN IMMEDIATE;
+    db.exec(`BEGIN IMMEDIATE; DROP TABLE smart_planner_ai_proposals; DROP TABLE smart_planner_ai_preferences;
       ${missing === "both" ? "ALTER TABLE smart_planner_mutations DROP COLUMN result_json;" : ""}
       ALTER TABLE smart_planner_mutations DROP COLUMN result_checksum;
-      DELETE FROM schema_migrations WHERE version=6; PRAGMA user_version=5; COMMIT;`);
+      DELETE FROM schema_migrations WHERE version IN (6,7); PRAGMA user_version=5; COMMIT;`);
     const receipts = db.prepare("SELECT business_id,mutation_id,request_hash,revision,created_at FROM smart_planner_mutations").all();
     const history = db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
     first.database.close();
     const repaired = open();
     const connection = repaired.database.connection();
-    expect(connection.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(connection.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
     expect(connection.prepare("SELECT * FROM schema_migrations ORDER BY version").all().slice(0, 5)).toEqual(history);
     expect(connection.prepare("SELECT * FROM smart_planner_tasks").all()).toEqual(tasks);
     expect(connection.prepare("SELECT business_id,mutation_id,request_hash,revision,created_at FROM smart_planner_mutations").all()).toEqual(receipts);

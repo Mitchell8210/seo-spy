@@ -22,8 +22,8 @@ export interface PlannerTask {
   schedule?: TaskSchedule
   notes?: string
   estimatedDurationMinutes?: number
-  durationEstimateSource?: 'default' | 'legacy-default' | 'user'
-  scheduledBy?: 'manual' | 'auto' | 'legacy-unknown' | null
+  durationEstimateSource?: 'default' | 'legacy-default' | 'user' | 'muse-estimate' | 'offline-estimate'
+  scheduledBy?: 'manual' | 'auto' | 'legacy-unknown' | 'muse' | 'offline-preview' | null
 }
 export interface TaskEdit { status?: PlannerTask['status']; schedule?: TaskSchedule | null }
 export interface PlannerLocalState {

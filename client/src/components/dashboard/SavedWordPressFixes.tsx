@@ -5,7 +5,7 @@ import { StatusBadge } from '../common/StatusBadge'
 import { wordpressFix, type FixWorkflow } from '../../services/wordpressFix'
 
 interface SavedFix { reportId: string; findingId: string; evidenceId: string; workflow: FixWorkflow & {
-  target?: { sourceUrl: string; mediaId: number; pageId: number }; pageTitle?: string | null; completedAt?: string | null
+  target?: { sourceUrl: string; mediaId: number; pageId: number }; thumbnailUrl?: string | null; pageTitle?: string | null; completedAt?: string | null
 } }
 const applied = (item: SavedFix) => item.workflow.proposal?.outcome?.status === 'applied' && !item.workflow.proposal.restorationOf
 function completedTime(workflow: SavedFix['workflow']) {
@@ -56,7 +56,7 @@ export function SavedWordPressFixes({ businessId }: { businessId: string }) {
         return <li key={proposal.id} className="rounded-xl border border-line bg-elevated/40 p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-start gap-3">
-              {workflow.target?.sourceUrl && <img src={workflow.target.sourceUrl} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg border border-line bg-surface object-contain" />}
+              {workflow.target?.sourceUrl && <img src={workflow.thumbnailUrl ?? workflow.target.sourceUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={event => { if (event.currentTarget.src !== workflow.target!.sourceUrl) event.currentTarget.src = workflow.target!.sourceUrl }} className="size-16 shrink-0 rounded-lg border border-line bg-surface object-contain" />}
               <div className="min-w-0"><h3 className="font-semibold text-ink">Image description updated</h3><p className="mt-1 break-words text-xs text-muted">{workflow.pageTitle || 'Published website page'} · WordPress media {proposal.resourceId}</p>
                 {date && <p className="mt-1 flex items-center gap-1 text-xs text-muted"><Clock3 size={12} aria-hidden="true" />{date}</p>}
               </div>

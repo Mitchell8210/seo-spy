@@ -1,5 +1,7 @@
 # Smart Planner backend and integration plan
 
+AI-assisted roadmap extension: [dedicated implementation tracker and contracts](SMART_PLANNER_AI_PLAN.md). Schema 7 adds separate AI preferences/proposals; explicit offline generation, review and atomic apply are separate from existing free deterministic planning. No existing scoring/Fix prompt or financial allocation changes. Live generation remains blocked pending dedicated authorization and a compatible planner response-size policy.
+
 Created: November 2, 2026. Status: complete and ready for local end-to-end testing.
 
 Final checkpoint including the duration/multiweek upgrade: `npm run check` from `server/` passed 89 suites with 1,892 passing tests and one existing skip, plus typecheck, lint and production build. Frontend lint/build and planner regressions passed. The final offline browser run passed ten scenarios with 27 screenshots. No Smart Planner shared-file blocker remains; all earlier Swagger/documentation and browser verification deferrals below are resolved. Earlier checkpoint counts below describe the original integration.

@@ -2,8 +2,8 @@ import "reflect-metadata";
 import { jest } from "@jest/globals";
 import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
-import { buildAltModelInput } from "../src/modules/wordpress/wordpress-alt-request.js";
-import { ALT_CAPABILITY, altInstructions, altOutputSchema, validateAltOutput, validateHumanAltText, type AltEvidence } from "../src/modules/wordpress/wordpress-fix.types.js";
+import { buildAltModelInput, buildCustomerAltModelInput } from "../src/modules/wordpress/wordpress-alt-request.js";
+import { ALT_CAPABILITY, altInstructions, legacyAltOutputSchema as altOutputSchema, validateAltOutput, validateHumanAltText, type AltEvidence } from "../src/modules/wordpress/wordpress-fix.types.js";
 import { MetaMuseProvider, type MetaMuseTransport } from "../src/integrations/ai/meta-muse.provider.js";
 import type { AiUsageStore } from "../src/integrations/ai/ai-usage.store.js";
 
@@ -24,6 +24,20 @@ const spanish = (): AltEvidence => ({ ...structuredClone(legacy), verifiedDescri
 const proposed = (altText: string) => ({ schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText, reason: "DESCRIPTION_EXCERPT" });
 
 describe("Spanish WordPress alt request preparation with historical input compatibility", () => {
+  it("drafts from a short reviewed topic and primary page context without copying a finished customer description", () => {
+    const evidence = spanish(); evidence.verifiedDescription = "Taxes";
+    evidence.proposalContext!.requiredTerms = ["Taxes"];
+    evidence.proposalContext!.page.title = "Bookkeeping en Los Ángeles, California";
+    evidence.proposalContext!.page.textExcerpt = "Servicios de contabilidad e impuestos en Los Ángeles, California. Si recibiste cartas del IRS, podemos ayudar.";
+    const input = buildCustomerAltModelInput(evidence, "Keep it concise");
+    expect(input.instructions).not.toContain("EXACT CONTIGUOUS EXCERPT");
+    expect(JSON.stringify(input.input)).not.toContain("cartas del IRS");
+    const value = { schemaVersion: "wordpress-alt-output-v2", status: "proposed", altText: "Guzman Tax Accounting ofrece servicios de contabilidad e impuestos en Los Ángeles.", reason: "CONTEXT_DRAFT" };
+    expect(validateAltOutput(value, evidence)).toEqual(value);
+    expect(() => validateAltOutput({ ...value, altText: "Una mujer sonriendo junto a una computadora." }, evidence)).toThrow();
+    expect(() => validateAltOutput({ ...value, altText: "Ayuda para responder cartas del IRS." }, evidence)).toThrow();
+    expect(buildAltModelInput(evidence, "").input).not.toEqual(input.input);
+  });
   it("allows a human assistance restatement while preserving the stricter Muse output contract", () => {
     const evidence = spanish();
     evidence.verifiedDescription = "Gráfico promocional de Guzman Tax Accounting sobre ayuda para entender y responder cartas del IRS.";

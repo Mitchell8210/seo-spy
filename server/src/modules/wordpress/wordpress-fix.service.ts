@@ -6,13 +6,14 @@ import { load } from "cheerio";
 import { WebsiteCollector } from "../../integrations/website/collector.js";
 import { FileReportStore } from "../../reports/file-report.store.js";
 import { MetaMuseError, MetaMuseProvider, type MetaMuseGeneration } from "../../integrations/ai/meta-muse.provider.js";
+import { AiUsageError } from "../../integrations/ai/ai-usage.types.js";
 import { matchMediaImages, observeImages } from "../../integrations/wordpress/image-evidence.js";
 import { pageMediaBindingSchema, pageSnapshot } from "./wordpress-page-evidence.service.js";
 import { WordPressService } from "./wordpress.service.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
 import { WordPressFixStore, fixDigest } from "./wordpress-fix.store.js";
-import { ALT_CAPABILITY, altEvidenceSchema, altOutputSchema, enrollAltSchema, fixTargetSchema, generateAltSchema, hasAltTerm, validateAltOutput, validateHumanAltText, type AltEvidence } from "./wordpress-fix.types.js";
-import { buildAltModelInput } from "./wordpress-alt-request.js";
+import { ALT_CAPABILITY, altEvidenceSchema, altOutputSchema, enrollAltSchema, fixTargetSchema, generateAltSchema, hasAltTerm, validateAltOutput, validateHumanAltText, validateContextualAltText, type AltEvidence } from "./wordpress-fix.types.js";
+import { buildAltModelInput, buildCustomerAltModelInput } from "./wordpress-alt-request.js";
 import { WordPressAltReceiptService, type AltReceiptOutcome } from "./wordpress-alt-receipt.service.js";
 import { WordPressPurposeService, executionFactsHash } from "./wordpress-purpose.service.js";
 const generationSchema = z.object({ id: z.string().uuid(), kind: z.literal("generation"), businessId: z.string(), actor: z.string(), siteUrl: z.string(), createdAt: z.string(), evidenceId: z.string().uuid(),
@@ -90,14 +91,17 @@ export class WordPressFixService {
       return { ...checked.fresh, effectiveEvidence: checked.evidence };
     }
     const fresh = await this.wordpress.altTarget(record.businessId, expected.mediaId, expected.pageResource, expected.pageId);
-    if (JSON.stringify(fresh.target) !== JSON.stringify(expected)) throw unavailable("The media or page binding changed; review fresh evidence before proceeding.");
-    const match = matchMediaImages(observeImages(fresh.pageHtml), expected.pageUrl, [{ mediaId: expected.mediaId, sourceUrls: fresh.sourceUrls }], expected.mediaId);
-    if (match.status !== "matched" || !allowAltMismatch && match.matches.some(image => image.alt !== expected.currentAlt)) throw unavailable("The page image cannot be matched unambiguously to the editable media and stored alternative.");
+    this.assertCurrentImage(fresh, expected, allowAltMismatch);
     if (!allowAltMismatch) {
       const source = await this.source(record.businessId, record.source.reportId, record.source.findingId, record.source.evidenceId);
       this.assertPageBinding(source, fresh, record.siteUrl);
     }
     return { ...fresh, effectiveEvidence: undefined };
+  }
+  private assertCurrentImage(fresh: Awaited<ReturnType<WordPressService["altTarget"]>>, expected: AltEvidence["target"], allowAltMismatch = false) {
+    if (JSON.stringify(fresh.target) !== JSON.stringify(expected)) throw unavailable("The media or page binding changed; review fresh evidence before proceeding.");
+    const match = matchMediaImages(observeImages(fresh.pageHtml), expected.pageUrl, [{ mediaId: expected.mediaId, sourceUrls: fresh.sourceUrls }], expected.mediaId);
+    if (match.status !== "matched" || !allowAltMismatch && match.matches.some(image => image.alt !== expected.currentAlt)) throw unavailable("The page image cannot be matched unambiguously to the editable media and stored alternative.");
   }
   private assertPageBinding(source: Awaited<ReturnType<WordPressFixService["source"]>>, fresh: Awaited<ReturnType<WordPressService["altTarget"]>>, siteUrl: string) {
     const raw = source.evidence.observed.wordpressMediaBinding;
@@ -137,11 +141,31 @@ export class WordPressFixService {
       ...(body.proposalLanguage ? { proposalContext: { version: "wordpress-alt-context-v2", language: body.proposalLanguage, requiredTerms: body.requiredTerms,
         business: { id: source.report.business.id, name: source.report.business.name, website: source.report.business.website }, page: this.pageContext(fresh) } } : {}),
       ...(body.durablePurpose ? { purposeValidity: "evidence-bound-v1" } : {}) });
-    await this.current(record);
+    // Reuse this request's authenticated snapshot; later generation/Apply still re-read independently.
+    this.assertCurrentImage(fresh, record.target);
     this.store.publish(record);
     if (body.durablePurpose) await this.purposes.adopt(businessId, actor, { evidenceId: record.id, originalReviewHash: fixDigest(record),
       ...body.durablePurpose, dependenciesUnchanged: true });
     return publicRecord(record);
+  }
+  private async savedThumbnail(owner: AltEvidence) {
+    // Saved display metadata only: never refresh a historical report or call WordPress.
+    let report;
+    try { report = await this.reports.read(owner.source.reportId); } catch { return owner.target.sourceUrl; }
+    if (!report || report.business.id !== owner.businessId || report.audit.businessId !== owner.businessId
+      || fixDigest(report) !== owner.source.reportHash) return owner.target.sourceUrl;
+    const evidence = report.results?.evidence.find(row => row.id === owner.source.evidenceId && row.auditId === report.reportId);
+    try {
+      const binding = pageMediaBindingSchema.parse(JSON.parse(evidence?.observed.wordpressMediaBinding ?? "null"));
+      if (binding.businessId !== owner.businessId || binding.siteUrl !== owner.siteUrl || binding.target.mediaId !== owner.target.mediaId
+        || binding.target.pageId !== owner.target.pageId || binding.target.pageResource !== owner.target.pageResource
+        || binding.target.pageUrl !== owner.target.pageUrl || binding.target.sourceUrl !== owner.target.sourceUrl) return owner.target.sourceUrl;
+      return binding.renderedUrls.find(value => {
+        const url = new URL(value), site = new URL(owner.siteUrl);
+        return value !== owner.target.sourceUrl && binding.sourceUrls.includes(value) && url.protocol === "https:" && !url.username && !url.password && !url.port
+          && url.hostname.replace(/^www\./, "") === site.hostname.replace(/^www\./, "");
+      }) ?? owner.target.sourceUrl;
+    } catch { return owner.target.sourceUrl; }
   }
   async workflows(businessId: string, actor: string) {
     const siteUrl = await this.wordpress.reportSite(businessId), rows = this.store.list(businessId, actor);
@@ -176,7 +200,7 @@ export class WordPressFixService {
       }
       items.push({ reportId: owner.source.reportId, findingId: owner.source.findingId, evidenceId: owner.id,
         workflow: { status, proposal, generation: generation ? publicRecord(generation) : null, verification, pageUrl: owner.target.pageUrl,
-          target: owner.target, pageTitle: owner.proposalContext?.page.title ?? null, completedAt: typeof outcome?.completedAt === "string" ? outcome.completedAt : null,
+          target: owner.target, thumbnailUrl: await this.savedThumbnail(owner), pageTitle: owner.proposalContext?.page.title ?? null, completedAt: typeof outcome?.completedAt === "string" ? outcome.completedAt : null,
           approvalRequired: !!proposal && !proposal.executionStarted && !proposal.outcome, generationApproval } });
     }
     return { items };
@@ -216,9 +240,15 @@ export class WordPressFixService {
     const saved = record ? this.store.list(businessId, actor).find(row => row.kind === "generation" && row.evidenceId === record.id) : null;
     const savedGeneration = saved ? generationSchema.parse(saved) : null;
     if (savedGeneration && record) validateAltOutput(savedGeneration.output, record);
-    return { capability: ALT_CAPABILITY, fixable, purposeReusable, executionRefreshRequired: refreshRequired, workflow: savedWorkflow?.workflow ?? null,
+    const owner = record ?? (savedWorkflow ? records.find(row => row.id === savedWorkflow.evidenceId) : undefined);
+    const customerFixes = owner && typeof this.provider.wordPressAllowanceStatus === "function"
+      ? await this.provider.wordPressAllowanceStatus(actor, businessId, new URL(owner.siteUrl).href, owner.target.mediaId)
+      : { status: "pending_approval" as const, allowWordPressAltApply: false };
+    return { capability: ALT_CAPABILITY, fixable, purposeReusable, executionRefreshRequired: refreshRequired, workflow: savedWorkflow?.workflow ?? null, customerFixes,
+      ...(owner?.purpose === "informative" && owner.proposalContext ? { customerGenerationPolicy: "page-context-v1" as const } : {}),
       reason: refreshRequired ? "Owner purpose is retained. Refresh read-only execution state; no new owner purpose confirmation is needed." : fixable ? "Exact operator-reviewed media context; fresh remote checks are required before proposal and Apply." : "No unique, current, writable media target with reliable image purpose/content has been reviewed. This recommendation remains manual.",
       savedGeneration: savedGeneration ? publicRecord(savedGeneration) : null,
+      purposeReview: owner ? publicRecord(owner) : null,
       evidence: record ? publicRecord(record) : null, writesEnabled: [true, "true"].includes(this.config.get("WORDPRESS_WRITES_ENABLED") ?? false), limitations: ["Text-only Muse input; no image pixels are sent.", "Empty alt can be correct for decorative images.", "No score or ranking improvement is established."] };
   }
   private modelInput(evidence: AltEvidence, instructions: string) {
@@ -238,12 +268,33 @@ export class WordPressFixService {
     return this.provider.estimate(this.modelInput(evidence, body.instructions), { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, reason });
   }
   async generate(businessId: string, actor: string, input: unknown) {
+    return this.generateProposal(businessId, actor, input, false);
+  }
+  async generateCustomer(businessId: string, actor: string, input: unknown) {
+    const body = generateAltSchema.omit({ intentId: true }).parse(input);
+    try { return await this.generateProposal(businessId, actor, body, true); }
+    catch (error) {
+      this.customerFailure(error);
+    }
+  }
+  private customerFailure(error: unknown): never {
+    if (error instanceof AiUsageError || error instanceof MetaMuseError) {
+      const message = error.code.startsWith("AI_WORDPRESS_ALLOWANCE") || error.code.includes("APPROVAL")
+        ? "Complete the one-time Fix with AI setup before continuing."
+        : ["AI_RATE_LIMIT", "AI_RATE_LIMITED"].includes(error.code)
+          ? "Please wait a minute before requesting a suggestion."
+          : "We could not confirm this request. Review its saved status before trying again.";
+      throw new ConflictException({ code: error.code, message });
+    }
+    throw error;
+  }
+  private async generateProposal(businessId: string, actor: string, input: unknown, customer: boolean) {
     const body = generateAltSchema.parse(input);
     let evidence = await this.evidence(businessId, actor, body.evidenceId, false);
     const checked = await this.current(evidence); evidence = checked.effectiveEvidence ?? evidence;
     if (Date.parse(evidence.expiresAt) <= Date.now()) throw unavailable("The review expired during the current resource checks. Explicit confirmation is required before generation.");
-    const modelInput = this.modelInput(evidence, body.instructions), prepared = this.provider.prepare(modelInput);
-    const mock = ![false, "false"].includes(this.config.get("MOCK_AI") ?? true) || (this.config.get("AI_MODE") ?? "mock") === "mock";
+    const modelInput = customer ? buildCustomerAltModelInput(evidence, body.instructions) : this.modelInput(evidence, body.instructions), prepared = this.provider.prepare(modelInput);
+    const mock = !customer && (![false, "false"].includes(this.config.get("MOCK_AI") ?? true) || (this.config.get("AI_MODE") ?? "mock") === "mock");
     const inputHash = fixDigest({ evidenceId: evidence.id, requestHash: prepared.requestHash, mock });
     const cached = this.store.list(businessId, actor).find(row => row.kind === "generation" && row.inputHash === inputHash);
     if (cached) return publicRecord(generationSchema.parse(cached));
@@ -252,6 +303,10 @@ export class WordPressFixService {
     const local = !sufficient ? { schemaVersion: "wordpress-alt-output-v1", status: "insufficient_evidence", altText: null, reason: "INSUFFICIENT_CONTEXT" }
       : { schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText: evidence.purpose === "decorative" ? "" : mockDescription.replace(/\s+/g, " ").trim().slice(0, 300), reason: evidence.purpose === "decorative" ? "DECORATIVE" : "DESCRIPTION_EXCERPT" };
     if (!mock && !sufficient) throw unavailable("No reliable image content/purpose exists; real generation is unnecessary and blocked.");
+    if (customer) {
+      const intent = await this.provider.authorizeAllowedWordPressAlt(modelInput, { actor, businessId, siteUrl: new URL(evidence.siteUrl).href, mediaId: evidence.target.mediaId, evidenceId: evidence.id });
+      body.intentId = intent.id;
+    }
     let generation: MetaMuseGeneration | undefined, schemaValid = false, savedId: string | null = null, receiptAttempted = false;
     const publishReceipt = async (error?: unknown) => {
       if (mock || !evidence.proposalContext || !body.intentId) return;
@@ -266,10 +321,14 @@ export class WordPressFixService {
     };
     try {
       generation = mock ? { output: local, model: prepared.model, usage: { inputTokens: 0, outputTokens: 0 }, requestId: null }
-        : await this.provider.generate(modelInput, undefined, { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, intentId: body.intentId ?? "" });
+        : customer ? await this.provider.generateAllowedWordPressAlt(modelInput, undefined, { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, intentId: body.intentId ?? "" })
+          : await this.provider.generate(modelInput, undefined, { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, intentId: body.intentId ?? "" });
       if (generation.model !== prepared.model) throw new BadGatewayException("The proposal model did not match the prepared request.");
       let output;
-      try { output = validateAltOutput(generation.output, evidence); } catch { throw new BadGatewayException({ code: "WORDPRESS_ALT_OUTPUT_INVALID", message: "Muse returned unsupported alt text. No proposal or write was created." }); }
+      try {
+        output = validateAltOutput(generation.output, evidence);
+        if (customer && evidence.proposalContext && output.schemaVersion !== "wordpress-alt-output-v2") throw new Error("Wrong customer output version");
+      } catch { throw new BadGatewayException({ code: "WORDPRESS_ALT_OUTPUT_INVALID", message: "Muse returned unsupported alt text. No proposal or write was created." }); }
       schemaValid = true;
       const record = generationSchema.parse({ id: randomUUID(), kind: "generation", businessId, actor, siteUrl: evidence.siteUrl, createdAt: new Date().toISOString(), evidenceId: evidence.id, inputHash,
         requestHash: prepared.requestHash, isMock: mock, provider: mock ? "mock-fixture" : "meta", model: generation.model, output, usage: generation.usage, requestId: generation.requestId,
@@ -287,7 +346,7 @@ export class WordPressFixService {
     const generation = generationSchema.parse(this.store.read(businessId, actor, generationId));
     let evidence = await this.evidence(businessId, actor, generation.evidenceId, false);
     if (generation.output.status !== "proposed") throw unavailable("Insufficient evidence cannot produce an executable proposal.");
-    try { validateAltOutput(generation.output, evidence); validateHumanAltText(text, evidence); } catch { throw unavailable("Edited text must remain grounded in the verified image description/purpose."); }
+    try { validateAltOutput(generation.output, evidence); if (generation.output.schemaVersion === "wordpress-alt-output-v2") validateContextualAltText(text, evidence); else validateHumanAltText(text, evidence); } catch { throw unavailable("Edited text must remain grounded in the verified image description/purpose."); }
     const checked = await this.current(evidence); evidence = checked.effectiveEvidence ?? evidence;
     if (evidence.purposeDependencyHash && generation.executionFactsHash !== executionFactsHash(evidence)) throw unavailable("Factual input changed since generation. Prepare a new exact model request; owner purpose is not renewed.");
     const proposal = await this.wordpress.propose(businessId, actor, { resource: "media", resourceId: evidence.target.mediaId, changes: { altText: text } });
@@ -322,6 +381,21 @@ export class WordPressFixService {
       ...(revision.textOrigin ? { textOrigin: revision.textOrigin } : {}) };
   }
   async apply(businessId: string, actor: string, id: string, hash: string) {
+    return this.applyProposal(businessId, actor, id, hash, false);
+  }
+  async applyCustomer(businessId: string, actor: string, id: string, hash: string) {
+    try { return await this.applyCustomerProposal(businessId, actor, id, hash); }
+    catch (error) { this.customerFailure(error); }
+  }
+  private async applyCustomerProposal(businessId: string, actor: string, id: string, hash: string) {
+    const { revision } = await this.revision(businessId, actor, id);
+    if (revision.restorationOf) throw unavailable("Restoration requires its own separately approved workflow.");
+    const generation = generationSchema.parse(this.store.read(businessId, actor, revision.generationId));
+    if (generation.isMock || !generation.attemptId) throw unavailable("Generate an authorized suggestion before applying this fix.");
+    const outcome = await this.applyProposal(businessId, actor, id, hash, true);
+    return { outcome, verification: null };
+  }
+  private async applyProposal(businessId: string, actor: string, id: string, hash: string, customer: boolean) {
     const { revision, proposal } = await this.revision(businessId, actor, id);
     if (hash !== proposal.hash) throw unavailable("Approve the exact current proposal hash.");
     if (!proposal.outcome) {
@@ -335,15 +409,21 @@ export class WordPressFixService {
         await this.current(evidence, revision.target, true);
       }
     }
+    if (customer) {
+      const generation = generationSchema.parse(this.store.read(businessId, actor, revision.generationId));
+      if (generation.isMock || !generation.attemptId) throw unavailable("Generate an authorized suggestion before applying this fix.");
+      return this.wordpress.applyCustomerAlt(businessId, actor, id, hash, generation.attemptId, revision.evidenceId, generation.id);
+    }
     return this.wordpress.apply(businessId, actor, id, hash);
   }
   async verify(businessId: string, actor: string, id: string) {
     const { revision } = await this.revision(businessId, actor, id);
-    const fresh = await this.wordpress.altTarget(businessId, revision.target.mediaId, revision.target.pageResource, revision.target.pageId);
     const owner = altEvidenceSchema.parse(this.store.read(businessId, actor, revision.evidenceId));
-    if (this.purposes?.hasBinding(owner)) await this.purposes.checkRestoration(owner, fresh.target);
-    if (fresh.target.sourceUrl !== revision.target.sourceUrl || fresh.target.pageUrl !== revision.target.pageUrl) throw unavailable("The approved media/page identity changed; verification requires reconciliation.");
-    const receipt = await this.verification.verify(businessId, actor, id, revision.target.pageResource, revision.target.pageId);
+    if (this.purposes?.hasBinding(owner)) {
+      const fresh = await this.wordpress.altTarget(businessId, revision.target.mediaId, revision.target.pageResource, revision.target.pageId);
+      await this.purposes.checkRestoration(owner, fresh.target);
+    }
+    const receipt = await this.verification.verify(businessId, actor, id, revision.target.pageResource, revision.target.pageId, revision.target);
     return { receipt, status: !receipt.storedFieldMatches ? "stored_mismatch" : receipt.status === "verified" ? "public_verified" : receipt.status === "mismatch" ? "public_mismatch" : "stored_verified_public_inconclusive" };
   }
   async verificationReceipt(businessId: string, actor: string, id: string, verificationId: string) {

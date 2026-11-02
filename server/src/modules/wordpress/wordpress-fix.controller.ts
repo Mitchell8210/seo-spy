@@ -38,6 +38,11 @@ export class WordPressFixController {
     const { enrollAltSchema } = await import("./wordpress-fix.types.js");
     return this.fixes.enroll(business, await this.actor(req), parse(enrollAltSchema, body));
   }
+  @Post("customer-generations") @ApiOperation({ summary: "Generate an exact image suggestion within the authenticated operator's preapproved capped allowance" })
+  async generateCustomer(@Param("businessId") business: string, @Req() req: Request, @Body() body: unknown) {
+    const { generateAltSchema } = await import("./wordpress-fix.types.js");
+    return this.fixes.generateCustomer(business, await this.actor(req), parse(generateAltSchema.omit({ intentId: true }), body));
+  }
   @Get("generations/:id") @ApiOperation({ summary: "Read a saved validated mock/live alt-text generation without a model call" })
   async generation(@Param("businessId") business: string, @Param("id", new ParseUUIDPipe()) id: string, @Req() req: Request) { return this.fixes.generation(business, await this.actor(req), id); }
   @Post("proposals") @ApiOperation({ summary: "Re-read exact media and create a new immutable before/after hash, without applying" })
@@ -53,6 +58,10 @@ export class WordPressFixController {
   @Post("proposals/:id/verifications")
   async verify(@Param("businessId") business: string, @Param("id", new ParseUUIDPipe()) id: string, @Req() req: Request, @Body() input: unknown) {
     parse(z.object({ confirmed: z.literal(true) }).strict(), input); return this.fixes.verify(business, await this.actor(req), id);
+  }
+  @Post("proposals/:id/customer-apply") @ApiOperation({ summary: "Approve the exact displayed scoped edit once, apply it and independently verify stored/public results" })
+  async applyCustomer(@Param("businessId") business: string, @Param("id", new ParseUUIDPipe()) id: string, @Req() req: Request, @Body() input: unknown) {
+    const body = parse(exact, input); return this.fixes.applyCustomer(business, await this.actor(req), id, body.proposalHash);
   }
   @Post("proposals/:id/restorations") @ApiOperation({ summary: "Prepare a separate restoration proposal; no automatic rollback or Apply" })
   async restore(@Param("businessId") business: string, @Param("id", new ParseUUIDPipe()) id: string, @Req() req: Request, @Body() input: unknown) {

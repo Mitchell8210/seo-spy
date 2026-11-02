@@ -8,7 +8,7 @@ const actor = "a".repeat(64), admin = "b".repeat(64), hash = "c".repeat(64), bus
 describe("settled WordPress-alt receipt publication without ledger or provider transports", () => {
   let service: WordPressAltReceiptService, outcome: AltReceiptOutcome, attempt: Record<string, unknown>, generation: Record<string, unknown>, evidence: Record<string, unknown>;
   let state: Record<string, unknown>;
-  const usage = { status: jest.fn<() => Promise<unknown>>(), wordPressAltAttempt: jest.fn<(id: string) => Promise<unknown>>(),
+  const usage = { status: jest.fn<() => Promise<unknown>>(), wordPressAltReceiptAuthority: jest.fn<(id: string) => Promise<unknown>>(), wordPressAltAttempt: jest.fn<(id: string) => Promise<unknown>>(),
     completeWordPressAltReceipt: jest.fn<(...args: unknown[]) => Promise<unknown>>() };
   const fixes = { read: jest.fn<(business: string, operator: string, id: string) => unknown>() };
   beforeEach(() => {
@@ -25,6 +25,10 @@ describe("settled WordPress-alt receipt publication without ledger or provider t
     generation = { id: outcome.generationId, kind: "generation", businessId, actor, evidenceId: outcome.evidenceId, requestHash: hash, isMock: false, provider: "meta", attemptId: attempt.id,
       output: { schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText: "A blue calculator", reason: "DESCRIPTION_EXCERPT" } };
     usage.status.mockImplementation(async () => state); usage.wordPressAltAttempt.mockImplementation(async () => attempt);
+    usage.wordPressAltReceiptAuthority.mockImplementation(async () => {
+      const grant = (state.wordPressAlt as { funding?: { adminActor: string; request: Record<string, unknown> } } | undefined)?.funding;
+      return grant ? { ...grant.request, receiptActor: grant.adminActor } : null;
+    });
     usage.completeWordPressAltReceipt.mockResolvedValue({});
     fixes.read.mockImplementation((_business, _actor, id) => id === outcome.evidenceId ? evidence : id === outcome.generationId ? generation : null);
     service = new WordPressAltReceiptService(usage as unknown as AiUsageStore, fixes as unknown as WordPressFixStore);

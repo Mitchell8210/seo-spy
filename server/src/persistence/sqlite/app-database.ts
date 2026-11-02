@@ -81,7 +81,7 @@ export class AppDatabase implements OnApplicationShutdown {
       const database = new DatabaseSync(this.path, { enableForeignKeyConstraints: true, allowExtension: false });
       try {
         const version = database.prepare("PRAGMA user_version").get()?.user_version;
-        if (existing && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) throw fail();
+        if (existing && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw fail();
         database.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;");
         if (!existing) {
           database.exec(`BEGIN IMMEDIATE;
@@ -167,7 +167,7 @@ export class AppDatabase implements OnApplicationShutdown {
             PRAGMA user_version=5;
             COMMIT;`);
         }
-        if (version !== 6) {
+        if (version !== 6 && version !== 7) {
           // Early development schema-5 databases were opened before planning
           // receipt columns were added. Repair additively; never rewrite receipts.
           database.exec("BEGIN IMMEDIATE");
@@ -176,7 +176,20 @@ export class AppDatabase implements OnApplicationShutdown {
           if (!columns.has("result_checksum")) database.exec("ALTER TABLE smart_planner_mutations ADD COLUMN result_checksum TEXT");
           database.exec("INSERT INTO schema_migrations(version,applied_at) VALUES(6,strftime('%Y-%m-%dT%H:%M:%fZ','now')); PRAGMA user_version=6; COMMIT;");
         }
-        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2,3,4,5,6)").get()?.count !== 6 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 6) throw fail();
+        if (version !== 7) {
+          database.exec(`BEGIN IMMEDIATE;
+            CREATE TABLE smart_planner_ai_preferences (
+              business_id TEXT PRIMARY KEY REFERENCES businesses(id), data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL
+            );
+            CREATE TABLE smart_planner_ai_proposals (
+              id TEXT PRIMARY KEY, business_id TEXT NOT NULL REFERENCES businesses(id), mutation_id TEXT NOT NULL,
+              request_hash TEXT NOT NULL, created_at TEXT NOT NULL, data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL,
+              UNIQUE(business_id,mutation_id)
+            );
+            CREATE INDEX smart_planner_ai_business ON smart_planner_ai_proposals(business_id,created_at);
+            INSERT INTO schema_migrations(version,applied_at) VALUES(7,strftime('%Y-%m-%dT%H:%M:%fZ','now')); PRAGMA user_version=7; COMMIT;`);
+        }
+        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2,3,4,5,6,7)").get()?.count !== 7 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 7) throw fail();
         this.database = database;
         if (!memory) {
           const info = lstatSync(this.path);

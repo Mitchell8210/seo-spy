@@ -106,14 +106,14 @@ describe("Smart Planner durable SQLite state", () => {
     const artifacts = db.prepare("SELECT * FROM artifacts ORDER BY id").all();
     const business = db.prepare("SELECT * FROM businesses ORDER BY id").all();
     const audits = db.prepare("SELECT * FROM audits ORDER BY id").all();
-    db.exec("DROP TABLE smart_planner_mutations; DROP TABLE smart_planner_tasks; DROP TABLE smart_planners; DELETE FROM schema_migrations WHERE version IN (4,5,6);");
+    db.exec("DROP TABLE smart_planner_ai_proposals; DROP TABLE smart_planner_ai_preferences; DROP TABLE smart_planner_mutations; DROP TABLE smart_planner_tasks; DROP TABLE smart_planners; DELETE FROM schema_migrations WHERE version IN (4,5,6,7);");
     if (version < 3) db.exec("DROP TABLE assessment_records; DELETE FROM schema_migrations WHERE version=3;");
     if (version < 2) db.exec("DROP TABLE google_reporting_cache; DELETE FROM schema_migrations WHERE version=2;");
     db.exec(`PRAGMA user_version=${version};`);
     const history = db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
     database.close();
     const migrated = open();
-    expect(migrated.database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(migrated.database.connection().prepare("PRAGMA user_version").get()?.user_version).toBe(7);
     expect(migrated.database.connection().prepare("SELECT * FROM businesses ORDER BY id").all()).toEqual(business);
     expect(migrated.database.connection().prepare("SELECT * FROM audits ORDER BY id").all()).toEqual(audits);
     expect(migrated.database.connection().prepare("SELECT * FROM artifacts ORDER BY id").all()).toEqual(artifacts);
@@ -123,6 +123,6 @@ describe("Smart Planner durable SQLite state", () => {
     migrated.database.close();
     const twice = open();
     expect((await twice.repository.read("demo-guzman")).tasks).toHaveLength(1);
-    expect(twice.database.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(6);
+    expect(twice.database.connection().prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count).toBe(7);
   });
 });

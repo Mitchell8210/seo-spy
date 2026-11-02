@@ -93,4 +93,5 @@ export class PlannerSession {
     if (!this.response) { this.ready = this.read(this.epoch); return this.ready.then(() => Boolean(this.response)) }
     return this.mutate('POST', '/reconcile', { confirmed: true }, '')
   }
+  async reload() { this.ready = this.read(this.epoch); await this.ready }
 }

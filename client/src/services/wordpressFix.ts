@@ -1,12 +1,13 @@
 import type { FixReviewRequest } from '../types/fixReview'
 export interface AltEvidence {
   id: string; expiresAt: string; purpose: 'informative' | 'functional' | 'decorative' | 'unknown'; verifiedDescription: string; descriptionProvenance: string
+  proposalContext?: { language: 'es'; requiredTerms: string[] }
   target: { mediaId: number; pageResource: 'pages' | 'posts'; pageId: number; sourceUrl: string; pageUrl: string; currentAlt: string; modified: string }
 }
 export interface FixWorkflow { status: 'draft' | 'pending_approval' | 'expired' | 'applying' | 'applied' | 'public_verified' | 'stored_mismatch' | 'public_mismatch' | 'stored_verified_public_inconclusive' | 'outcome_unknown' | 'failed' | 'restored'; proposal: AltProposal | null; generation: AltGeneration | null; verification: AltVerification | null; pageUrl: string; approvalRequired: boolean; generationApproval?: { status: 'not_required' | 'pending_approval' | 'approved' | 'expired' | 'used'; intentId?: string } }
-export interface FixCapability { capability: string; fixable: boolean; reason: string; evidence: AltEvidence | null; writesEnabled: boolean; limitations: string[]; savedGeneration?: AltGeneration | null; workflow?: FixWorkflow | null; liveGenerationAllowed?: boolean }
+export interface FixCapability { capability: string; fixable: boolean; reason: string; evidence: AltEvidence | null; purposeReview?: AltEvidence | null; writesEnabled: boolean; limitations: string[]; savedGeneration?: AltGeneration | null; workflow?: FixWorkflow | null; liveGenerationAllowed?: boolean; customerGenerationPolicy?: 'page-context-v1'; customerFixes?: { status: 'active' | 'pending_approval' | 'expired' | 'exhausted' | 'blocked'; allowWordPressAltApply: boolean; writeAuthorized?: boolean; generationAuthorized?: boolean } }
 export interface FixCandidate { businessId: string; reportId: string; findingId: string; evidenceId: string; thumbnailUrl?: string; target: AltEvidence['target']; pageTitle: string | null; pageLanguage: 'es' | 'en' | null; purposeStatus: AltEvidence['purpose'] | 'unreviewed'; capability: FixCapability; issue: string; requiresPurposeConfirmation: boolean; isMock: boolean; collectedAt?: string; imageHash?: string | null; imageHashProvenance?: string | null; review?: FixReviewRequest }
-export interface AltGeneration { id: string; isMock: boolean; provider: string; output: { status: 'proposed' | 'insufficient_evidence'; altText: string | null; reason: string } }
+export interface AltGeneration { id: string; isMock: boolean; provider: string; output: { schemaVersion?: string; status: 'proposed' | 'insufficient_evidence'; altText: string | null; reason: string } }
 export interface AltProposal { id: string; hash: string; expiresAt: string; resource: 'media'; resourceId: number; before: { altText: string }; changes: { altText: string }; field: 'alt_text'; restorationOf: string | null; outcome?: Record<string, unknown> | null; executionStarted?: boolean; textOrigin?: 'human-edited' }
 export interface AltVerification { status: string; receipt: { id: string; proposalId: string; storedFieldMatches: boolean; status: string; limitations: string[]; observedAlts: (string | null)[] } }
 let csrf = ''
@@ -18,10 +19,11 @@ export class WordPressFixError extends Error {
   constructor(message: string, status: number, code = '') { super(message); this.name = 'WordPressFixError'; this.status = status; this.code = code }
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-export function fixReviewState(capability?: FixCapability | null) {
+export function fixReviewState(capability?: FixCapability | null, requireLive = false) {
   const workflow = capability?.workflow, proposal = workflow?.proposal ?? null
   const generation = workflow?.generation ?? capability?.savedGeneration ?? null
   const outcome = proposal?.outcome ?? (proposal?.executionStarted ? { status: 'outcome_unknown' } : null)
+  if (requireLive && generation?.isMock && !outcome && !proposal?.executionStarted) return { step: 'review' as const, generation: null, proposal: null, outcome: null, verification: null, text: '' }
   const step = outcome || proposal?.executionStarted ? 'confirmed' : proposal && Date.parse(proposal.expiresAt) > Date.now() ? 'confirm' : 'review'
   return { step: step as 'review' | 'confirm' | 'confirmed', generation, proposal, outcome, verification: workflow?.verification ?? null, text: proposal?.changes.altText ?? generation?.output.altText ?? '' }
 }
@@ -38,6 +40,17 @@ export function fixGenerationPending(capability: FixCapability | null | undefine
   const approval = capability?.workflow?.generationApproval
   return requireLive && capability?.liveGenerationAllowed !== true || !!approval && !['not_required', 'approved'].includes(approval.status)
 }
+export const customerFixSetupMessage = 'AI fixes need the one-time account setup. No changes were made.'
+export const customerFixWaitMessage = 'Another AI request is still processing. Please wait before trying again.'
+export const customerFixReviewMessage = 'Review this image’s purpose and refresh its evidence before continuing. No changes were made.'
+export function customerFixReady(capability?: FixCapability | null) {
+  return capability?.customerFixes?.status === 'active' && (capability.customerFixes.generationAuthorized ?? capability.customerFixes.allowWordPressAltApply) === true
+}
+export function customerFixApplyReady(capability?: FixCapability | null) {
+  const allowance = capability?.customerFixes
+  if (allowance?.status === 'blocked') return false
+  return allowance?.writeAuthorized ?? (allowance?.allowWordPressAltApply === true && ['active', 'exhausted'].includes(allowance.status))
+}
 export function notifyWordPressFixChanged() { if (typeof window !== 'undefined') window.dispatchEvent(new Event('wordpress-fix-updated')) }
 async function request<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(`/api/wordpress/${path}`, { method: body ? 'POST' : 'GET', credentials: 'same-origin',
@@ -49,7 +62,10 @@ async function request<T>(path: string, body?: object): Promise<T> {
     const error = object(data) && object(data.error) ? data.error : object(data) ? data : null
     const code = error && typeof error.code === 'string' ? error.code : ''
     if (response.status === 401) { connecting = undefined; connectedSession = undefined; csrf = '' }
-    if (/AI_.*(APPROVAL|NOT_FUNDED|NOT_ACTIVATED)|AI_WORDPRESS_ALT_INTENT/.test(code)) throw new Error('Pending administrator approval. No model request was sent. Your proposed text has been preserved.')
+    if (/^AI_(RATE_LIMIT(ED)?|REAL_REQUEST_ACTIVE)$/.test(code)) throw new WordPressFixError(customerFixWaitMessage, response.status, code)
+    const message = error && typeof error.message === 'string' ? error.message : ''
+    if (code === 'WORDPRESS_PURPOSE_REVIEW_CHANGED' || code === 'WORDPRESS_ALT_CONTEXT_REQUIRED' || code === 'WORDPRESS_FIX_NOT_ELIGIBLE' && /(context|review|evidence|finding|purpose).*(expired|stale)|expired.*(review|evidence|context)|no reliable image content|context.*not bound/i.test(message)) throw new WordPressFixError(customerFixReviewMessage, response.status, code)
+    if (/AI_.*(APPROVAL|NOT_FUNDED|NOT_ACTIVATED)|AI_WORDPRESS_(ALT_INTENT|ALT_ALLOWANCE|ALLOWANCE)|CUSTOMER.*(REQUIRED|EXPIRED|EXHAUSTED|DISABLED)|WORDPRESS_CUSTOMER|^(AI|WORDPRESS)_SETUP_REQUIRED$/.test(code)) throw new WordPressFixError(customerFixSetupMessage, response.status, code)
     throw new WordPressFixError(error && typeof error.message === 'string' ? error.message : 'The protected WordPress request failed. No automatic retry was made.', response.status, code)
   }
   if (!object(data)) throw new Error('Invalid WordPress response. Inspect saved receipts before further action.')
@@ -109,6 +125,11 @@ export function connectWordPressBrowser(businessId?: string) {
   return connecting ?? connectionAttempt(businessId)
 }
 const base = (businessId: string) => `businesses/${encodeURIComponent(businessId)}/fixes/`
+/** Existing persistent account session and CSRF proof, never administrator credentials. */
+export async function authenticatedWordPressHeaders(businessId: string) {
+  await connectWordPressBrowser(businessId)
+  return { 'x-wordpress-csrf': csrf }
+}
 const localReadBase = (businessId: string) => `local/${base(businessId)}`
 export async function fixCapability(review: Pick<FixReviewRequest, 'category' | 'businessId' | 'reportId' | 'findingId'>): Promise<FixCapability | null> {
   if (review.category !== 'website' || !review.businessId || !review.reportId || !review.findingId) return null
@@ -132,6 +153,10 @@ export const wordpressFix = {
     await connectWordPressBrowser(businessId)
     return request<AltGeneration>(base(businessId) + 'generations', { evidenceId, instructions, ...(intentId ? { intentId } : {}), ...(requireLive ? { requireLive: true } : {}) })
   },
+  customerGenerate: async (businessId: string, evidenceId: string, instructions = '') => {
+    await connectWordPressBrowser(businessId)
+    return request<AltGeneration>(base(businessId) + 'customer-generations', { evidenceId, ...(instructions ? { instructions } : {}) })
+  },
   propose: async (businessId: string, generationId: string, altText: string) => {
     await connectWordPressBrowser(businessId)
     const proposal = await request<AltProposal>(base(businessId) + 'proposals', { generationId, altText })
@@ -139,7 +164,15 @@ export const wordpressFix = {
     return proposal
   },
   apply: async (businessId: string, proposal: AltProposal) => { await connectWordPressBrowser(businessId); return request<Record<string, unknown>>(base(businessId) + `proposals/${encodeURIComponent(proposal.id)}/apply`, { confirmed: true, proposalHash: proposal.hash }) },
+  customerApply: async (businessId: string, proposal: AltProposal) => {
+    await connectWordPressBrowser(businessId)
+    return request<{ outcome: Record<string, unknown>; verification?: AltVerification }>(base(businessId) + `proposals/${encodeURIComponent(proposal.id)}/customer-apply`, { confirmed: true, proposalHash: proposal.hash })
+  },
   read: (businessId: string, id: string) => request<AltProposal>(localReadBase(businessId) + `proposals/${encodeURIComponent(id)}`),
+  reconcileFailedApply: async (businessId: string, proposal: AltProposal): Promise<AltProposal> => {
+    try { return await request<AltProposal>(localReadBase(businessId) + `proposals/${encodeURIComponent(proposal.id)}`) }
+    catch { return { ...proposal, executionStarted: true, outcome: { status: 'outcome_unknown' } } }
+  },
   verify: async (businessId: string, id: string) => { await connectWordPressBrowser(businessId); return request<AltVerification>(base(businessId) + `proposals/${encodeURIComponent(id)}/verifications`, { confirmed: true }) },
   restore: async (businessId: string, id: string) => { await connectWordPressBrowser(businessId); return request<AltProposal>(base(businessId) + `proposals/${encodeURIComponent(id)}/restorations`, { confirmed: true }) },
 }

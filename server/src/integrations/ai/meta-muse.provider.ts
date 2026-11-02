@@ -4,6 +4,7 @@ import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
 import { createHash } from "node:crypto";
 import { AiUsageStore } from "./ai-usage.store.js";
+import type { WordPressAllowanceScope, FrontendAllowanceScope } from "./muse-wordpress-allowance.js";
 import { AiUsageError, type AiLiveMode, type AiModel, type AiUsageIntent, type AiUsageLimits } from "./ai-usage.types.js";
 import { prepareMuseHello, prepareMinimalMuseHello, MUSE_MINIMAL_HELLO_SCOPE } from "./muse-hello-request.js";
 import { estimateMuseCost, museUsageCostMicros, MuseCostError, MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, type MuseCostEstimate } from "./muse-cost.js";
@@ -15,6 +16,12 @@ const dispatchGrants = new WeakMap<object, { hash: string; diagnostic?: boolean 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const object = (value: unknown): Record<string, unknown> | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const safeId = (value: unknown): string | null => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) ? value : null;
+const allowancePageBelongsToSite = (page: unknown, site: string) => {
+  try { const url = new URL(String(page)), connected = new URL(site);
+    return url.protocol === "https:" && !url.username && !url.password && !url.port && !url.hash
+      && url.hostname.replace(/^www\./, "") === connected.hostname.replace(/^www\./, "");
+  } catch { return false; }
+};
 
 export class MetaMuseError extends Error {
   constructor(public readonly code: string, message: string, public readonly diagnostics?: MetaMuseDiagnostics) { super(message); this.name = "MetaMuseError"; }
@@ -246,6 +253,58 @@ export class MetaMuseProvider {
   async wordPressAltApproval(input: MetaMuseInput, context: { actor: string; scope: string }) {
     try { return await this.ledger.wordPressAltApproval(context.actor, context.scope, this.prepare(input).requestHash); }
     catch { return { status: "pending_approval" as const }; }
+  }
+  async wordPressAllowanceStatus(actor: string, businessId: string, siteUrl: string, mediaId: number) {
+    return this.ledger.wordPressAllowanceStatus(actor, businessId, siteUrl, mediaId);
+  }
+  async authorizeAllowedWordPressAlt(input: MetaMuseInput, context: WordPressAllowanceScope) {
+    const source = object(input.input), prepared = this.prepare(input), request = object(JSON.parse(prepared.payload));
+    const target = object(source?.target);
+    if (!source || !["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source.schemaVersion)) || source.capability !== "wordpress.media.alt_text.update"
+      || target?.mediaId !== context.mediaId || !allowancePageBelongsToSite(target?.pageUrl, context.siteUrl)
+      || input.reasoningEffort !== "minimal" || request?.model !== "muse-spark-1.3" || object(request?.reasoning)?.effort !== "minimal")
+      throw failure("AI_APPROVAL_MISMATCH", "This allowance supports only the approved image-alt generation task.");
+    const { payload: _payload, ...cost } = prepared; void _payload;
+    return this.ledger.estimateAllowedWordPressAlt({ ...cost, actor: context.actor, scope: `wordpress-alt:${context.businessId}:${context.evidenceId}`,
+      mode: "poc", cacheKey: prepared.requestHash, reason: "User requested an evidence-bound WordPress image alternative-text suggestion." }, context);
+  }
+  async generateAllowedWordPressAlt(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization) {
+    if (!authorization) throw failure("AI_APPROVAL_REQUIRED", "Approve this website's AI allowance first.");
+    const authority = await this.ledger.wordPressAltReceiptAuthority(authorization.intentId);
+    const allowance = await this.ledger.wordPressAllowanceIntentScope(authorization.intentId);
+    const intent = await this.ledger.readIntent(authorization.intentId);
+    const source = object(input.input), target = object(source?.target);
+    if (!authority || !allowance || allowance.actor !== authorization.actor || allowance.requestHash !== this.prepare(input).requestHash || authority.actor !== authorization.actor || intent.scope !== authorization.scope || intent.requestHash !== this.prepare(input).requestHash || !target
+      || target.mediaId !== allowance.mediaId || !allowancePageBelongsToSite(target.pageUrl, allowance.siteUrl))
+      throw failure("AI_APPROVAL_MISMATCH", "The image request changed; review it again.");
+    // This exact grant is the one-time explicit live permission. General calls
+    // remain governed by the unchanged mock-first configuration.
+    const siteUrl = allowance.siteUrl;
+    if ((await this.ledger.wordPressAllowanceStatus(authorization.actor, authority.businessId, siteUrl, Number(target.mediaId))).status !== "active")
+      throw failure("AI_APPROVAL_REQUIRED", "Approve this website's AI allowance first.");
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc", AI_CONTROLLED_TESTING: true }), this.transport, this.ledger);
+    return scoped.generate(input, signal, authorization);
+  }
+  async generateFrontend(input: MetaMuseInput, context: FrontendAllowanceScope, signal?: AbortSignal): Promise<MetaMuseGeneration> {
+    const source = object(input.input), snapshot = object(source?.snapshot), prepared = this.prepare(input), request = object(JSON.parse(prepared.payload));
+    const validTask = context.task === "planner"
+      ? snapshot?.version === "planner-snapshot-v1" && snapshot.businessId === context.businessId && Array.isArray(snapshot.tasks) && /^[a-f0-9]{64}$/.test(String(source?.snapshotHash))
+      : context.task === "wordpress-alt" && ["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source?.schemaVersion))
+        && source?.capability === "wordpress.media.alt_text.update" && allowancePageBelongsToSite(object(source.target)?.pageUrl, context.siteUrl);
+    if (!validTask || input.reasoningEffort !== "minimal" || prepared.model !== "muse-spark-1.3" || prepared.maxOutputTokens !== 1500 || object(request?.reasoning)?.effort !== "minimal")
+      throw failure("AI_APPROVAL_MISMATCH", "Only a supported, authenticated frontend action may use this allowance.");
+    const { payload: _payload, ...cost } = prepared; void _payload;
+    const intent = await this.ledger.estimateFrontend({ ...cost, actor: context.actor, scope: `frontend:${context.task}:${context.businessId}:${context.resourceKey}`,
+      mode: "poc", cacheKey: prepared.requestHash, reason: "Authenticated user explicitly requested this supported frontend Muse task." }, context);
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc", AI_CONTROLLED_TESTING: true }), this.transport, this.ledger);
+    try { return await scoped.generate(input, signal, { intentId: intent.id, actor: context.actor, scope: intent.scope }); }
+    finally { await this.ledger.completeFrontendReceipt(context.actor, intent.id); }
   }
 
   async generate(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization): Promise<MetaMuseGeneration> {

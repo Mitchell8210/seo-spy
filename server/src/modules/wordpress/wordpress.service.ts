@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { WordPressClient, WordPressRequestError, type WordPressConnection } from
 import { collectRankMathEvidence, runRankMathAudit, rankMathOutcomeStatus } from "../../integrations/wordpress/rankmath.js";
 import { WordPressActionsStore } from "./wordpress-actions.store.js";
 import type { CreateWordPressProposalDto } from "./wordpress.dto.js";
+import { AiUsageStore } from "../../integrations/ai/ai-usage.store.js";
 
 const object = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const digest = (value: object) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -18,7 +19,8 @@ const resourceFields: Record<string, string[]> = { pages: ["title", "content", "
 @Injectable()
 export class WordPressService {
   constructor(private readonly config: ConfigService, private readonly client: WordPressClient, private readonly store: WordPressActionsStore,
-    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository) {}
+    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository,
+    @Optional() private readonly usage?: AiUsageStore) {}
 
   async businessIdentity(businessId: string) {
     await this.reportSite(businessId);
@@ -95,10 +97,10 @@ export class WordPressService {
   /** Exact authenticated editable media plus its published page, for the narrow alt pilot. */
   async altTarget(businessId: string, mediaId: number, pageResource: "pages" | "posts", pageId: number) {
     const connection = await this.connection(businessId);
-    const media = await this.raw(connection, "media", mediaId);
-    const page = await this.raw(connection, pageResource, pageId);
-    const info = await this.info(businessId);
-    const options = object(await this.client.request(connection, "OPTIONS", `/wp-json/wp/v2/media/${mediaId}`));
+    const [media, page] = await Promise.all([this.raw(connection, "media", mediaId), this.raw(connection, pageResource, pageId)]);
+    // The protected WordPress client permits at most two concurrent requests.
+    const [info, rawOptions] = await Promise.all([this.info(businessId), this.client.request(connection, "OPTIONS", `/wp-json/wp/v2/media/${mediaId}`)]);
+    const options = object(rawOptions);
     const endpoints = Array.isArray(options.endpoints) ? options.endpoints.map(object) : [];
     if (media.type !== "attachment" || media.media_type !== "image" || media.status !== "inherit" || page.type !== (pageResource === "pages" ? "page" : "post") || page.status !== "publish" || object(page.content).protected !== false
       || !info.capabilities.upload_files || !info.capabilities.edit_posts
@@ -163,31 +165,46 @@ export class WordPressService {
     return proposal;
   }
   async getProposal(businessId: string, actor: string, id: string) { const proposal = await this.proposal(businessId, actor, id); return { ...proposal, outcome: await this.store.read(id, "outcome"), executionStarted: Boolean(await this.store.read(id, "started")) }; }
-  async verificationTarget(businessId: string, actor: string, proposalId: string, pageResource: "pages" | "posts", pageId: number) {
+  async verificationTarget(businessId: string, actor: string, proposalId: string, pageResource: "pages" | "posts", pageId: number,
+    expected?: { mediaId: number; sourceUrl: string; pageUrl: string }) {
     const connection = await this.connection(businessId);
     const proposal = await this.proposal(businessId, actor, proposalId);
     const outcome = object(await this.store.read(proposalId, "outcome"));
     if (proposal.siteUrl !== connection.siteUrl || outcome.status !== "applied" || proposal.resource !== "media" || Object.keys(proposal.changes).length !== 1 || typeof proposal.changes.altText !== "string")
       throw new ConflictException({ code: "WORDPRESS_VERIFICATION_UNSUPPORTED", message: "Public verification requires an applied media alt-text-only proposal on the currently bound installation." });
     if (!["pages", "posts"].includes(pageResource)) throw new BadRequestException("Only published pages or posts can be verified.");
-    const page = await this.raw(connection, pageResource, pageId);
-    const media = await this.raw(connection, "media", proposal.resourceId);
+    const [page, media] = await Promise.all([this.raw(connection, pageResource, pageId), this.raw(connection, "media", proposal.resourceId)]);
     if (page.status !== "publish" || typeof page.link !== "string" || typeof media.source_url !== "string") throw new ConflictException("Published page and image source information are required for verification.");
     try {
       const url = new URL(page.link);
       const site = new URL(connection.siteUrl);
       if (url.protocol !== "https:" || url.username || url.password || url.port || url.hostname.replace(/^www\./, "") !== site.hostname.replace(/^www\./, "")) throw new Error();
     } catch { throw new ConflictException("The public page does not belong to the registered HTTPS website."); }
+    if (expected && (expected.mediaId !== proposal.resourceId || expected.sourceUrl !== media.source_url || expected.pageUrl !== page.link))
+      throw new ConflictException("The approved media/page identity changed; verification requires reconciliation.");
     return { siteUrl: connection.siteUrl, pageUrl: page.link, sourceUrl: media.source_url, mediaId: proposal.resourceId, expectedAlt: proposal.changes.altText, storedFieldMatches: typeof media.alt_text === "string" && media.alt_text === proposal.changes.altText };
   }
   private enabled() { return this.config.get("WORDPRESS_WRITES_ENABLED") === true || this.config.get("WORDPRESS_WRITES_ENABLED") === "true"; }
   private requireWrites() { if (!this.enabled()) throw new ForbiddenException({ code: "WORDPRESS_WRITES_DISABLED", message: "WordPress writes and audit triggers are disabled by configuration." }); }
   async apply(businessId: string, actor: string, id: string, hash: string) {
+    return this.execute(businessId, actor, id, hash, false);
+  }
+  async applyCustomerAlt(businessId: string, actor: string, id: string, hash: string, generationAttemptId: string, evidenceId: string, generationId: string) {
+    const proposal = await this.proposal(businessId, actor, id);
+    if (proposal.hash !== hash || proposal.resource !== "media" || Object.keys(proposal.changes).length !== 1 || typeof proposal.changes.altText !== "string")
+      throw new ConflictException({ code: "WORDPRESS_APPROVAL_MISMATCH", message: "Review and approve the current image alternative text." });
+    const siteUrl = new URL(proposal.siteUrl).href;
+    const grant = await this.usage?.wordPressAllowanceStatus(actor, businessId, siteUrl, proposal.resourceId);
+    if (!grant?.writeAuthorized || !await this.usage?.wordPressAllowanceGenerationAuthorized(actor, businessId, siteUrl, proposal.resourceId, generationAttemptId, evidenceId, generationId))
+      throw new ForbiddenException({ code: "WORDPRESS_SETUP_REQUIRED", message: "Complete the one-time Fix with AI setup before applying this change." });
+    return this.execute(businessId, actor, id, hash, true);
+  }
+  private async execute(businessId: string, actor: string, id: string, hash: string, scopedAlt: boolean) {
     const connection = await this.connection(businessId);
     const proposal = await this.proposal(businessId, actor, id);
     if (proposal.hash !== hash) throw new ConflictException({ code: "WORDPRESS_APPROVAL_MISMATCH", message: "Approval must match the exact reviewed proposal hash." });
     const completed = await this.store.read(id, "outcome"); if (completed) return completed;
-    this.requireWrites();
+    if (!scopedAlt) this.requireWrites();
     if (Date.parse(proposal.expiresAt) <= Date.now() || proposal.siteUrl !== connection.siteUrl) throw new ConflictException({ code: "WORDPRESS_PROPOSAL_STALE", message: "The proposal expired or the installation changed; create and review a new proposal." });
     if (!await this.store.create(id, "started", { businessId, actor, proposalHash: hash, siteUrl: proposal.siteUrl, resource: proposal.resource, resourceId: proposal.resourceId, before: proposal.before, changes: proposal.changes, startedAt: new Date().toISOString() })) throw new ConflictException({ code: "WORDPRESS_EXECUTION_RESERVED", message: "Execution was already reserved. Inspect or reconcile its outcome; do not resend the write." });
     let outcome: object;

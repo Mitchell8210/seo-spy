@@ -16,6 +16,7 @@ export interface PlannerSourceState {
   reportIds: string[];
 }
 export interface SourcePlannerTask {
+  sourceSeverity?: string;
   taskKey: string; title: string; explanation: string; guidance: string;
   priority: "Urgent" | "Medium" | "Low";
   category: "Admin" | "Content" | "Social" | "Search" | "Review";
@@ -41,6 +42,7 @@ function opportunityTitle(title: string, explanation: string): string {
 function toTask(issue: Issue, businessId: string): SourcePlannerTask {
   return { taskKey: `${issue.category}:${issue.id}`, title: issue.recommendation?.title ?? opportunityTitle(issue.title, issue.explanation),
     explanation: issue.explanation, guidance: issue.recommendation?.explanation ?? "Review this finding and its source report. Confirm the correct business information before making a change.",
+    sourceSeverity: issue.origin.kind === "finding" ? issue.severity : undefined,
     priority: issue.severity === "critical" ? "Urgent" : issue.severity === "low" ? "Low" : "Medium",
     category: issue.category === "consistency" || /hours|phone|contact|business information/i.test(issue.title) ? "Admin"
       : issue.category === "social" ? "Social" : /image|content|heading|alt/i.test(issue.title) ? "Content" : /meta|search|description|title/i.test(issue.title) ? "Search" : "Review",

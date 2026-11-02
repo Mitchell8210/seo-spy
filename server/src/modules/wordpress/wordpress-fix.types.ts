@@ -14,8 +14,11 @@ export const enrollAltSchema = z.object({ reportId: z.string().uuid(), findingId
   durablePurpose: z.object({ originalImageHash: fixHash, hashProvenance: z.string().min(10).max(500) }).strict().optional(),
   confirmed: z.literal(true) }).strict().refine(value => (value.proposalLanguage !== undefined) === (value.requiredTerms !== undefined), "Language and essential terms must be reviewed together.");
 export const generateAltSchema = z.object({ evidenceId: z.string().uuid(), instructions: z.string().max(2000).default(""), intentId: z.string().uuid().optional() }).strict();
-export const altOutputSchema = z.object({ schemaVersion: z.literal("wordpress-alt-output-v1"), status: z.enum(["proposed", "insufficient_evidence"]),
+export const legacyAltOutputSchema = z.object({ schemaVersion: z.literal("wordpress-alt-output-v1"), status: z.enum(["proposed", "insufficient_evidence"]),
   altText: z.string().max(300).nullable(), reason: z.enum(["DESCRIPTION_EXCERPT", "DECORATIVE", "INSUFFICIENT_CONTEXT"]) }).strict();
+export const contextualAltOutputSchema = z.object({ schemaVersion: z.literal("wordpress-alt-output-v2"), status: z.enum(["proposed", "insufficient_evidence"]),
+  altText: z.string().max(300).nullable(), reason: z.enum(["CONTEXT_DRAFT", "DECORATIVE", "INSUFFICIENT_CONTEXT"]) }).strict();
+export const altOutputSchema = z.discriminatedUnion("schemaVersion", [legacyAltOutputSchema, contextualAltOutputSchema]);
 export type AltOutput = z.infer<typeof altOutputSchema>;
 export const altEvidenceSchema = z.object({ id: z.string().uuid(), kind: z.literal("evidence"), businessId: z.string(), actor: fixHash, siteUrl: z.string().url(),
   createdAt: z.string().datetime(), expiresAt: z.string().datetime(), capability: z.literal(ALT_CAPABILITY),
@@ -39,6 +42,7 @@ export function validateAltOutput(value: unknown, evidence: Pick<AltEvidence, "p
     return output;
   }
   if (evidence.purpose === "decorative" && output.altText === "" && output.reason === "DECORATIVE") return output;
+  if (output.schemaVersion === "wordpress-alt-output-v2") { validateContextualAltText(output.altText, evidence, output.reason); return output; }
   const text = output.altText;
   const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
   if (evidence.purpose !== "informative" || output.reason !== "DESCRIPTION_EXCERPT" || !text?.trim() || text !== normalize(text)
@@ -50,6 +54,27 @@ export function validateAltOutput(value: unknown, evidence: Pick<AltEvidence, "p
     if (words.length < 6 || words.length > 40 || evidence.proposalContext.requiredTerms.some(term => !hasAltTerm(text, term))) throw new Error("The Spanish alternative must retain the reviewed essential message.");
   }
   return output;
+}
+/** Primary service context only; unrelated later page paragraphs cannot describe this image. */
+export function contextualAltBasis(evidence: Pick<AltEvidence, "verifiedDescription" | "proposalContext">) {
+  const context = evidence.proposalContext;
+  const intro = context?.page.textExcerpt.split(/[.!?](?:\s|$)/u)[0]?.slice(0, 300) ?? "";
+  return { reviewedDescription: evidence.verifiedDescription, businessName: context?.business.name ?? "",
+    pageTitle: context?.page.title ?? "", primaryPageContext: intro };
+}
+const altWords = (text: string): string[] => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("es").match(/[\p{L}\p{N}]+/gu) ?? [];
+const connectors = new Set("a al algo ante bajo cada como con contra cual cuando de del desde donde durante e el ella ellas ellos en entre es esta este estos hacia hasta la las lo los o para por que se sin sobre su sus un una unos unas y ofrece ofrecen servicios the an and at by for from in of on or to with".split(" "));
+export function validateContextualAltText(text: string | null, evidence: Pick<AltEvidence, "purpose" | "verifiedDescription" | "proposalContext">, reason = "CONTEXT_DRAFT"): void {
+  const basis = contextualAltBasis(evidence), words = altWords(text ?? "");
+  const allowed = new Set([...Object.values(basis).flatMap(altWords), ...connectors]);
+  const translated: Record<string, string> = { taxes: "impuestos", tax: "impuestos", bookkeeping: "contabilidad" };
+  const anchors = altWords(evidence.verifiedDescription).filter(word => !connectors.has(word));
+  for (const anchor of anchors) if (translated[anchor]) allowed.add(translated[anchor]);
+  if (evidence.purpose !== "informative" || !evidence.proposalContext || reason !== "CONTEXT_DRAFT" || !text?.trim() || text !== text.replace(/\s+/g, " ").trim()
+    || text.length > 300 || words.length > 40 || /[<>]|https?:|www\.|\b(seo|best|cheap|rankings?)\b/i.test(text)
+    || [...text].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+    || words.some(word => !allowed.has(word) || words.filter(item => item === word).length > 3)
+    || !anchors.some(anchor => words.includes(translated[anchor] ?? anchor))) throw new Error("Unsupported contextual alt text");
 }
 export function hasAltTerm(text: string, term: string): boolean {
   const words = (value: string) => " " + value.toLocaleLowerCase("es").replace(/[^\p{L}\p{N}]+/gu, " ").trim() + " ";

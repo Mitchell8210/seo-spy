@@ -38,8 +38,9 @@ function clientTasks(saved: AuditReportRecord, selected: Assessment, social: Aud
 }
 function expectClientParity(saved: AuditReportRecord, selected: Assessment, social: AuditReportRecord | null = null) {
   const expected = clientTasks(saved, selected, social);
-  const actual = projectPlannerSources("business-a", saved, social, selected).map(({ taskKey, origin: _origin, authoritativeScanAt: _at, ...task }) => {
-    void _origin; void _at; return { ...task, id: taskKey, status: "Needs Action" };
+  const actual = projectPlannerSources("business-a", saved, social, selected).map(({ taskKey, origin: _origin, authoritativeScanAt: _at, sourceSeverity: _severity, ...task }) => {
+    // Severity is additional backend provenance; existing visible task mapping stays identical.
+    void _origin; void _at; void _severity; return { ...task, id: taskKey, status: "Needs Action" };
   });
   expect(actual).toEqual(expected);
 }

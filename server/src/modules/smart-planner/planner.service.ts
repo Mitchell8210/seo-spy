@@ -34,7 +34,7 @@ export class PlannerService {
       }
       state.tasks.push({ id, taskKey: `${task.taskKey}@${id}`, orderKey: task.taskKey,
         title: task.title, explanation: task.explanation, guidance: task.guidance, priority: task.priority, category: task.category,
-        source: task.source, mode: task.mode, status: "Needs Action", schedule: null, destination: task.destination ?? null, notes: null,
+        source: task.source, mode: task.mode, ...(task.sourceSeverity ? { sourceSeverity: task.sourceSeverity } : {}), status: "Needs Action", schedule: null, destination: task.destination ?? null, notes: null,
         origin: task.origin, sourceChannel: task.origin.channel, sourcePresent: true, completedAt: null, createdAt: now, updatedAt: now,
         payloadVersion: 2, estimatedDurationMinutes: 60, durationEstimateSource: "default", scheduledBy: null });
     }
@@ -49,9 +49,11 @@ export class PlannerService {
     state.tasks.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
   private response(state: PlannerState, projection: PlannerSourceProjection): PlannerResponseDto {
+    const severities = new Map(projection.tasks.map(task => [sourceTaskId(state.businessId, task.origin), task.sourceSeverity]));
     return { businessId: state.businessId, revision: state.revision, preferences: { useWeekends: state.useWeekends, dailyCapacityMinutes: state.dailyCapacityMinutes, maxTasksPerDay: state.maxTasksPerDay, horizonWeeks: state.horizonWeeks, timeZone: state.timeZone },
-      tasks: visible(state).map(({ id, taskKey, title, explanation, guidance, priority, category, source, mode, status, schedule, destination, notes, completedAt, origin, estimatedDurationMinutes, durationEstimateSource, scheduledBy }) =>
+      tasks: visible(state).map(({ id, taskKey, title, explanation, guidance, priority, category, source, mode, status, schedule, destination, notes, completedAt, origin, estimatedDurationMinutes, durationEstimateSource, scheduledBy, sourceSeverity }) =>
         ({ id, taskKey, title, explanation, guidance, priority, category, source, mode, status, schedule, destination, notes, completedAt, origin,
+          sourceSeverity: sourceSeverity ?? (status !== "Done" ? severities.get(id) : undefined),
           estimatedDurationMinutes: estimatedDurationMinutes ?? 60, durationEstimateSource: durationEstimateSource ?? "legacy-default", scheduledBy: scheduledBy ?? (schedule ? "legacy-unknown" : null) })),
       sources: projection.sources, ...(state.mutationResult ? { planning: state.mutationResult } : {}) };
   }
@@ -61,11 +63,11 @@ export class PlannerService {
     this.merge(state, projection);
     return this.response(state, projection);
   }
-  private async write(businessId: string, operation: string, body: PlannerMutation, apply: (state: PlannerState) => void): Promise<PlannerResponseDto> {
+  private async write(businessId: string, operation: string, body: PlannerMutation, apply: (state: PlannerState, projection: PlannerSourceProjection) => void): Promise<PlannerResponseDto> {
     const projection = await this.context(businessId);
     const state = await this.repository.mutate(businessId, body, checksum(canonical({ operation, body })), current => {
       this.merge(current, projection);
-      apply(current);
+      apply(current, projection);
     });
     this.merge(state, projection);
     return this.response(state, projection);
@@ -135,6 +137,16 @@ export class PlannerService {
       }
       state.mutationResult = { policyVersion: planned.policyVersion, range: planned.range, scheduledCount: Object.keys(planned.assignments).length, remaining: planned.remaining, overloadedDays: planned.overloadedDays };
     });
+  }
+  applyReviewedAiPlan(businessId: string, body: PlannerMutation & { proposalId: string }, apply: (state: PlannerState, current: PlannerResponseDto) => void): Promise<PlannerResponseDto> {
+    return this.write(businessId, "ai-plan-apply", body, (state, projection) => {
+      // Same saved projection used for snapshot validation and mutation, inside CAS.
+      // Existing write() merges saved sources before invoking this callback.
+      apply(state, this.response(state, projection));
+    });
+  }
+  saveAiSettings(businessId: string, body: PlannerMutation & { settings: object }, apply: () => void) {
+    return this.write(businessId, "ai-planning-settings", body, apply);
   }
   reconcile(businessId: string, body: ReconcilePlannerDto): Promise<PlannerResponseDto> {
     return this.write(businessId, "reconcile", body, () => { /* Saved evidence never reopens completed work. */ });

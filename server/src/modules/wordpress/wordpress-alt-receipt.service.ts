@@ -23,10 +23,10 @@ const rejected = () => new ServiceUnavailableException({ code: "WORDPRESS_ALT_RE
 export class WordPressAltReceiptService {
   constructor(private readonly usage: AiUsageStore, private readonly fixes: WordPressFixStore) {}
   async publish(outcome: AltReceiptOutcome): Promise<boolean> {
-    const state = await this.usage.status(), grant = state.wordPressAlt?.funding;
-    if (!grant) return false;
-    if (grant.request.actor !== outcome.actor || grant.request.businessId !== outcome.businessId
-      || grant.request.evidenceContextId !== outcome.evidenceId || grant.request.requestHash !== outcome.requestHash) throw rejected();
+    const authority = await this.usage.wordPressAltReceiptAuthority(outcome.intentId);
+    if (!authority) return false;
+    if (authority.actor !== outcome.actor || authority.businessId !== outcome.businessId
+      || authority.evidenceContextId !== outcome.evidenceId || authority.requestHash !== outcome.requestHash) throw rejected();
     const raw = await this.usage.wordPressAltAttempt(outcome.intentId);
     if (!raw) return false;
     const attempt = attemptSchema.parse(raw);
@@ -43,7 +43,7 @@ export class WordPressAltReceiptService {
         || generation.attemptId !== attempt.id) throw rejected();
       validateAltOutput(generation.output, evidence);
     }
-    await this.usage.completeWordPressAltReceipt(grant.adminActor, outcome.intentId, { requestHash: outcome.requestHash, evidenceContextId: outcome.evidenceId,
+    await this.usage.completeWordPressAltReceipt(authority.receiptActor, outcome.intentId, { requestHash: outcome.requestHash, evidenceContextId: outcome.evidenceId,
       attemptId: attempt.id, reservedMicros: attempt.reserve_micros, ledgerChargeMicros: attempt.charged_micros,
       inputTokens: attempt.input_tokens, outputTokens: attempt.output_tokens, requestId: attempt.request_id,
       httpStatus: outcome.httpStatus, completionStatus: outcome.completionStatus, schemaValid: outcome.schemaValid,
