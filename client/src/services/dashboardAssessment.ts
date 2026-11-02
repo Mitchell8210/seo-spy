@@ -5,6 +5,7 @@ import { mapDashboardReports } from './dashboardMapping.ts'
 import { opportunityDestination, selectDashboardOpportunities, type DashboardIssue } from './dashboardOpportunities.ts'
 import { knownAssessment } from './savedScore.ts'
 import { socialScoreDetails } from './socialScoreDetails.ts'
+import { mapSavedMuseAssessment } from './dashboardMuse.ts'
 
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 
@@ -56,8 +57,18 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
       })
     }
   }
-  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment,
+  const opportunities = selectDashboardOpportunities(issues)
+  const interpretation = mapSavedMuseAssessment(knownPolicy ? assessment : null, website, social)
+  // Use the validated selection for the existing category cards, including
+  // scoring observations that have no original audit finding. Keep model order
+  // and leave omitted categories empty instead of inventing an AI priority.
+  const top = interpretation ? Object.fromEntries((['website', 'social', 'consistency'] as const).map(category => [category,
+    interpretation.path.filter(item => item.category === category).slice(0, 3).map(item => ({ ...item,
+      explanation: `${item.source}: ${item.recommendation!.explanation}`,
+    })),
+  ])) as Record<DashboardIssue['category'], DashboardIssue[]> : opportunities.top
+  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment, interpretation,
     websiteResults: { ...view.websiteResults, overall: websiteScore }, consistency: { ...view.consistency, score: consistencyScore, checks },
     main: { ...view.main, overall: overallScore, components: [websiteScore, socialScore, consistencyScore] },
-    ...selectDashboardOpportunities(issues) }
+    ...opportunities, top, path: interpretation ? interpretation.path : opportunities.path }
 }

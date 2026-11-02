@@ -1,5 +1,7 @@
 # Dashboard saved-report integration
 
+Single assessment POC preparation: the existing consultation/recommendation source slots use `Meta Muse-assisted assessment` only for saved nonmock Meta output carrying a usage-attempt reference. Mock wording is unchanged. Model-selected priorities remain distinct from backend-rendered prose and original report findings. Server-only approval provenance is omitted from HTTP/Dashboard responses. This changes data-slot provenance values only; no component, layout, gauge, navigation or control changed and no live request occurred. See `server/MUSE_PROVIDER.md` for the separately authorized local operator procedure.
+
 ## Approved Social scoring breakdown v1.4 - November 1, 2026
 
 The user explicitly requested category scores, evidence coverage, freshness, missing metrics and actionable recommendations on the Dashboard. The existing Social Media Performance card now includes a compact backend-supplied breakdown with six weighted category rows (15/20/25/15/15/10), evidence/explanation disclosures, dated freshness, missing metrics and category recommendations. Existing category headers, gauges, findings, report links and surrounding layout retain their presentation. No action/edit controls were added.
@@ -76,3 +78,23 @@ Actual saved SQLite assessment f4222edc-0e4f-4fde-8bc7-2a6fe70e4adb displayed We
 ## Dashboard presentation follow-up ? November 1, 2026
 
 The user requested removal of the new Social scoring breakdown from the Dashboard. The section and its component were removed. Scoring, evidence coverage, category ledgers and definitive-only gauge eligibility remain in the data/backend layer. Preserve the existing dashboard gauges and presentation; do not reintroduce calculation details without explicit approval.
+
+## Approved Muse consultation refinement — November 1, 2026
+
+The user authorized the smallest integration change necessary to show the refined consultation in the existing assessment experience. For a valid saved `assessment-muse-output-v3`, the existing Your Next Steps description paragraph shows the explicitly labeled mock/saved executive assessment. The existing Recommended Path description paragraph shows the owner-facing scoring explanation, and its ordered rows show the saved priority recommendations in their exact order. Existing headings, cards, controls, CSS classes, gauge values and section ordering remain unchanged; no Social category breakdown or editing controls were added. V1/v2 retain their original presentation/mapping.
+
+`dashboardMuse.ts` validates business/assessment identity, pinned source manifest hashes, exact current report IDs, saved evidence citations and typed recommendation origins before mapping. Grouped posting recommendations must reference measured underperforming posting criteria; grouped consistency recommendations require failed name/hours comparisons and citations from both saved sources. Unavailable measurements do not become failures. Unknown scoring IDs, stale inputs and mismatched/foreign citations fail closed.
+
+Scoring-observation recommendations are assessment suggestions, not newly invented audit findings. Their path rows are labeled `Mock AI assessment`/`Saved AI assessment` and link to the saved channel report or existing consistency details without passing a fictional original finding ID. Existing report-finding recommendations retain their true finding navigation target. More Opportunities continues to contain original audit findings only. No read, render, click or polling behavior starts model generation or writes.
+
+Verification: frontend build/typecheck, lint, 24 mapping/score tests and existing opportunity assertions passed. Offline browser checks were extended for v3 content, preserved section/gauge structure, read-only navigation and responsive overflow, but the local Chrome harness stopped at `CDP timeout: Page.enable` before product assertions. Saved-data mode includes exact v3 executive/scoring/priority assertions for a separate protected local backend run; do not claim live UI validation until that run succeeds.
+
+## Muse v4 compatibility
+
+The existing saved interpretation mapping accepts `assessment-muse-output-v4` alongside v3, preserving source/business/citation guards and returned priority order. A valid empty selected list remains empty and uses the existing empty treatment; it never falls back to unrelated audit recommendations. Labels, sections, component structure, visual styles and scoring gauges are unchanged. The removed Social scoring breakdown remains removed. See [backend v4 contract](../server/MUSE_V4_ASSESSMENT.md).
+
+## Saved Muse recommendations in the main category cards — November 2, 2026
+
+The user requested that real AI evaluation recommendations appear in the main “Top issues to fix now” slots. Validated v3/v4 selections now populate those existing rows by Website, Social or Consistency category, preserving selected order within each category. Row titles and descriptions use saved recommendation text and mock/Meta provenance. The existing Fix with AI preview exposes the full saved action without generation or execution. Posting and consistency scoring observations can occupy these slots without inventing original report findings. Omitted categories and empty selections retain the existing empty treatment; absent or invalid interpretations retain the original report-based selection. More Opportunities, Recommended Path, score values, components, styling and controls keep their existing behavior.
+
+Validation: replaying the actual saved live v4 analysis through the Dashboard mapper yields the loading and posting recommendations in their respective main cards, no selected Consistency row, and unchanged Website 80 / Social 71 / Consistency 60 scores. Build and lint pass. The offline browser harness again times out at `Page.enable` before product assertions; browser rendering is not verified by this run.

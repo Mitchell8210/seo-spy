@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Req, UseGuards } from "@nestjs/common";
+import { assessmentMuseBrowserView } from "../../integrations/assessment-ai/assessment-muse.types.js";
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 import { z } from "zod";
@@ -45,9 +46,9 @@ export class AssessmentsController {
   @ApiOperation({ summary: "Explicitly prepare and save labeled mock recommendations from pinned summarized evidence; live dispatch is blocked" })
   @ApiBody({ schema: { type: "object", additionalProperties: false, required: ["confirmed"], properties: { confirmed: { type: "boolean", enum: [true] } } } })
   @ApiCreatedResponse({ schema: { type: "object", additionalProperties: true } })
-  analyze(@Param("businessId") businessId: string, @Param("id", new ParseUUIDPipe({ version: "4" })) id: string, @Body() input: unknown) { body(confirmed, input); return this.analysis.create(businessId, id); }
+  async analyze(@Param("businessId") businessId: string, @Param("id", new ParseUUIDPipe({ version: "4" })) id: string, @Body() input: unknown) { body(confirmed, input); return assessmentMuseBrowserView(await this.analysis.create(businessId, id)); }
   @Get("businesses/:businessId/assessments/:id/muse-analyses/:analysisId") @UseGuards(WordPressOperatorGuard) @ApiBearerAuth()
-  savedAnalysis(@Param("businessId") businessId: string, @Param("id", new ParseUUIDPipe({ version: "4" })) id: string, @Param("analysisId", new ParseUUIDPipe({ version: "4" })) analysisId: string) { return this.analysis.read(businessId, id, analysisId); }
+  async savedAnalysis(@Param("businessId") businessId: string, @Param("id", new ParseUUIDPipe({ version: "4" })) id: string, @Param("analysisId", new ParseUUIDPipe({ version: "4" })) analysisId: string) { return assessmentMuseBrowserView(await this.analysis.read(businessId, id, analysisId)); }
 }
 
 @Controller("wordpress/businesses/:businessId/media-alt-previews")

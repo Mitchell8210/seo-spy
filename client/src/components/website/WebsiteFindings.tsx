@@ -48,7 +48,10 @@ function BoardCard({ item, live, evidenceLabel }: { item: BoardItem; live: boole
             {item.recommendations.length > 0 ? <ul className="mt-1 space-y-3">{item.recommendations.map((recommendation) => <li key={recommendation.id} data-recommendation-id={recommendation.id}>{recommendation.action}</li>)}</ul> : <p className="mt-1 text-muted">No recommended fix is linked to this finding yet.</p>}
             <p className="mt-2 text-muted">Priority: {item.finding.severity} · Suggested change · Not applied</p>
           </div>
-          <FindingActions live={live} fixRef={fixRef} hasRecommendation={item.recommendations.length > 0} />
+          <FindingActions live={live} fixRef={fixRef} hasRecommendation={item.recommendations.length > 0}
+            review={{ id: item.finding.id, title, category: 'website', source: live ? item.finding.evidenceLabel ?? evidenceLabel : 'Mock website report',
+              isMock: !live, explanation: item.finding.explanation, evidence: [item.finding.evidence], target: urls.join(', '),
+              findingId: item.finding.id, recommendation: item.recommendations.map(recommendation => recommendation.action).join('\n\n') }} />
         </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{live ? 'Passed in this Lighthouse run. Remediation has not been verified.' : `${item.check.status} in this mock analysis. No live verification was performed.`}</p></div>}
         <dl className="space-y-1 border-t border-line pt-3 text-muted">
           <div><dt className="inline font-medium text-secondary">Source: </dt><dd className="inline">{isIssue ? item.finding.source : 'Website'}</dd></div>

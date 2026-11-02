@@ -33,7 +33,10 @@ function SocialReportCard(props: SocialCardProps) {
         {issue ? <>
           <div><h5 className="font-semibold text-ink">Affected area</h5><p className="mt-1">{props.finding.affectedArea}</p></div>
           <div><h5 ref={fixRef} tabIndex={-1} className="scroll-mt-6 rounded-sm font-semibold text-ink">Recommended fix</h5><p className="mt-1" data-recommendation-id={props.finding.recommendation.id}>{props.finding.recommendation.action}</p><p className="mt-2 text-muted">Suggested change · Not applied</p></div>
-          <FindingActions fixRef={fixRef} hasRecommendation target="account" live={live} />
+          <FindingActions fixRef={fixRef} hasRecommendation target="account" live={live}
+            review={{ id: props.finding.recommendation.id, title: item.title, category: 'social', source: live ? props.evidenceLabel ?? 'Saved Facebook report' : 'Mock Facebook report',
+              isMock: !live, explanation: props.finding.explanation, evidence: [props.finding.evidence], target: props.finding.affectedArea,
+              findingId: props.finding.id, recommendation: props.finding.recommendation.action }} />
           <p className="border-t border-line pt-3 text-muted">Status: {props.finding.status}</p>
         </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{live ? `${props.check.status} against the saved evidence. Current Page state may differ.` : `${props.check.status} in this mock analysis. No live verification was performed.`}</p></div>}
       </ReportDisclosure>

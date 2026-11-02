@@ -428,6 +428,36 @@ describe("Facebook local HTTP boundary", () => {
     expect(status).not.toHaveBeenCalled(); expect(graph.request).not.toHaveBeenCalled();
   });
 
+  it("requires an exact matching isolated-port configuration and never trusts forwarded production hosts", async () => {
+    const settings = app.get(ConfigService);
+    const priorFrontend = process.env.FACEBOOK_FRONTEND_ORIGIN;
+    const priorRedirect = process.env.FACEBOOK_REDIRECT_URI;
+    const priorFrontendSetting = settings.get<string>("FACEBOOK_FRONTEND_ORIGIN") ?? "http://localhost:5173";
+    const priorRedirectSetting = settings.get<string>("FACEBOOK_REDIRECT_URI") ?? `${ORIGIN}/api/facebook/callback`;
+    try {
+    settings.set("FACEBOOK_FRONTEND_ORIGIN", "http://127.0.0.1:5186");
+    settings.set("FACEBOOK_REDIRECT_URI", "http://127.0.0.1:3016/api/facebook/callback");
+    const status = jest.spyOn(app.get(OverallInvestigationService), "status").mockResolvedValue({ businessId: "demo-guzman", active: null, latest: null });
+    const route = "/api/facebook/investigations/status?businessId=demo-guzman";
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5186").expect(200);
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5186").set("Origin", "http://127.0.0.1:5186").expect(200);
+    expect(status).toHaveBeenCalledTimes(2);
+    status.mockClear();
+    await request(app.getHttpServer()).get(route).set("Host", "localhost:5186").expect(400);
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5187").expect(400);
+    await request(app.getHttpServer()).get(route).set("Host", "demo.example.com").set("X-Forwarded-Host", "127.0.0.1:5186").set("X-Forwarded-Proto", "https").expect(400);
+    expect(status).not.toHaveBeenCalled();
+    expect(graph.request).not.toHaveBeenCalled();
+    } finally {
+      settings.set("FACEBOOK_FRONTEND_ORIGIN", priorFrontendSetting);
+      settings.set("FACEBOOK_REDIRECT_URI", priorRedirectSetting);
+      if (priorFrontend === undefined) delete process.env.FACEBOOK_FRONTEND_ORIGIN;
+      else process.env.FACEBOOK_FRONTEND_ORIGIN = priorFrontend;
+      if (priorRedirect === undefined) delete process.env.FACEBOOK_REDIRECT_URI;
+      else process.env.FACEBOOK_REDIRECT_URI = priorRedirect;
+    }
+  });
+
   beforeEach(async () => {
     store = credentialMock();
     graph.request.mockReset();

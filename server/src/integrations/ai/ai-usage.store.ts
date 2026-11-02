@@ -6,6 +6,8 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { activateTesting, testingExists, testingAllocation, testingIntent, testingStatus, testingMetadataSchema, verifyTestingBudget, saveTestingReceipt, readTestingReceipts, testingFail } from "./muse-testing-ledger.js";
+import { MUSE_HELLO_HASH, MUSE_HELLO_SCOPE, MUSE_HELLO_V1_HASH, MUSE_HELLO_V1_SCOPE, prepareMuseHello, MUSE_MINIMAL_HELLO_HASH, MUSE_MINIMAL_HELLO_SCOPE, prepareMinimalMuseHello } from "./muse-hello-request.js";
 import { AiUsageError, type AiDemoAuthorization, type AiUsageAuthorization, type AiUsageEstimateInput, type AiUsageIntent, type AiUsageLimits, type AiUsageReservation, type AiUsageSettlement, type AiUsageSummary } from "./ai-usage.types.js";
 
 const DEFAULT_LIMITS: AiUsageLimits = { budgetMicros: 2_000_000, dailyMicros: 500_000, maxCalls: 10 };
@@ -23,6 +25,7 @@ const inputSchema = z.object({
 }).strict();
 const fail = (code = "AI_USAGE_UNAVAILABLE", message = "Persistent AI usage tracking is unavailable; real API calls are blocked.") => new AiUsageError(code, message);
 const digest = (input: string) => createHash("sha256").update(input).digest("hex");
+const rowDigest = (input: unknown) => { const serialized = JSON.stringify(input); if (serialized === undefined) throw fail(); return digest(serialized); };
 const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
 const utcDay = (timestamp: number) => new Date(timestamp).toISOString().slice(0, 10);
 const date = (value: unknown): string => { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw fail(); return value; };
@@ -108,6 +111,145 @@ export class AiUsageStore implements OnModuleDestroy {
       throw fail();
     }
   }
+  /** Optional additive audit table: created only by the explicitly approved amendment. */
+  private originalHelloAmendment(database: DatabaseSync) {
+    if (!database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hello_diagnostic_amendment'").get()) return null;
+    const row = database.prepare("SELECT * FROM hello_diagnostic_amendment WHERE id=1").get();
+    if (!row || typeof row.record_json !== "string" || digest(row.record_json) !== row.checksum) throw fail();
+    const record = z.object({ intentId: z.string().uuid(), actor: hash, requestHash: hash, scope: z.enum([MUSE_HELLO_V1_SCOPE, MUSE_HELLO_SCOPE]), reserveMicros: z.number().int().positive().max(10000),
+      originalAttemptId: z.string().uuid(), originalIntentId: z.string().uuid(), originalAttemptHash: hash, originalIntentHash: hash,
+      approvedAt: z.string().datetime(), before: z.object({ budgetMicros: z.literal(131460), dailyMicros: z.literal(131460), maxCalls: z.literal(1) }).strict(),
+      after: z.object({ budgetMicros: z.number().int().max(141460), dailyMicros: z.number().int().max(141460), maxCalls: z.literal(2) }).strict() }).strict().parse(JSON.parse(row.record_json));
+    if (record.requestHash !== (record.scope === MUSE_HELLO_V1_SCOPE ? MUSE_HELLO_V1_HASH : MUSE_HELLO_HASH) || record.after.budgetMicros !== 131460 + record.reserveMicros || record.after.dailyMicros !== 131460 + record.reserveMicros
+      || rowDigest(database.prepare("SELECT * FROM attempts WHERE id=?").get(record.originalAttemptId)) !== record.originalAttemptHash
+      || rowDigest(database.prepare("SELECT * FROM intents WHERE id=?").get(record.originalIntentId)) !== record.originalIntentHash) throw fail();
+    return record;
+  }
+  private correctedHelloAmendment(database: DatabaseSync) {
+    const prior = this.originalHelloAmendment(database);
+    if (!database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='corrected_hello_amendment'").get()) return prior;
+    const row = database.prepare("SELECT * FROM corrected_hello_amendment WHERE id=1").get();
+    if (!prior || !row || typeof row.record_json !== "string" || digest(row.record_json) !== row.checksum) throw fail();
+    const record = z.object({ intentId: z.string().uuid(), actor: hash, requestHash: z.literal(MUSE_HELLO_HASH), scope: z.literal(MUSE_HELLO_SCOPE), reserveMicros: z.literal(6544),
+      priorAmendmentHash: hash, previousAttemptId: z.string().uuid(), previousIntentId: z.string().uuid(), previousAttemptHash: hash, previousIntentHash: hash,
+      approvedAt: z.string().datetime(), before: z.object({ budgetMicros: z.literal(138004), dailyMicros: z.literal(138004), maxCalls: z.literal(2) }).strict(),
+      after: z.object({ budgetMicros: z.literal(144548), dailyMicros: z.literal(144548), maxCalls: z.literal(3) }).strict() }).strict().parse(JSON.parse(row.record_json));
+    if (prior.scope !== MUSE_HELLO_V1_SCOPE || record.priorAmendmentHash !== rowDigest(database.prepare("SELECT * FROM hello_diagnostic_amendment WHERE id=1").get())
+      || record.previousIntentId !== prior.intentId
+      || record.previousAttemptHash !== rowDigest(database.prepare("SELECT * FROM attempts WHERE id=?").get(record.previousAttemptId))
+      || record.previousIntentHash !== rowDigest(database.prepare("SELECT * FROM intents WHERE id=?").get(record.previousIntentId))) throw fail();
+    return record;
+  }
+  private helloAmendment(database: DatabaseSync) {
+    const prior = this.correctedHelloAmendment(database);
+    if (!database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='minimal_hello_amendment'").get()) return prior;
+    const row = database.prepare("SELECT * FROM minimal_hello_amendment WHERE id=1").get();
+    if (!prior || !row || typeof row.record_json !== "string" || digest(row.record_json) !== row.checksum) throw fail();
+    const record = z.object({ intentId: z.string().uuid(), actor: hash, requestHash: z.literal(MUSE_MINIMAL_HELLO_HASH), scope: z.literal(MUSE_MINIMAL_HELLO_SCOPE), reserveMicros: z.literal(8196),
+      priorAmendmentHash: hash, previousAttemptId: z.string().uuid(), previousIntentId: z.string().uuid(), previousAttemptHash: hash, previousIntentHash: hash,
+      approvedAt: z.string().datetime(), before: z.object({ budgetMicros: z.literal(144548), dailyMicros: z.literal(144548), maxCalls: z.literal(3) }).strict(),
+      after: z.object({ budgetMicros: z.literal(152744), dailyMicros: z.literal(152744), maxCalls: z.literal(4) }).strict() }).strict().parse(JSON.parse(row.record_json));
+    if (prior.scope !== MUSE_HELLO_SCOPE || record.priorAmendmentHash !== rowDigest(database.prepare("SELECT * FROM corrected_hello_amendment WHERE id=1").get())
+      || record.previousIntentId !== prior.intentId
+      || record.previousAttemptHash !== rowDigest(database.prepare("SELECT * FROM attempts WHERE id=?").get(record.previousAttemptId))
+      || record.previousIntentHash !== rowDigest(database.prepare("SELECT * FROM intents WHERE id=?").get(record.previousIntentId))) throw fail();
+    return record;
+  }
+  /** Final separately approved minimal/512 diagnostic only; immutable prior receipts. */
+  async amendMinimalHelloDiagnostic(adminActor: string, confirmation: { confirmed: boolean; requestHash: string; maximumMicros: number }) {
+    const prepared = prepareMinimalMuseHello();
+    if (!hash.safeParse(adminActor).success || confirmation.confirmed !== true || confirmation.requestHash !== prepared.requestHash || confirmation.maximumMicros !== 8196)
+      throw fail("AI_APPROVAL_MISMATCH", "Exact confirmation of the minimal diagnostic and 8196-microdollar reservation is required.");
+    return this.transaction(database => {
+      const prior = this.helloAmendment(database);
+      if (!prior || prior.scope !== MUSE_HELLO_SCOPE || !("priorAmendmentHash" in prior)) throw fail("AI_DIAGNOSTIC_ALREADY_AUTHORIZED", "The final diagnostic requires three consumed attempts and cannot be renewed.");
+      const policy = database.prepare("SELECT * FROM policy WHERE id=1").get();
+      const attempts = database.prepare("SELECT * FROM attempts ORDER BY rowid").all(), previous = attempts[2];
+      if (!policy || policy.budget !== 144548 || policy.daily !== 144548 || policy.calls !== 3 || policy.halted !== 0 || attempts.length !== 3
+        || !previous || previous.intent_id !== prior.intentId || previous.mode !== "poc" || previous.status !== "failed" || previous.reserve_micros !== 6544 || previous.charged_micros !== 6544 || previous.error_code !== "AI_INVALID_OUTPUT" || previous.input_tokens !== 10 || previous.output_tokens !== 128
+        || this.intent(database, prior.intentId).requestHash !== MUSE_HELLO_HASH
+        || database.prepare("SELECT id FROM intents WHERE consumed_at IS NULL AND approved_at IS NOT NULL LIMIT 1").get()) throw fail("AI_DIAGNOSTIC_STATE_MISMATCH", "The three historical receipts or permanent limits differ; stop.");
+      const now = Date.now(), createdAt = new Date(now).toISOString(), intentId = randomUUID();
+      const { payload: _payload, scope: _scope, ...cost } = prepared; void _payload; void _scope;
+      const input = inputSchema.parse({ ...cost, actor: adminActor, scope: prepared.scope, cacheKey: prepared.requestHash, mode: "poc", reason: "Final explicit authorization: one minimal/512 Hello diagnostic, 8196 micros, no retries or other scopes." });
+      const serialized = JSON.stringify(input);
+      const record = { intentId, actor: adminActor, requestHash: prepared.requestHash, scope: prepared.scope, reserveMicros: 8196 as const,
+        priorAmendmentHash: rowDigest(database.prepare("SELECT * FROM corrected_hello_amendment WHERE id=1").get()),
+        previousAttemptId: String(previous.id), previousIntentId: prior.intentId, previousAttemptHash: rowDigest(previous), previousIntentHash: rowDigest(database.prepare("SELECT * FROM intents WHERE id=?").get(prior.intentId)), approvedAt: createdAt,
+        before: { budgetMicros: 144548 as const, dailyMicros: 144548 as const, maxCalls: 3 as const }, after: { budgetMicros: 152744 as const, dailyMicros: 152744 as const, maxCalls: 4 as const } };
+      const audit = JSON.stringify(record);
+      database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,NULL)").run(intentId, serialized, digest(serialized), createdAt, new Date(now + 15 * 60000).toISOString());
+      database.exec("CREATE TABLE minimal_hello_amendment(id INTEGER PRIMARY KEY CHECK(id=1),record_json TEXT NOT NULL,checksum TEXT NOT NULL)");
+      database.prepare("INSERT INTO minimal_hello_amendment(id,record_json,checksum) VALUES(1,?,?)").run(audit, digest(audit));
+      database.prepare("UPDATE policy SET budget=152744,daily=152744,calls=4 WHERE id=1").run();
+      this.helloAmendment(database);
+      return record;
+    });
+  }
+  /** Separately authorized corrected Hello only: append a receipt, never renew the old grant. */
+  async amendCorrectedHelloDiagnostic(adminActor: string, confirmation: { confirmed: boolean; requestHash: string; maximumMicros: number }) {
+    const prepared = prepareMuseHello();
+    if (!hash.safeParse(adminActor).success || confirmation.confirmed !== true || confirmation.requestHash !== prepared.requestHash || confirmation.maximumMicros !== 6544 || prepared.reserveMicros !== 6544)
+      throw fail("AI_APPROVAL_MISMATCH", "Exact confirmation of the corrected Hello request and 6544-microdollar reservation is required.");
+    return this.transaction(database => {
+      const prior = this.helloAmendment(database);
+      if (!prior || prior.scope !== MUSE_HELLO_V1_SCOPE) throw fail("AI_DIAGNOSTIC_ALREADY_AUTHORIZED", "The corrected diagnostic requires the original consumed amendment and cannot be renewed.");
+      const policy = database.prepare("SELECT * FROM policy WHERE id=1").get();
+      const attempts = database.prepare("SELECT * FROM attempts ORDER BY rowid").all();
+      const previous = attempts[1];
+      if (!policy || policy.budget !== 138004 || policy.daily !== 138004 || policy.calls !== 2 || policy.halted !== 0 || attempts.length !== 2
+        || !previous || previous.intent_id !== prior.intentId || previous.mode !== "poc" || previous.status !== "failed" || previous.reserve_micros !== 6544 || previous.charged_micros !== 6544 || previous.error_code !== "AI_PROVIDER_FAILED"
+        || this.intent(database, prior.intentId).requestHash !== MUSE_HELLO_V1_HASH
+        || database.prepare("SELECT id FROM intents WHERE consumed_at IS NULL AND approved_at IS NOT NULL LIMIT 1").get()) throw fail("AI_DIAGNOSTIC_STATE_MISMATCH", "The two historical failed receipts or narrowed limits differ; stop.");
+      const now = Date.now(), createdAt = new Date(now).toISOString(), intentId = randomUUID();
+      const { payload: _payload, scope: _scope, ...cost } = prepared; void _payload; void _scope;
+      const input = inputSchema.parse({ ...cost, actor: adminActor, scope: prepared.scope, cacheKey: prepared.requestHash, mode: "poc", reason: "Separate explicit authorization: one corrected Hello diagnostic, 6544 micros, one attempt, no retries or other scopes." });
+      const serialized = JSON.stringify(input);
+      const record = { intentId, actor: adminActor, requestHash: prepared.requestHash, scope: prepared.scope, reserveMicros: 6544 as const,
+        priorAmendmentHash: rowDigest(database.prepare("SELECT * FROM hello_diagnostic_amendment WHERE id=1").get()),
+        previousAttemptId: String(previous.id), previousIntentId: prior.intentId, previousAttemptHash: rowDigest(previous), previousIntentHash: rowDigest(database.prepare("SELECT * FROM intents WHERE id=?").get(prior.intentId)), approvedAt: createdAt,
+        before: { budgetMicros: 138004 as const, dailyMicros: 138004 as const, maxCalls: 2 as const }, after: { budgetMicros: 144548 as const, dailyMicros: 144548 as const, maxCalls: 3 as const } };
+      const audit = JSON.stringify(record);
+      database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,NULL)").run(intentId, serialized, digest(serialized), createdAt, new Date(now + 15 * 60000).toISOString());
+      database.exec("CREATE TABLE corrected_hello_amendment(id INTEGER PRIMARY KEY CHECK(id=1),record_json TEXT NOT NULL,checksum TEXT NOT NULL)");
+      database.prepare("INSERT INTO corrected_hello_amendment(id,record_json,checksum) VALUES(1,?,?)").run(audit, digest(audit));
+      database.prepare("UPDATE policy SET budget=144548,daily=144548,calls=3 WHERE id=1").run();
+      this.helloAmendment(database);
+      return record;
+    });
+  }
+  /** One fixed Hello exception, not a general limit-increase API. No dispatch. */
+  async amendHelloDiagnostic(adminActor: string, confirmation: { confirmed: boolean; requestHash: string; maximumMicros: number }) {
+    const prepared = prepareMuseHello();
+    if (!hash.safeParse(adminActor).success || confirmation.confirmed !== true || confirmation.requestHash !== prepared.requestHash || confirmation.maximumMicros !== prepared.reserveMicros)
+      throw fail("AI_APPROVAL_MISMATCH", "Exact administrator confirmation of the fixed Hello request and reservation is required.");
+    return this.transaction(database => {
+      if (this.helloAmendment(database)) throw fail("AI_DIAGNOSTIC_ALREADY_AUTHORIZED", "The single diagnostic amendment has already been used; no renewal is allowed.");
+      const policy = database.prepare("SELECT * FROM policy WHERE id=1").get();
+      const attempts = database.prepare("SELECT * FROM attempts ORDER BY rowid").all();
+      if (!policy || policy.budget !== 131460 || policy.daily !== 131460 || policy.calls !== 1 || policy.halted !== 0 || attempts.length !== 1) throw fail("AI_DIAGNOSTIC_STATE_MISMATCH", "The original narrowed ledger state differs; no amendment is permitted.");
+      const original = attempts[0], originalIntent = database.prepare("SELECT * FROM intents WHERE id=?").get(String(original.intent_id));
+      if (original.mode !== "poc" || original.status !== "failed" || original.reserve_micros !== 131460 || original.charged_micros !== 131460 || original.error_code !== "AI_PROVIDER_FAILED"
+        || this.intent(database, String(original.intent_id)).requestHash !== "d4c2fdb6694981d374ed304dd1ecbc477e85d0ed2709cb9c5cf2ea48ddf0aa39"
+        || database.prepare("SELECT id FROM intents WHERE consumed_at IS NULL AND approved_at IS NOT NULL LIMIT 1").get()) throw fail("AI_DIAGNOSTIC_STATE_MISMATCH", "Original receipt or outstanding approval state differs; stop.");
+      const now = Date.now(), createdAt = new Date(now).toISOString(), intentId = randomUUID();
+      const after = { budgetMicros: 131460 + prepared.reserveMicros, dailyMicros: 131460 + prepared.reserveMicros, maxCalls: 2 as const };
+      const { payload: _payload, scope: _scope, ...cost } = prepared; void _payload; void _scope;
+      const input = inputSchema.parse({ ...cost, actor: adminActor, scope: MUSE_HELLO_SCOPE, cacheKey: prepared.requestHash, mode: "poc", reason: "Explicit user exception: one additional fixed Hello connectivity diagnostic, no retries or other scopes." });
+      const serialized = JSON.stringify(input);
+      database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,NULL)").run(intentId, serialized, digest(serialized), createdAt, new Date(now + 15 * 60000).toISOString());
+      const record = { intentId, actor: adminActor, requestHash: prepared.requestHash, scope: MUSE_HELLO_SCOPE, reserveMicros: prepared.reserveMicros,
+        originalAttemptId: String(original.id), originalIntentId: String(original.intent_id), originalAttemptHash: rowDigest(original), originalIntentHash: rowDigest(originalIntent), approvedAt: createdAt,
+        before: { budgetMicros: 131460 as const, dailyMicros: 131460 as const, maxCalls: 1 as const }, after };
+      const audit = JSON.stringify(record);
+      database.exec("CREATE TABLE hello_diagnostic_amendment(id INTEGER PRIMARY KEY CHECK(id=1),record_json TEXT NOT NULL,checksum TEXT NOT NULL)");
+      database.prepare("INSERT INTO hello_diagnostic_amendment(id,record_json,checksum) VALUES(1,?,?)").run(audit, digest(audit));
+      database.prepare("UPDATE policy SET budget=?,daily=?,calls=? WHERE id=1").run(after.budgetMicros, after.dailyMicros, after.maxCalls);
+      this.helloAmendment(database);
+      return record;
+    });
+  }
+  async readHelloAmendment() { return this.transaction(database => this.helloAmendment(database)); }
   private intent(database: DatabaseSync, id: string): AiUsageIntent {
     if (!UUID.test(id)) throw fail("AI_APPROVAL_REQUIRED", "A valid persisted per-call approval is required.");
     const row = database.prepare("SELECT * FROM intents WHERE id=?").get(id);
@@ -140,11 +282,16 @@ export class AiUsageStore implements OnModuleDestroy {
     return limits;
   }
   private totals(database: DatabaseSync, mode: "poc" | "demo", today: string) {
-    const row = database.prepare("SELECT COALESCE(SUM(charged_micros),0) charged, COALESCE(SUM(CASE WHEN substr(reserved_at,1,10)=? THEN charged_micros ELSE 0 END),0) daily, COUNT(*) calls FROM attempts WHERE mode=?").get(today, mode)!;
+    const excludeTesting = testingExists(database) ? " AND intent_id NOT IN (SELECT intent_id FROM muse_testing_intents)" : "";
+    const row = database.prepare("SELECT COALESCE(SUM(charged_micros),0) charged, COALESCE(SUM(CASE WHEN substr(reserved_at,1,10)=? THEN charged_micros ELSE 0 END),0) daily, COUNT(*) calls FROM attempts WHERE mode=?" + excludeTesting).get(today, mode)!;
     if (![row.charged, row.daily, row.calls].every(safeInteger)) throw fail();
     return { chargedMicros: Number(row.charged), todayChargedMicros: Number(row.daily), calls: Number(row.calls) };
   }
   private verifyBudget(database: DatabaseSync, intent: AiUsageIntent, limits?: AiUsageLimits): void {
+    if (testingIntent(database,intent.id)) { verifyTestingBudget(database,intent.requestHash,intent.reserveMicros); return; }
+    const hello = this.helloAmendment(database);
+    if (intent.mode === "poc" && hello && (intent.id !== hello.intentId || intent.requestHash !== hello.requestHash || intent.scope !== hello.scope || intent.actor !== hello.actor))
+      throw fail("AI_DIAGNOSTIC_SCOPE_LOCKED", "Amended development capacity is exclusively bound to the one Hello intent.");
     if (intent.mode === "demo" && intent.demoAuthorizationId !== this.demo(database)?.id) throw fail("AI_DEMO_APPROVAL_REQUIRED", "Demo authorization changed; review a fresh estimate under the current limits.");
     const selected = intent.mode === "poc" ? this.developmentLimits(database, limits) : this.demo(database, intent.demoAuthorizationId);
     if (!selected) throw fail("AI_DEMO_APPROVAL_REQUIRED", "Demo mode requires separate persisted administrator authorization.");
@@ -162,6 +309,7 @@ export class AiUsageStore implements OnModuleDestroy {
     // tokens. Never accept a lower reservation even if a caller underestimates.
     const minimum = Math.ceil((parsed.data.maxInputTokens * parsed.data.inputPriceMicrosPerMillion + parsed.data.maxOutputTokens * parsed.data.outputPriceMicrosPerMillion) / 1_000_000);
     if (parsed.data.reserveMicros < minimum) throw fail("AI_ESTIMATE_INVALID", "The maximum-cost reservation is below the supported Standard pricing floor.");
+    if (parsed.data.mode === "poc") this.transaction(database => { if (this.helloAmendment(database)) throw fail("AI_DIAGNOSTIC_SCOPE_LOCKED", "No other development estimate may use the diagnostic amendment."); });
     if (parsed.data.mode === "poc" && limits) this.transaction(database => this.developmentLimits(database, limits));
     return this.transaction(database => {
       const now = Date.now();
@@ -187,9 +335,11 @@ export class AiUsageStore implements OnModuleDestroy {
     });
   }
   async reserve(id: string, authorization: AiUsageAuthorization, limits?: AiUsageLimits): Promise<AiUsageReservation> {
+    const controlledTesting = this.transaction(database => !!testingIntent(database,id));
+    if (authorization?.mode === "poc" && !controlledTesting) this.transaction(database => { const hello = this.helloAmendment(database); if (hello && (id !== hello.intentId || authorization.actor !== hello.actor || authorization.requestHash !== hello.requestHash || authorization.scope !== hello.scope)) throw fail("AI_DIAGNOSTIC_SCOPE_LOCKED", "Only the exact fixed diagnostic authorization may reserve this capacity."); });
     // Persist reductions even if this particular request is subsequently rejected;
     // restoring a larger environment value cannot silently restore old capacity.
-    if (authorization?.mode === "poc" && limits) this.transaction(database => this.developmentLimits(database, limits));
+    if (authorization?.mode === "poc" && limits && !controlledTesting) this.transaction(database => this.developmentLimits(database, limits));
     return this.transaction(database => {
       const intent = this.intent(database, id);
       if (!authorization || authorization.mode !== intent.mode || authorization.requestHash !== intent.requestHash || authorization.actor !== intent.actor) throw fail("AI_APPROVAL_MISMATCH", "Approval is bound to another operator, mode or exact request.");
@@ -255,10 +405,31 @@ export class AiUsageStore implements OnModuleDestroy {
       const attempts = database.prepare("SELECT * FROM attempts ORDER BY reserved_at DESC,rowid DESC LIMIT 50").all();
       return {
         schemaVersion: "seo-spy.ai-usage.v1", development: { ...limits, ...this.totals(database, "poc", today) }, demo: { ...this.totals(database, "demo", today), authorization: this.demo(database) },
+        ...(testingExists(database) ? { testing: testingStatus(database) } : {}),
         activeAttemptId: active ? String(active.id) : null, halted: database.prepare("SELECT halted FROM policy WHERE id=1").get()?.halted !== 0,
         lastReservedAt: latest ? date(latest.reserved_at) : null,
         recentAttempts: attempts.map(row => ({ id: String(row.id), intentId: String(row.intent_id), mode: row.mode as "poc" | "demo", model: row.model as "muse-spark-1.3" | "muse-spark-1.2", status: String(row.status), reservedAt: date(row.reserved_at), completedAt: row.completed_at === null ? null : date(row.completed_at), reserveMicros: Number(row.reserve_micros), chargedMicros: Number(row.charged_micros), inputTokens: row.input_tokens === null ? null : Number(row.input_tokens), outputTokens: row.output_tokens === null ? null : Number(row.output_tokens), requestId: row.request_id === null ? null : String(row.request_id), errorCode: row.error_code === null ? null : String(row.error_code) })),
       };
     });
   }
+  async activateTestingAllocation(actor: string, confirmation: { confirmed: boolean; policyHash: string; requestHash: string; maximumMicros: number }) {
+    return this.transaction(database=>activateTesting(database,actor,confirmation));
+  }
+  async estimateTesting(input: AiUsageEstimateInput, metadata: unknown) {
+    const prepared=inputSchema.parse(input), context=testingMetadataSchema.parse(metadata);
+    if(prepared.mode!=="poc"||prepared.model!=="muse-spark-1.3"||prepared.scope!==`assessment:${context.businessId}:${context.assessmentId}`
+      ||prepared.reserveMicros<Math.ceil((prepared.maxInputTokens*prepared.inputPriceMicrosPerMillion+prepared.maxOutputTokens*prepared.outputPriceMicrosPerMillion)/1000000))return testingFail("AI_ESTIMATE_INVALID");
+    return this.transaction(database=>{
+      const allocation=testingAllocation(database);if(!allocation||allocation.actor!==prepared.actor)return testingFail("AI_APPROVAL_MISMATCH");
+      verifyTestingBudget(database,prepared.requestHash,prepared.reserveMicros);
+      if(database.prepare("SELECT id FROM intents WHERE consumed_at IS NULL AND approved_at IS NOT NULL LIMIT 1").get())return testingFail("AI_TESTING_REVIEW_REQUIRED");
+      const now=Date.now(),intentId=randomUUID(),createdAt=new Date(now).toISOString(),expiresAt=new Date(now+15*60000).toISOString(),serialized=JSON.stringify(prepared),contextJson=JSON.stringify(context);
+      database.prepare("INSERT INTO intents(id,payload,checksum,created_at,expires_at,demo_id) VALUES(?,?,?,?,?,NULL)").run(intentId,serialized,digest(serialized),createdAt,expiresAt);
+      database.prepare("INSERT INTO muse_testing_intents VALUES(?,?,?,?)").run(intentId,prepared.requestHash,contextJson,digest(contextJson));
+      return this.intent(database,intentId);
+    });
+  }
+  async testingAttempt(intentId: string) { return this.transaction(database=>{if(!testingIntent(database,intentId))return testingFail();const row=database.prepare("SELECT * FROM attempts WHERE intent_id=?").get(intentId);return row??null;}); }
+  async completeTestingReceipt(actor: string,intentId: string,receipt: unknown) { return this.transaction(database=>{if(this.intent(database,intentId).actor!==actor)return testingFail("AI_APPROVAL_MISMATCH");return saveTestingReceipt(database,intentId,receipt);}); }
+  async testingReceipts() { return this.transaction(database=>readTestingReceipts(database)); }
 }

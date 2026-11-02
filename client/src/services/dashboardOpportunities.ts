@@ -1,4 +1,5 @@
 import type { Severity } from '../types/dashboard'
+import type { FixReviewRequest } from '../types/fixReview'
 export type DashboardCategory = 'website' | 'social' | 'consistency'
 export interface DashboardIssue {
   id: string
@@ -10,6 +11,9 @@ export interface DashboardIssue {
   category: DashboardCategory
   mode: 'demo' | 'saved'
   destination: string
+  origin?: 'assessment'
+  findingId?: string
+  fixReview?: FixReviewRequest
   recommendation?: { id: string; title: string; explanation: string; status: string }
 }
 const priority: Record<string, number> = { Critical: 0, Medium: 1, Low: 2 }

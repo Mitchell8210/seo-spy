@@ -1,0 +1,1018 @@
+{
+  "schemaVersion": "seo-spy.assessment-muse-evidence.v4",
+  "assessmentId": "a0c19a0e-2be3-447e-a795-e7fdee84c0bf",
+  "businessId": "demo-guzman",
+  "policyVersion": "seo-spy-score-v1.4",
+  "cutoff": "2026-11-01T19:52:03.800Z",
+  "selectionVersion": "assessment-muse-selection-v4",
+  "sources": [
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "contentHash": "c2cb2983513bb071ef9745b52c6ca550bc39fcc6adcd924e2e7998afd09e629d",
+      "provider": "website",
+      "collectedAt": "2026-11-01T19:51:36.538Z",
+      "status": "completed"
+    },
+    {
+      "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+      "contentHash": "7d879b07361625afd108f7bc865b9ccd6e5024f50c13383f23412ffedd76c479",
+      "provider": "facebook",
+      "collectedAt": "2026-11-01T19:50:56.065Z",
+      "status": "partial"
+    }
+  ],
+  "scores": [
+    {
+      "category": "website",
+      "value": 80,
+      "reasonCodes": []
+    },
+    {
+      "category": "social",
+      "value": 71,
+      "reasonCodes": []
+    },
+    {
+      "category": "consistency",
+      "value": 60,
+      "reasonCodes": []
+    },
+    {
+      "category": "overall",
+      "value": 73,
+      "reasonCodes": []
+    }
+  ],
+  "findings": [
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "1659e943-0a57-43aa-b813-5d45c507a55d",
+      "source": "website",
+      "title": "Review the saved website measurement.",
+      "summary": "Largest Contentful Paint marks the time at which the largest text or image is painted.",
+      "severity": "critical",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "b49e5472-422c-49db-9ddc-226fe2b99089"
+        },
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+        }
+      ],
+      "existingRecommendation": {
+        "title": "Review the saved website measurement.",
+        "change": "Largest Contentful Paint measured 11.6 s in this mobile lab run. Inspect the largest visible image or text block and its loading timeline. If it is an image, check its dimensions, compression and loading priority; avoid lazy-loading the main visible image. Check server response and render-blocking resources before choosing a fix. Re-run Lighthouse with the same device strategy to verify the result."
+      }
+    },
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "d008461d-bf52-4ce4-bc8a-94f2469effac",
+      "source": "website",
+      "title": "Review image alternatives in context",
+      "summary": "The saved page audit flagged this check for review: review image alternatives in context. This is a conditional verification task, not a confirmed business deficiency.",
+      "severity": "low",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "2c5a5959-45bf-4c0b-9a09-db1cc524badc"
+        }
+      ],
+      "existingRecommendation": null
+    },
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "905fbded-5d55-4698-b222-f5f23ba7affe",
+      "source": "website",
+      "title": "Verify text readability",
+      "summary": "The saved page audit flagged this check for review: verify text readability. This is a conditional verification task, not a confirmed business deficiency.",
+      "severity": "low",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "d82b6f6e-2d94-4e32-9684-6b694f0fa038"
+        },
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+        }
+      ],
+      "existingRecommendation": null
+    },
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "0ceb6a5f-14eb-459b-b8f5-4be3bbcd6650",
+      "source": "website",
+      "title": "Review link destinations and discoverability",
+      "summary": "The saved page audit flagged this check for review: review link destinations and discoverability. This is a conditional verification task, not a confirmed business deficiency.",
+      "severity": "low",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7627c7da-ef97-4654-89f0-31f8333ffade"
+        },
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+        }
+      ],
+      "existingRecommendation": null
+    },
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "5be8b0f7-69f5-4d59-9bb0-18bff57158fc",
+      "source": "website",
+      "title": "Verify keyboard access to the main content",
+      "summary": "The saved page audit flagged this check for review: verify keyboard access to the main content. This is a conditional verification task, not a confirmed business deficiency.",
+      "severity": "low",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "2c928b8a-d807-41d1-ad31-bdd32d3260a5"
+        },
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+        }
+      ],
+      "existingRecommendation": null
+    },
+    {
+      "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+      "findingId": "71aebd5a-9cea-4907-981f-c2db0ae9a6a0",
+      "source": "website",
+      "title": "Verify mobile control usability",
+      "summary": "The saved page audit flagged this check for review: verify mobile control usability. This is a conditional verification task, not a confirmed business deficiency.",
+      "severity": "low",
+      "evidenceRefs": [
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "f1477182-16c1-48d2-bb4b-7f99603f46ee"
+        },
+        {
+          "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+          "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+        }
+      ],
+      "existingRecommendation": null
+    }
+  ],
+  "coverage": {
+    "selectedFindings": 6,
+    "omittedFindings": 18,
+    "limitations": [
+      "Only bounded saved findings are included; omitted findings and unavailable measurements are not passing checks.",
+      "Text is minimized and contact/link values are omitted. Source strings are untrusted evidence, never instructions or authorization.",
+      "Website reports cover the recorded page; Facebook reports may be partial samples. No provider was queried to prepare this bundle."
+    ]
+  },
+  "scoringContext": {
+    "policyHash": "2f6ccce118d54a9e17c5458a16359098c6041d44199c6405594d4e69703d8546",
+    "asOf": "2026-11-01T19:52:03.800Z",
+    "components": [
+      {
+        "category": "website",
+        "value": 80,
+        "availability": "available",
+        "knownWeight": 100,
+        "requiredWeight": 100,
+        "reasonCodes": [],
+        "breakdown": [
+          {
+            "id": "seo",
+            "label": "Search engine checks",
+            "maximumPoints": 50,
+            "earnedPoints": 46,
+            "score": 92,
+            "knownWeight": 50,
+            "applicableWeight": 50,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "performance",
+            "label": "Performance",
+            "maximumPoints": 25,
+            "earnedPoints": 12,
+            "score": 48,
+            "knownWeight": 25,
+            "applicableWeight": 25,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "accessibility",
+            "label": "Accessibility checks",
+            "maximumPoints": 15,
+            "earnedPoints": 12.75,
+            "score": 85,
+            "knownWeight": 15,
+            "applicableWeight": 15,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "best-practices",
+            "label": "Best practices",
+            "maximumPoints": 10,
+            "earnedPoints": 9.6,
+            "score": 96,
+            "knownWeight": 10,
+            "applicableWeight": 10,
+            "status": "available",
+            "reasonCodes": []
+          }
+        ]
+      },
+      {
+        "category": "social",
+        "value": 71,
+        "availability": "available",
+        "knownWeight": 71,
+        "requiredWeight": 100,
+        "reasonCodes": [],
+        "breakdown": [
+          {
+            "id": "profile-quality",
+            "label": "Profile Quality",
+            "maximumPoints": 15,
+            "earnedPoints": 15,
+            "score": null,
+            "knownWeight": 15,
+            "applicableWeight": 15,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "posting-consistency",
+            "label": "Posting Consistency",
+            "maximumPoints": 20,
+            "earnedPoints": 0,
+            "score": null,
+            "knownWeight": 20,
+            "applicableWeight": 20,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "audience-engagement",
+            "label": "Audience Engagement",
+            "maximumPoints": 25,
+            "earnedPoints": 20,
+            "score": null,
+            "knownWeight": 20,
+            "applicableWeight": 25,
+            "status": "partial",
+            "reasonCodes": [
+              "PERIOD_SHARE_EVENTS_UNAVAILABLE"
+            ]
+          },
+          {
+            "id": "reach-growth",
+            "label": "Audience Reach and Growth",
+            "maximumPoints": 15,
+            "earnedPoints": 5,
+            "score": null,
+            "knownWeight": 5,
+            "applicableWeight": 15,
+            "status": "partial",
+            "reasonCodes": [
+              "ALIGNED_FOLLOWER_SNAPSHOTS_REQUIRED"
+            ]
+          },
+          {
+            "id": "content-quality",
+            "label": "Content Quality",
+            "maximumPoints": 15,
+            "earnedPoints": 10.25,
+            "score": null,
+            "knownWeight": 11,
+            "applicableWeight": 15,
+            "status": "partial",
+            "reasonCodes": [
+              "SUPPORTED_CONTENT_REVIEW_REQUIRED"
+            ]
+          },
+          {
+            "id": "customer-interaction",
+            "label": "Customer Interaction",
+            "maximumPoints": 10,
+            "earnedPoints": null,
+            "score": null,
+            "knownWeight": 0,
+            "applicableWeight": 10,
+            "status": "unavailable",
+            "reasonCodes": [
+              "PAIRED_INQUIRY_RESPONSE_EVIDENCE_REQUIRED"
+            ]
+          }
+        ]
+      },
+      {
+        "category": "consistency",
+        "value": 60,
+        "availability": "available",
+        "knownWeight": 100,
+        "requiredWeight": 100,
+        "reasonCodes": [],
+        "breakdown": [
+          {
+            "id": "business-name",
+            "label": "Business name",
+            "maximumPoints": null,
+            "earnedPoints": 0,
+            "score": 0,
+            "knownWeight": 20,
+            "applicableWeight": 20,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "phone",
+            "label": "Phone",
+            "maximumPoints": null,
+            "earnedPoints": 30,
+            "score": 100,
+            "knownWeight": 30,
+            "applicableWeight": 30,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "website-url",
+            "label": "Website address",
+            "maximumPoints": null,
+            "earnedPoints": 30,
+            "score": 100,
+            "knownWeight": 30,
+            "applicableWeight": 30,
+            "status": "available",
+            "reasonCodes": []
+          },
+          {
+            "id": "hours",
+            "label": "Opening hours",
+            "maximumPoints": null,
+            "earnedPoints": 0,
+            "score": 0,
+            "knownWeight": 20,
+            "applicableWeight": 20,
+            "status": "available",
+            "reasonCodes": []
+          }
+        ]
+      },
+      {
+        "category": "overall",
+        "value": 73,
+        "availability": "available",
+        "knownWeight": 100,
+        "requiredWeight": 100,
+        "reasonCodes": [],
+        "breakdown": []
+      }
+    ],
+    "socialStatus": "definitive",
+    "socialCoveragePercent": 71,
+    "observations": [],
+    "omittedObservations": 23,
+    "measurementGaps": [
+      {
+        "category": "social",
+        "id": "shares-per-100-followers",
+        "reasonCode": "PERIOD_SHARE_EVENTS_UNAVAILABLE",
+        "label": "Shares per 100 current followers",
+        "explanation": "Complete timestamped shares for the reporting period are not established; lifetime shares cannot fill this gap."
+      },
+      {
+        "category": "social",
+        "id": "follower-growth-percent",
+        "reasonCode": "ALIGNED_FOLLOWER_SNAPSHOTS_REQUIRED",
+        "label": "Follower growth",
+        "explanation": "Comparable follower snapshots at both reporting boundaries are needed before growth can be assessed."
+      },
+      {
+        "category": "social",
+        "id": "reviewed-relevance",
+        "reasonCode": "SUPPORTED_CONTENT_REVIEW_REQUIRED",
+        "label": "Reviewed usefulness and relevance",
+        "explanation": "Content relevance and factual usefulness have not received a supported review; text patterns cannot establish them."
+      },
+      {
+        "category": "social",
+        "id": "customer-response-rate",
+        "reasonCode": "PAIRED_INQUIRY_RESPONSE_EVIDENCE_REQUIRED",
+        "label": "Customer response coverage",
+        "explanation": "Eligible inquiries paired with business responses are not established. Conversation counts do not show response coverage."
+      },
+      {
+        "category": "social",
+        "id": "customer-response-hours",
+        "reasonCode": "PAIRED_INQUIRY_RESPONSE_EVIDENCE_REQUIRED",
+        "label": "Customer response time",
+        "explanation": "Paired inquiry and response timestamps are not established. A conversation count does not show response speed."
+      }
+    ],
+    "omittedMeasurementGaps": 0,
+    "limitations": [
+      "Scores and points are copied from the saved deterministic snapshot, not recalculated. Interpret them as of the recorded cutoff, not current conditions.",
+      "Category earned points and evidence coverage are separate; unavailable measurements are not failures or zero. Social category points are not normalized category scores.",
+      "Social thresholds are provisional product targets, not industry standards. Content structure is a proxy, not proof of relevance, correctness or usefulness.",
+      "Likes/comments per current follower measure action density, not unique engagement. Media views are non-unique, not people reached; repeats and ads may contribute.",
+      "A score shortfall does not identify its cause, expected business outcome or exact editable target. Recommendations grant no approval or execution capability.",
+      "Selected observations and gaps are bounded; omission does not mean a passing check. Missing measurements may require access or future evidence rather than a business change."
+    ]
+  },
+  "businessContext": {
+    "facts": [
+      {
+        "id": "business:website:loading",
+        "category": "website",
+        "kind": "weakness",
+        "group": "loading",
+        "text": "The main visible image or text block took about 11.6 seconds to appear in this mobile lab run. This measures the recorded page under test conditions, not every visitor's experience.",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "b49e5472-422c-49db-9ddc-226fe2b99089"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ]
+      },
+      {
+        "id": "score:social:posting",
+        "category": "social",
+        "kind": "weakness",
+        "group": "posting",
+        "text": "3 posts were recorded over the verified 90-day window; the most recent was about 73 days before the reporting cutoff. Posting earned 0/20 points.",
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "1f0a9b02-8872-4145-923b-cd7c4c9b6da2"
+          }
+        ]
+      },
+      {
+        "id": "score:consistency:disagreements",
+        "category": "consistency",
+        "kind": "weakness",
+        "group": "consistency",
+        "text": "The saved website and Facebook comparison does not agree on business name and hours. This does not establish which source is correct; confirm the intended business details before changing either source.",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "366d8c22-0a17-41c8-abd6-8ad58088d66c"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "02cef717-b047-49bb-bf85-a11b47694403"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "98e29dd8-8d17-433b-a2b8-c1b821f81978"
+          }
+        ]
+      },
+      {
+        "id": "business:social:profile",
+        "category": "social",
+        "kind": "strength",
+        "group": "profile",
+        "text": "The saved Facebook profile provides the measured basics: a populated name and description, website link, contact route and category. Presence and syntax do not prove that every detail is correct.",
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "02cef717-b047-49bb-bf85-a11b47694403"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "92687da9-bad8-4355-a5f8-13c0aae38e28"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "7f0b8e80-8dc5-48af-95fe-9eda5afc8fe9"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "e28e052a-5978-42c4-8924-5d66f1ed4ca1"
+          }
+        ]
+      },
+      {
+        "id": "business:social:audience",
+        "category": "social",
+        "kind": "strength",
+        "group": "audience",
+        "text": "The measured interaction-density targets are met. The saved audience is 17 current followers, with 4 LIKE actions and 1 comments/replies in the measured 30-day period. Ratios can swing with small audiences; these are actions, not unique customers, growth or proof of business results.",
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "8e31b906-6078-4de6-b4c8-5abda3458f70"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "ff9616b2-3b5f-4f2f-9f91-f9b81e0def6a"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "f575a0cf-2e9b-4b8c-84e9-e745a92cc51d"
+          }
+        ]
+      }
+    ],
+    "measures": [
+      {
+        "id": "followers",
+        "value": 17,
+        "unit": "current followers",
+        "since": null,
+        "until": null,
+        "normalizedValue": null,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "ff9616b2-3b5f-4f2f-9f91-f9b81e0def6a"
+          }
+        ]
+      },
+      {
+        "id": "likes-per-100-followers",
+        "value": 4,
+        "unit": "LIKE actions",
+        "since": "2026-10-02T07:00:00.000Z",
+        "until": "2026-11-01T07:00:00.000Z",
+        "normalizedValue": 23.529411764705884,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "8e31b906-6078-4de6-b4c8-5abda3458f70"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "ff9616b2-3b5f-4f2f-9f91-f9b81e0def6a"
+          }
+        ]
+      },
+      {
+        "id": "media-views-per-follower",
+        "value": 115,
+        "unit": "non-unique media views",
+        "since": "2026-10-02T07:00:00.000Z",
+        "until": "2026-11-01T07:00:00.000Z",
+        "normalizedValue": 6.764705882352941,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "276162c8-4313-4941-9faa-e2c4693678a2"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "ff9616b2-3b5f-4f2f-9f91-f9b81e0def6a"
+          }
+        ]
+      },
+      {
+        "id": "comments-per-100-followers",
+        "value": 1,
+        "unit": "comments/replies",
+        "since": "2026-10-02T07:00:00.000Z",
+        "until": "2026-11-01T07:00:00.000Z",
+        "normalizedValue": 5.882352941176471,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "f575a0cf-2e9b-4b8c-84e9-e745a92cc51d"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "ff9616b2-3b5f-4f2f-9f91-f9b81e0def6a"
+          }
+        ]
+      },
+      {
+        "id": "posts",
+        "value": 3,
+        "unit": "accessible posts",
+        "since": "2026-08-03T00:00:00.000Z",
+        "until": "2026-11-01T00:00:00.000Z",
+        "normalizedValue": 0.23333333333333334,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "1f0a9b02-8872-4145-923b-cd7c4c9b6da2"
+          }
+        ]
+      },
+      {
+        "id": "posting-recency-days",
+        "value": 73.1504861111111,
+        "unit": "days since latest post at the saved reporting cutoff",
+        "since": "2026-08-03T00:00:00.000Z",
+        "until": "2026-11-01T00:00:00.000Z",
+        "normalizedValue": null,
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "1f0a9b02-8872-4145-923b-cd7c4c9b6da2"
+          }
+        ]
+      },
+      {
+        "id": "largest-contentful-paint",
+        "value": 11.626117431971041,
+        "unit": "seconds in a mobile Lighthouse lab run",
+        "since": null,
+        "until": null,
+        "normalizedValue": null,
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "b49e5472-422c-49db-9ddc-226fe2b99089"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ]
+      }
+    ],
+    "overallContributions": [
+      {
+        "category": "website",
+        "weight": 50,
+        "earnedPoints": 40.175
+      },
+      {
+        "category": "social",
+        "weight": 30,
+        "earnedPoints": 21.232394366197184
+      },
+      {
+        "category": "consistency",
+        "weight": 20,
+        "earnedPoints": 12
+      }
+    ],
+    "executiveAssessment": "Priorities are rendered from the selected verified opportunities.",
+    "scoringExplanation": "Website 80/100 reflects the saved mobile Lighthouse page measurements, not search rankings or the whole site. Social 71/100 is the saved result across measured criteria: profile 15/15, posting 0/20, and engagement 20/20 measured points. Coverage is 71% (71/100); unavailable measures reduce coverage, not performance points. Strong measured profile and interaction-density criteria can coexist with poor posting. With 17 followers, 4 likes and 1 comments/replies, action-density ratios can be volatile; they do not measure unique engagement or audience growth, and 115 media views are non-unique. Consistency 60/100 reflects disagreements on business name and hours; neither source is presumed correct. Total 73/100 combines Website 50%, Social 30%, Consistency 20% using the saved unrounded contributions. No score was recalculated.",
+    "recommendations": []
+  },
+  "opportunities": [
+    {
+      "id": "o_05ee93cbc231dd09",
+      "group": "link-purpose",
+      "kind": "conditional-review",
+      "severity": "low",
+      "statement": "The saved page audit flagged this check for review: review link destinations and discoverability. This is a conditional verification task, not a confirmed business deficiency.",
+      "action": {
+        "id": "o_05ee93cbc231dd09",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "0ceb6a5f-14eb-459b-b8f5-4be3bbcd6650",
+        "title": "Review link destinations and discoverability",
+        "recommendation": "Inspect the flagged links and confirm their intended destinations and whether search engines should follow them.",
+        "rationale": "The saved page audit flagged this check for review: review link destinations and discoverability. This is a conditional verification task, not a confirmed business deficiency.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7627c7da-ef97-4654-89f0-31f8333ffade"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ],
+        "verificationSteps": [
+          "Confirm the flagged condition on the recorded page. After any separately approved change, repeat the same check and verify the public page manually."
+        ],
+        "manualFallback": "Ask your website maintainer to review the original saved finding. No exact edit or publishing approval is provided.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7627c7da-ef97-4654-89f0-31f8333ffade"
+            },
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_0cdbbc667338f875",
+      "group": "consistency",
+      "kind": "conditional-review",
+      "severity": "medium",
+      "statement": "The saved website and Facebook comparison does not agree on business name and hours. This does not establish which source is correct; confirm the intended business details before changing either source.",
+      "action": {
+        "id": "o_0cdbbc667338f875",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "score:consistency:disagreements",
+        "title": "Confirm the intended business name and hours",
+        "recommendation": "Review the website and Facebook details with the business owner. Confirm the intended business name and hours, then prepare a separate exact proposal for any correction that is actually needed.",
+        "rationale": "Conflicting details make the intended business information unclear. Neither a disagreement score nor an omitted API field decides which source should be authoritative.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "366d8c22-0a17-41c8-abd6-8ad58088d66c"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "02cef717-b047-49bb-bf85-a11b47694403"
+          },
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "98e29dd8-8d17-433b-a2b8-c1b821f81978"
+          }
+        ],
+        "verificationSteps": [
+          "After any separately approved correction, explicitly collect comparable website and Page evidence and check the agreed details. Retain the original human review dates and verify publicly served information separately."
+        ],
+        "manualFallback": "Review the saved evidence and confirm the intended business decision manually before any separately approved change.",
+        "origin": {
+          "kind": "scoring-observation",
+          "category": "consistency",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "366d8c22-0a17-41c8-abd6-8ad58088d66c"
+            },
+            {
+              "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+              "evidenceId": "02cef717-b047-49bb-bf85-a11b47694403"
+            },
+            {
+              "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+              "evidenceId": "98e29dd8-8d17-433b-a2b8-c1b821f81978"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_1dc22beb90342d37",
+      "group": "posting",
+      "kind": "confirmed",
+      "severity": "medium",
+      "statement": "3 posts were recorded over the verified 90-day window; the most recent was about 73 days before the reporting cutoff. Posting earned 0/20 points.",
+      "action": {
+        "id": "o_1dc22beb90342d37",
+        "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+        "findingId": "score:social:posting",
+        "title": "Restart a sustainable posting routine",
+        "recommendation": "Plan useful updates that answer common customer questions and explain how to contact the business. Resume with a manageable schedule and spread posts over time; the saved product target is two posts per week, not a promise of growth.",
+        "rationale": "The complete saved history confirms limited recent activity. A regular routine addresses this directly without mistaking missing analytics for poor performance.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+            "evidenceId": "1f0a9b02-8872-4145-923b-cd7c4c9b6da2"
+          }
+        ],
+        "verificationSteps": [
+          "After allowing time for the routine, explicitly request a new report and compare post count, recency and weekly distribution over a compatible window. Do not expect an immediate change across a full historical window."
+        ],
+        "manualFallback": "Review the saved evidence and confirm the intended business decision manually before any separately approved change.",
+        "origin": {
+          "kind": "scoring-observation",
+          "category": "social",
+          "sourceRefs": [
+            {
+              "reportId": "3aeafc4c-34f5-4caa-82ed-0a8dd6b9857b",
+              "evidenceId": "1f0a9b02-8872-4145-923b-cd7c4c9b6da2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_251f486c4a30e275",
+      "group": "text-readability",
+      "kind": "conditional-review",
+      "severity": "low",
+      "statement": "The saved page audit flagged this check for review: verify text readability. This is a conditional verification task, not a confirmed business deficiency.",
+      "action": {
+        "id": "o_251f486c4a30e275",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "905fbded-5d55-4698-b222-f5f23ba7affe",
+        "title": "Verify text readability",
+        "recommendation": "Check the flagged foreground and background combinations in their actual page states before proposing a contrast correction.",
+        "rationale": "The saved page audit flagged this check for review: verify text readability. This is a conditional verification task, not a confirmed business deficiency.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "d82b6f6e-2d94-4e32-9684-6b694f0fa038"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ],
+        "verificationSteps": [
+          "Confirm the flagged condition on the recorded page. After any separately approved change, repeat the same check and verify the public page manually."
+        ],
+        "manualFallback": "Ask your website maintainer to review the original saved finding. No exact edit or publishing approval is provided.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "d82b6f6e-2d94-4e32-9684-6b694f0fa038"
+            },
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_26c6df899f333cef",
+      "group": "touch-controls",
+      "kind": "conditional-review",
+      "severity": "low",
+      "statement": "The saved page audit flagged this check for review: verify mobile control usability. This is a conditional verification task, not a confirmed business deficiency.",
+      "action": {
+        "id": "o_26c6df899f333cef",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "71aebd5a-9cea-4907-981f-c2db0ae9a6a0",
+        "title": "Verify mobile control usability",
+        "recommendation": "Test the flagged controls on mobile and confirm whether their size or spacing prevents reliable activation.",
+        "rationale": "The saved page audit flagged this check for review: verify mobile control usability. This is a conditional verification task, not a confirmed business deficiency.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "f1477182-16c1-48d2-bb4b-7f99603f46ee"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ],
+        "verificationSteps": [
+          "Confirm the flagged condition on the recorded page. After any separately approved change, repeat the same check and verify the public page manually."
+        ],
+        "manualFallback": "Ask your website maintainer to review the original saved finding. No exact edit or publishing approval is provided.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "f1477182-16c1-48d2-bb4b-7f99603f46ee"
+            },
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_36d88033f8eda01c",
+      "group": "image-alternatives",
+      "kind": "conditional-review",
+      "severity": "low",
+      "statement": "The saved page audit flagged this check for review: review image alternatives in context. This is a conditional verification task, not a confirmed business deficiency.",
+      "action": {
+        "id": "o_36d88033f8eda01c",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "d008461d-bf52-4ce4-bc8a-94f2469effac",
+        "title": "Review image alternatives in context",
+        "recommendation": "Check whether the recorded images are informative or decorative. Empty alternatives can be intentional; propose text only where meaning needs an alternative.",
+        "rationale": "The saved page audit flagged this check for review: review image alternatives in context. This is a conditional verification task, not a confirmed business deficiency.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "2c5a5959-45bf-4c0b-9a09-db1cc524badc"
+          }
+        ],
+        "verificationSteps": [
+          "Confirm the flagged condition on the recorded page. After any separately approved change, repeat the same check and verify the public page manually."
+        ],
+        "manualFallback": "Ask your website maintainer to review the original saved finding. No exact edit or publishing approval is provided.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "2c5a5959-45bf-4c0b-9a09-db1cc524badc"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_7faf9a281e6bd80b",
+      "group": "keyboard-navigation",
+      "kind": "conditional-review",
+      "severity": "low",
+      "statement": "The saved page audit flagged this check for review: verify keyboard access to the main content. This is a conditional verification task, not a confirmed business deficiency.",
+      "action": {
+        "id": "o_7faf9a281e6bd80b",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "5be8b0f7-69f5-4d59-9bb0-18bff57158fc",
+        "title": "Verify keyboard access to the main content",
+        "recommendation": "Test the skip link with a keyboard on the recorded page and confirm that focus reaches the main content.",
+        "rationale": "The saved page audit flagged this check for review: verify keyboard access to the main content. This is a conditional verification task, not a confirmed business deficiency.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "2c928b8a-d807-41d1-ad31-bdd32d3260a5"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ],
+        "verificationSteps": [
+          "Confirm the flagged condition on the recorded page. After any separately approved change, repeat the same check and verify the public page manually."
+        ],
+        "manualFallback": "Ask your website maintainer to review the original saved finding. No exact edit or publishing approval is provided.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "2c928b8a-d807-41d1-ad31-bdd32d3260a5"
+            },
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "o_9eeb0b598d92d844",
+      "group": "loading",
+      "kind": "confirmed",
+      "severity": "critical",
+      "statement": "The main visible image or text block took about 11.6 seconds to appear in this mobile lab run. This measures the recorded page under test conditions, not every visitor's experience.",
+      "action": {
+        "id": "o_9eeb0b598d92d844",
+        "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+        "findingId": "1659e943-0a57-43aa-b813-5d45c507a55d",
+        "title": "Investigate the slow main content on mobile",
+        "recommendation": "Ask your website maintainer to identify the largest visible image or text block and inspect its loading timeline. Check image size and loading priority, server response and blocking resources before selecting a fix.",
+        "rationale": "The saved loading measurement is a concrete usability concern. Diagnose the cause first; a score alone cannot identify the correct edit or predict business results.",
+        "effort": "unknown",
+        "risk": "unknown",
+        "evidenceRefs": [
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "b49e5472-422c-49db-9ddc-226fe2b99089"
+          },
+          {
+            "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+            "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+          }
+        ],
+        "verificationSteps": [
+          "After a separately approved change, explicitly request another mobile Lighthouse run for the same page and compare the main-content loading measurement. Allow for normal lab variability."
+        ],
+        "manualFallback": "Ask your website maintainer to inspect the saved report before proposing an exact change.",
+        "origin": {
+          "kind": "finding",
+          "category": "website",
+          "sourceRefs": [
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "b49e5472-422c-49db-9ddc-226fe2b99089"
+            },
+            {
+              "reportId": "43a66038-2184-4f72-b242-8381102b651d",
+              "evidenceId": "7bc162af-b9cc-48e9-9e98-1f36d3c5b544"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

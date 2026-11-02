@@ -75,6 +75,11 @@ describe("environment configuration", () => {
       expect(() => validateEnvironment({ FACEBOOK_FRONTEND_ORIGIN })).toThrow("FACEBOOK_FRONTEND_ORIGIN");
     }
   });
+  it("does not silently enable a public production Facebook/operator deployment", () => {
+    expect(validateEnvironment({ NODE_ENV: "production" }).HOST).toBe("127.0.0.1");
+    expect(() => validateEnvironment({ NODE_ENV: "production", FACEBOOK_FRONTEND_ORIGIN: "https://demo.example.com" })).toThrow("FACEBOOK_FRONTEND_ORIGIN");
+    expect(() => validateEnvironment({ NODE_ENV: "production", FACEBOOK_REDIRECT_URI: "https://demo.example.com/api/facebook/callback" })).toThrow("FACEBOOK_REDIRECT_URI");
+  });
   it("defaults to localhost and parses numeric values", () => {
     expect(validateEnvironment({ PORT: "3100" })).toMatchObject({
       HOST: "127.0.0.1",

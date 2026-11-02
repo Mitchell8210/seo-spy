@@ -8,8 +8,10 @@ import { SpyLogo } from '../common/SpyLogo'
 import { ScoreCard } from './ScoreCard'
 import { getScoreStatus } from '../../utils/scoreStatus'
 import type { ReactNode } from 'react'
+import type { FixReviewRequest } from '../../types/fixReview'
+import { FixWithAIButton } from '../recommendations/FixWithAIButton'
 
-interface Issue { id: string; title: string; explanation: string; severity: string; recommendation?: { title: string; explanation: string } }
+interface Issue { id: string; title: string; explanation: string; severity: string; fixReview?: FixReviewRequest; recommendation?: { title: string; explanation: string } }
 const buttonStyle = 'inline-flex min-h-11 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 py-2 text-[11px] font-semibold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 const reportStyle = 'mt-auto inline-flex min-h-11 items-center justify-center rounded-lg border border-blue-400/40 px-2 py-2 text-center text-xs font-semibold text-blue-200 hover:bg-blue-500/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300'
 
@@ -39,10 +41,14 @@ function Category({ title, description, icon, score, source, issues, empty, chil
     <h4 className="mb-3 text-xs font-semibold text-ink">Top issues to fix now</h4>
     {topIssues.length ? <ul className="mb-4 space-y-2">{topIssues.map(issue => {
       const tone = issue.severity === 'Critical' ? 'border-red-400/20 bg-red-400/10 text-red-300' : issue.severity === 'Medium' ? 'border-amber-400/20 bg-amber-400/10 text-amber-300' : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
-      return <li key={issue.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-2 sm:flex-nowrap">
+      return <li key={issue.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-2 sm:flex-nowrap xl:max-2xl:flex-wrap">
         <span title={issue.severity} className={`flex size-6 shrink-0 items-center justify-center rounded-md border ${tone}`}><CircleAlert size={14} aria-hidden="true" /><span className="sr-only">{issue.severity} · Needs review</span></span>
-        <div className="min-w-0 flex-1"><h5 className="break-words text-xs font-semibold leading-4 text-ink">{issue.title}</h5><p title={issue.explanation} className="mt-1 truncate text-[10px] leading-4 text-secondary">{issue.explanation}</p></div>
-        <button type="button" aria-label={`Fix with AI: ${issue.title}`} className={`${buttonStyle} shrink-0`} onClick={() => setFeedback(issue.recommendation ? `Saved recommendation: ${issue.recommendation.title}. ${issue.recommendation.explanation} Review the full report before approving a change. No changes have been made.` : `No saved recommendation is available for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" />Fix with AI</button>
+        <div className="min-w-0 flex-1 xl:max-2xl:basis-[calc(100%-2rem)]"><h5 className="break-words text-xs font-semibold leading-4 text-ink">{issue.title}</h5><p title={issue.explanation} className="mt-1 truncate text-[10px] leading-4 text-secondary">{issue.explanation}</p></div>
+        <FixWithAIButton ariaLabel={`Fix with AI: ${issue.title}`} className={`${buttonStyle} shrink-0`}
+          review={issue.fixReview ?? { id: issue.id, title: issue.title, explanation: issue.explanation,
+            category: title === 'Website Health' ? 'website' : title === 'Social Media Performance' ? 'social' : 'consistency',
+            source, recommendation: issue.recommendation?.explanation }}
+          onOpen={() => setFeedback(issue.recommendation ? `Saved recommendation: ${issue.recommendation.title}. ${issue.recommendation.explanation} Review the full report before approving a change. No changes have been made.` : `No saved recommendation is available for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" />Fix with AI</FixWithAIButton>
       </li>
     })}</ul> : <p className="mb-4 rounded-lg border border-line p-3 text-xs leading-5 text-secondary">{empty}</p>}
     <p role="status" aria-live="polite" className="break-words text-xs leading-5 text-blue-200">{feedback}</p>

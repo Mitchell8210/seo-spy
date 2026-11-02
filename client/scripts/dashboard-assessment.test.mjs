@@ -115,3 +115,150 @@ test('maps all approved v1.2 scores and source disagreements to existing slots',
   assert.equal(view.consistency.checks.find(item => item.id === 'name').website, 'Multi Services')
   assert.equal(view.scoreAssessment.consistencyBasis, 'source-agreement')
 })
+
+function museFixture() {
+  const fixture = scoredFixture()
+  const { business, dashboard, website, social } = fixture
+  const assessment = dashboard.assessment
+  assessment.reasons = []
+  const ref = (reportId, evidenceId) => ({ reportId, evidenceId })
+  const web = ref('website', 'web-proof'), posting = ref('facebook', 'posting-proof')
+  website.results.evidence = [{ id: 'web-proof', auditId: 'website', mode: 'live' }]
+  website.results.findings[0].evidenceIds = ['web-proof']
+  social.report.results.evidence = [{ id: 'posting-proof', auditId: 'facebook', mode: 'live' }]
+  for (const [index, source] of assessment.sources.entries()) source.reportHash = (index === 0 ? 'a' : 'b').repeat(64)
+  assessment.comparisons = [{ id: 'business-name', outcome: 'fail', applicable: true, website: 'Website name', facebook: 'Page name' }, { id: 'hours', outcome: 'fail', applicable: true, website: 'Restricted hours', facebook: 'Always open' }]
+  assessment.socialAssessment = { categories: [{ criteria: [{ id: 'posts-per-week', status: 'available', earned: 0, maximum: 6, evidence: [posting] }] }] }
+  const recommendation = (id, findingId, category, kind, evidenceRefs) => ({ id, findingId, reportId: evidenceRefs[0].reportId,
+    title: id, recommendation: `${id} complete recommendation.`, rationale: 'Confirmed saved evidence requires review.',
+    evidenceRefs, origin: { kind, category, sourceRefs: evidenceRefs } })
+  assessment.analysis = { id: 'v3-analysis', assessmentId: assessment.id, businessId: business.id, isMock: true, generationMode: 'mock',
+    sourceManifest: assessment.sources.map(source => ({ reportId: source.reportId, contentHash: source.reportHash, provider: source.provider })),
+    output: { schemaVersion: 'assessment-muse-output-v3', summary: 'Main mobile content took 11.6 seconds. Review posting activity and inconsistent business details.',
+      scoringExplanation: { text: 'Social 71 has 71% evidence coverage; only 17 followers make action ratios volatile.', categories: ['website', 'social', 'consistency', 'overall'] },
+      recommendations: [recommendation('Improve mobile loading', 'one', 'website', 'finding', [web]), recommendation('Resume useful posting', 'score:social:posting', 'social', 'scoring-observation', [posting]), recommendation('Confirm business details', 'score:consistency:disagreements', 'consistency', 'scoring-observation', [web, posting])] } }
+  return fixture
+}
+
+test('shows the v3 consultation and prioritized scoring recommendations in existing slots without inventing audit findings', () => {
+  const { business, dashboard, website, social } = museFixture()
+  const before = JSON.stringify({ dashboard, website, social })
+  const view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(view.interpretation.label, 'Mock AI assessment')
+  assert.match(view.interpretation.summary, /11\.6 seconds/)
+  assert.match(view.interpretation.scoringExplanation, /17 followers/)
+  assert.deepEqual(view.path.map(item => item.recommendation.title), ['Improve mobile loading', 'Resume useful posting', 'Confirm business details'])
+  assert.ok(view.path.every(item => item.origin === 'assessment' && item.source === 'Mock AI assessment'))
+  assert.equal(view.path[0].findingId, 'one', 'Only actual report findings carry a finding navigation target.')
+  assert.equal(view.path[1].findingId, undefined)
+  assert.equal(view.path[1].destination, '/social-media?businessId=business')
+  assert.equal(view.path[2].findingId, undefined)
+  assert.equal(view.path[2].destination, '/dashboard#consistency-details')
+  assert.deepEqual(view.top.website.map(item => item.title), ['Improve mobile loading'])
+  assert.deepEqual(view.top.social.map(item => item.title), ['Resume useful posting'])
+  assert.deepEqual(view.top.consistency.map(item => item.title), ['Confirm business details'])
+  assert.match(view.top.social[0].explanation, /^Mock AI assessment: Resume useful posting/)
+  assert.ok(!view.remaining.some(item => item.id.startsWith('assessment:')))
+  assert.equal(view.websiteResults.overall.value, 79)
+  assert.equal(JSON.stringify({ dashboard, website, social }), before)
+})
+
+test('fails closed for v3 interpretation with stale, mismatched, unknown or cross-business provenance', () => {
+  for (const mutate of [
+    assessment => { assessment.businessId = 'other' },
+    assessment => { assessment.reasons = ['STALE_INPUT'] },
+    assessment => { assessment.analysis.sourceManifest[0].contentHash = 'c'.repeat(64) },
+    assessment => { assessment.analysis.sourceManifest[1].reportId = 'older-facebook' },
+    assessment => { assessment.analysis.output.schemaVersion = 'assessment-muse-output-v9' },
+    assessment => { assessment.analysis.output.summary = '' },
+  ]) {
+    const { business, dashboard, website, social } = museFixture()
+    mutate(dashboard.assessment)
+    assert.equal(mapDashboardAssessment(business.id, dashboard, website, social).interpretation, null)
+  }
+})
+
+test('labels saved Meta selections as assisted output without changing mock slots or inventing findings', () => {
+  const fixture = museFixture(), analysis = fixture.dashboard.assessment.analysis
+  analysis.isMock = false; analysis.generationMode = 'poc'; analysis.provider = 'meta'; analysis.usageAttemptId = 'offline-ledger-attempt'
+  const view = mapDashboardAssessment(fixture.business.id, fixture.dashboard, fixture.website, fixture.social)
+  assert.equal(view.interpretation.label, 'Meta Muse-assisted assessment')
+  assert.equal(view.path.length, 3)
+  assert.ok(view.path.every(item => item.source === 'Meta Muse-assisted assessment' && item.origin === 'assessment'))
+  assert.equal(view.path[1].findingId, undefined)
+  delete analysis.usageAttemptId
+  assert.equal(mapDashboardAssessment(fixture.business.id, fixture.dashboard, fixture.website, fixture.social).interpretation, null)
+})
+
+test('does not accept arbitrary scoring IDs, unrelated citations, passed comparisons or unsupported origin metadata', () => {
+  for (const mutate of [
+    fixture => { fixture.dashboard.assessment.analysis.output.recommendations[1].findingId = 'score:social:invented' },
+    fixture => { fixture.dashboard.assessment.analysis.output.recommendations[1].evidenceRefs = [{ reportId: 'facebook', evidenceId: 'unknown' }] },
+    fixture => { fixture.dashboard.assessment.socialAssessment.categories[0].criteria[0].earned = 6 },
+    fixture => { fixture.dashboard.assessment.analysis.output.recommendations[1].origin.category = 'website' },
+    fixture => { fixture.dashboard.assessment.analysis.output.recommendations[1].origin.sourceRefs = [] },
+    fixture => { fixture.dashboard.assessment.analysis.output.recommendations[1].evidenceRefs = [null] },
+  ]) {
+    const fixture = museFixture()
+    mutate(fixture)
+    const view = mapDashboardAssessment(fixture.business.id, fixture.dashboard, fixture.website, fixture.social)
+    assert.ok(!view.path.some(item => item.recommendation.title === 'Resume useful posting'))
+  }
+  const fixture = museFixture()
+  fixture.dashboard.assessment.comparisons.forEach(item => { item.outcome = 'pass' })
+  const view = mapDashboardAssessment(fixture.business.id, fixture.dashboard, fixture.website, fixture.social)
+  assert.ok(!view.path.some(item => item.recommendation.title === 'Confirm business details'))
+})
+
+
+test('maps v4 selected order and preserves an explicit empty selection in existing Dashboard slots', () => {
+  for (const count of [0, 1, 2, 3]) {
+    const { business, dashboard, website, social } = museFixture()
+    const analysis = dashboard.assessment.analysis
+    analysis.output.schemaVersion = 'assessment-muse-output-v4'
+    analysis.output.recommendations = [...analysis.output.recommendations].reverse().slice(0, count)
+    analysis.output.summary = count ? 'Selected saved priorities in the returned order.' : 'No improvement opportunities were selected from verified saved evidence.'
+    const view = mapDashboardAssessment(business.id, dashboard, website, social)
+    assert.ok(view.interpretation)
+    assert.equal(view.path.length, count, 'An empty v4 selection must not fall back to unrelated recommendations.')
+    assert.deepEqual(view.path.map(item => item.recommendation.id), analysis.output.recommendations.map(item => item.id))
+    for (const category of ['website', 'social', 'consistency']) {
+      assert.deepEqual(view.top[category].map(item => item.recommendation.id), analysis.output.recommendations
+        .filter(item => item.origin.category === category).map(item => item.id))
+    }
+    assert.equal(view.websiteResults.overall.value, 79)
+  }
+})
+
+test('places the live v4 loading and posting selections in the main category cards with complete preview text', () => {
+  const { business, dashboard, website, social } = museFixture()
+  const analysis = dashboard.assessment.analysis
+  Object.assign(analysis, { isMock: false, generationMode: 'poc', provider: 'meta', usageAttemptId: 'saved-live-attempt' })
+  analysis.output.schemaVersion = 'assessment-muse-output-v4'
+  analysis.output.recommendations = analysis.output.recommendations.slice(0, 2)
+  const view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(view.top.website[0].title, 'Improve mobile loading')
+  assert.equal(view.top.website[0].findingId, 'one')
+  assert.equal(view.top.social[0].title, 'Resume useful posting')
+  assert.equal(view.top.social[0].findingId, undefined)
+  assert.equal(view.top.social[0].recommendation.explanation, analysis.output.recommendations[1].recommendation)
+  assert.match(view.top.social[0].explanation, /^Meta Muse-assisted assessment:/)
+  assert.deepEqual(view.top.consistency, [], 'An omitted review is not presented as a selected AI priority.')
+  assert.equal(view.consistency.checks.find(item => item.id === 'name').matches, false)
+  dashboard.assessment.reasons = ['STALE_INPUT']
+  const stale = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.equal(stale.interpretation, null)
+  assert.ok([...stale.top.website, ...stale.top.social].every(item => item.origin !== 'assessment'))
+})
+
+test('keeps selected order within a category instead of sorting recommendations by original finding severity', () => {
+  const { business, dashboard, website, social } = museFixture()
+  const analysis = dashboard.assessment.analysis
+  analysis.output.schemaVersion = 'assessment-muse-output-v4'
+  website.results.findings[1].evidenceIds = ['web-proof']
+  const first = { ...analysis.output.recommendations[0], id: 'second-finding-first', findingId: 'two', title: 'Review the second finding first' }
+  analysis.output.recommendations = [first, analysis.output.recommendations[0]]
+  const view = mapDashboardAssessment(business.id, dashboard, website, social)
+  assert.deepEqual(view.top.website.map(item => item.findingId), ['two', 'one'])
+  assert.deepEqual(view.top.website.map(item => item.recommendation.id), ['second-finding-first', 'Improve mobile loading'])
+})

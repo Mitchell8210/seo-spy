@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import type { RefObject } from 'react'
+import type { FixReviewRequest } from '../../types/fixReview'
+import { FixWithAIButton } from '../recommendations/FixWithAIButton'
 
-export function FindingActions({ fixRef, hasRecommendation, target = 'website', live = false }: { fixRef: RefObject<HTMLHeadingElement | null>; hasRecommendation: boolean; target?: 'website' | 'account'; live?: boolean }) {
+export function FindingActions({ fixRef, hasRecommendation, review, target = 'website', live = false }: { fixRef: RefObject<HTMLHeadingElement | null>; hasRecommendation: boolean; review: FixReviewRequest; target?: 'website' | 'account'; live?: boolean }) {
   const [actionMessage, setActionMessage] = useState('')
   return (
           <div className="border-t border-line pt-4">
             <h5 className="font-semibold text-ink">Available actions</h5>
             <p className="mt-1 text-muted">{live ? `Recommendations are for review. Automatic ${target} changes are unavailable.` : `Demo controls only. AI fixing is unavailable; no ${target} changes will be made.`}</p>
             <div className="mt-3 flex flex-col gap-2">
-              <button type="button" disabled className="min-h-11 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">Fix with AI</button>
+              <FixWithAIButton review={review} className="min-h-11 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" />
               <button type="button" disabled={!hasRecommendation} onClick={() => {
                 fixRef.current?.focus()
                 fixRef.current?.scrollIntoView({ block: 'nearest' })

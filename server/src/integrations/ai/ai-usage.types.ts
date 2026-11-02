@@ -74,6 +74,7 @@ export interface AiUsageSummary {
   activeAttemptId: string | null;
   halted: boolean;
   lastReservedAt: string | null;
+  testing?: ReturnType<typeof import("./muse-testing-ledger.js").testingStatus>;
   recentAttempts: { id: string; intentId: string; mode: AiLiveMode; model: AiModel; status: string; reservedAt: string; completedAt: string | null; reserveMicros: number; chargedMicros: number; inputTokens: number | null; outputTokens: number | null; requestId: string | null; errorCode: string | null }[];
 }
 
