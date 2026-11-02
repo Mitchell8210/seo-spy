@@ -52,6 +52,9 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
       issues.push({ id: finding.id, title: finding.title, explanation: summary?.text ?? finding.explanation,
         severity: severity[finding.severity], status: finding.status, source: channel.source,
         category: channel.category, mode: 'saved', destination: opportunityDestination(channel.category, businessId),
+        fixReview: { id: finding.id, title: finding.title, category: channel.category, source: channel.source, explanation: summary?.text ?? finding.explanation,
+          businessId, reportId: channel.category === 'website' ? website?.auditId : social?.report?.auditId, findingId: finding.id,
+          recommendation: recommendation?.recommendedChange || recommendation?.explanation, evidence: [summary?.text ?? finding.explanation] },
         recommendation: muse ? { id: muse.id, title: muse.title, explanation: `${analysis?.isMock ? 'Mock AI recommendation' : 'Saved AI recommendation'}: ${muse.recommendation}`, status: 'needs_review' } : recommendation ? { id: recommendation.id, title: recommendation.title,
           explanation: recommendation.recommendedChange || recommendation.explanation, status: recommendation.status } : undefined,
       })

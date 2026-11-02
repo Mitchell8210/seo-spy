@@ -69,7 +69,7 @@ export function Website() {
             <WebsiteHealth results={audit.results} live />
           </div>
         </section>
-        <WebsiteFindings live evidenceLabel={evidenceLabel} key={audit.id} findings={audit.findings} pages={audit.pages} passedChecks={audit.passedChecks} passedTotal={audit.results.checksPassed} recommendations={audit.recommendations} />
+        <WebsiteFindings live businessId={businessId} reportId={record?.reportId} evidenceLabel={evidenceLabel} key={audit.id} findings={audit.findings} pages={audit.pages} passedChecks={audit.passedChecks} passedTotal={audit.results.checksPassed} recommendations={audit.recommendations} />
       </> : <p role={state.error ? 'alert' : 'status'} className="rounded-xl border border-line bg-surface p-6 text-sm text-secondary">{state.error ?? (state.loading ? 'Loading your saved website report...' : running ? 'Your website investigation is running. Results will appear when it finishes.' : 'No saved website analysis is available for this website.')}</p>}
     </div>
   )

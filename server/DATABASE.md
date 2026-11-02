@@ -1,5 +1,7 @@
 # SQLite application database
 
+The [exact WordPress fix workflow](WORDPRESS_FIX_WORKFLOW.md) adds a lazily created `wordpress_fix_records` adjunct table inside this same application database for immutable, checksummed actor/business-scoped evidence, generation and proposal-origin records. Saved capability reads do not create it. It neither replaces the existing WordPress execution artifact/journal/lock infrastructure nor touches the separate protected AI ledger. Full application-database backups include this table. Existing artifact/schema/history formats remain unchanged.
+
 Schema 3 additionally stores immutable `assessment_records`: assessment inputs/policy/score ledgers, confirmed business-fact revisions, labeled mock interpretations and proposal-origin links. The transactional v2-to-v3 migration preserves existing artifacts, Google cache, businesses/audits and migration history; it does not open or reset the separate AI ledger. Records have business scope, timestamps, cache uniqueness and checksums. See [scoring policy and workflow](SCORING_POLICY.md).
 
 Decision: SQLite is SEO Spy's application database, replacing the earlier PostgreSQL plan. It fits the current local, single-server application without requiring a database service. SQLite's [deployment guidance](https://www.sqlite.org/whentouse.html) supports this use; revisit the architecture if the product later needs multiple application servers sharing a high-write workload. That is a future capacity decision, not a planned PostgreSQL migration.

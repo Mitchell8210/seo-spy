@@ -12,6 +12,11 @@ import { AiModule } from "../ai/ai.module.js";
 import { WordPressMuseService } from "./wordpress-muse.service.js";
 import { WordPressMuseStore } from "./wordpress-muse.store.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
+import { ReportsModule } from "../../reports/reports.module.js";
+import { WordPressFixService } from "./wordpress-fix.service.js";
+import { WordPressFixStore } from "./wordpress-fix.store.js";
+import { WordPressFixController, WordPressFixOperatorController } from "./wordpress-fix.controller.js";
+import { WordPressFixSessions, WordPressFixSessionController, WordPressFixSessionGuard } from "./wordpress-fix-session.js";
 
-@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule], controllers: [WordPressController], providers: [WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService], exports: [WordPressService, WordPressReportsService, WordPressMuseService, WordPressOperatorGuard] })
+@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule, ReportsModule], controllers: [WordPressController, WordPressFixController, WordPressFixOperatorController, WordPressFixSessionController], providers: [WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService, WordPressFixService, WordPressFixStore, WordPressFixSessions, WordPressFixSessionGuard], exports: [WordPressService, WordPressReportsService, WordPressMuseService, WordPressOperatorGuard] })
 export class WordPressModule {}

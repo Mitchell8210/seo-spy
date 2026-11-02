@@ -85,6 +85,27 @@ export class WordPressService {
     return { businessId, resource, page, perPage, items: data.map(item => this.clean(object(item))), collectedAt: new Date().toISOString() };
   }
   async content(businessId: string, resource: string, id: number) { return { businessId, resource, collectedAt: new Date().toISOString(), content: this.clean(await this.raw(await this.connection(businessId), resource, id)) }; }
+  /** Exact authenticated editable media plus its published page, for the narrow alt pilot. */
+  async altTarget(businessId: string, mediaId: number, pageResource: "pages" | "posts", pageId: number) {
+    const connection = await this.connection(businessId);
+    const media = await this.raw(connection, "media", mediaId);
+    const page = await this.raw(connection, pageResource, pageId);
+    const info = await this.info(businessId);
+    const options = object(await this.client.request(connection, "OPTIONS", `/wp-json/wp/v2/media/${mediaId}`));
+    const endpoints = Array.isArray(options.endpoints) ? options.endpoints.map(object) : [];
+    if (media.type !== "attachment" || media.media_type !== "image" || media.status !== "inherit" || page.status !== "publish" || object(page.content).protected !== false
+      || !info.capabilities.upload_files || !info.capabilities.edit_posts
+      || !endpoints.some(endpoint => Array.isArray(endpoint.methods) && endpoint.methods.includes("POST") && Object.hasOwn(object(endpoint.args), "alt_text")))
+      throw new ConflictException({ code: "WORDPRESS_ALT_NOT_WRITABLE", message: "Exact image edit permission and supported alt_text update were not established." });
+    const sameSite = (value: unknown): string => {
+      if (typeof value !== "string" || value.length > 2048) throw new ConflictException("Image/page URL unavailable.");
+      const url = new URL(value), site = new URL(connection.siteUrl);
+      if (url.protocol !== "https:" || url.username || url.password || url.port || url.hostname.replace(/^www\./, "") !== site.hostname.replace(/^www\./, "")) throw new ConflictException("Image/page does not belong to the connected installation.");
+      return url.href;
+    };
+    if (typeof media.modified_gmt !== "string" || typeof media.alt_text !== "string" || typeof object(page.content).rendered !== "string") throw new ConflictException("Exact image state unavailable.");
+    return { target: { mediaId, pageResource, pageId, sourceUrl: sameSite(media.source_url), pageUrl: sameSite(page.link), currentAlt: media.alt_text, modified: media.modified_gmt }, pageHtml: String(object(page.content).rendered) };
+  }
   async rankMath(businessId: string, resource: "pages" | "posts", id?: number) {
     const connection = await this.connection(businessId);
     return { businessId, evidence: await collectRankMathEvidence((path, method = "GET") => this.client.request(connection, method, `/wp-json${path}`), { contentType: resource, contentId: id, limit: 20 }) };
@@ -153,7 +174,7 @@ export class WordPressService {
     const completed = await this.store.read(id, "outcome"); if (completed) return completed;
     this.requireWrites();
     if (Date.parse(proposal.expiresAt) <= Date.now() || proposal.siteUrl !== connection.siteUrl) throw new ConflictException({ code: "WORDPRESS_PROPOSAL_STALE", message: "The proposal expired or the installation changed; create and review a new proposal." });
-    if (!await this.store.create(id, "started", { businessId, actor, proposalHash: hash, startedAt: new Date().toISOString() })) throw new ConflictException({ code: "WORDPRESS_EXECUTION_RESERVED", message: "Execution was already reserved. Inspect or reconcile its outcome; do not resend the write." });
+    if (!await this.store.create(id, "started", { businessId, actor, proposalHash: hash, siteUrl: proposal.siteUrl, resource: proposal.resource, resourceId: proposal.resourceId, before: proposal.before, changes: proposal.changes, startedAt: new Date().toISOString() })) throw new ConflictException({ code: "WORDPRESS_EXECUTION_RESERVED", message: "Execution was already reserved. Inspect or reconcile its outcome; do not resend the write." });
     let outcome: object;
     let dispatched = false;
     let uncertain = false;
@@ -176,8 +197,9 @@ export class WordPressService {
       const updated = object(await this.client.request(connection, "POST", `/wp-json/wp/v2/${proposal.resource}/${proposal.resourceId}`, patch));
       if (updated.id !== proposal.resourceId || typeof updated.code === "string" || Object.hasOwn(updated, "error")) throw new WordPressRequestError("WORDPRESS_INVALID_WRITE_RESPONSE", "WordPress did not return a matching updated resource; reconcile before retrying.");
       let verification = "inconclusive";
-      try { const fresh = await this.raw(connection, proposal.resource, proposal.resourceId); verification = Object.entries(proposal.changes).every(([key, value]) => this.value(fresh, key) === value) ? "verified_stored_fields" : "mismatch"; } catch { /* Applied is distinct from verification. */ }
-      outcome = { id, businessId, status: "applied", verification, limitation: "Stored fields verified only; public rendering and SEO impact require separate collection.", completedAt: new Date().toISOString() };
+      let storedModified: string | null = null;
+      try { const fresh = await this.raw(connection, proposal.resource, proposal.resourceId); storedModified = typeof fresh.modified_gmt === "string" ? fresh.modified_gmt : null; verification = Object.entries(proposal.changes).every(([key, value]) => this.value(fresh, key) === value) ? "verified_stored_fields" : "mismatch"; } catch { /* Applied is distinct from verification. */ }
+      outcome = { id, businessId, status: "applied", verification, storedModified, limitation: "Stored fields verified only; public rendering and SEO impact require separate collection.", completedAt: new Date().toISOString() };
       return await publish(outcome);
     } catch (error) {
       if (!dispatched) { await publish({ id, businessId, status: "failed", code: "PREFLIGHT_FAILED", completedAt: new Date().toISOString() }); throw error; }

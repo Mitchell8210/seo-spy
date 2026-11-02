@@ -48,7 +48,7 @@ function Category({ title, description, icon, score, source, issues, empty, chil
           review={issue.fixReview ?? { id: issue.id, title: issue.title, explanation: issue.explanation,
             category: title === 'Website Health' ? 'website' : title === 'Social Media Performance' ? 'social' : 'consistency',
             source, recommendation: issue.recommendation?.explanation }}
-          onOpen={() => setFeedback(issue.recommendation ? `Saved recommendation: ${issue.recommendation.title}. ${issue.recommendation.explanation} Review the full report before approving a change. No changes have been made.` : `No saved recommendation is available for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" />Fix with AI</FixWithAIButton>
+          onOpen={() => setFeedback(issue.recommendation ? `Saved recommendation: ${issue.recommendation.title}. ${issue.recommendation.explanation} Review the full report before approving a change. No changes have been made.` : `No saved recommendation is available for “${issue.title}”. Review the full report before deciding on a change. No changes have been made.`)}><WandSparkles size={12} aria-hidden="true" /></FixWithAIButton>
       </li>
     })}</ul> : <p className="mb-4 rounded-lg border border-line p-3 text-xs leading-5 text-secondary">{empty}</p>}
     <p role="status" aria-live="polite" className="break-words text-xs leading-5 text-blue-200">{feedback}</p>
