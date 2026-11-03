@@ -17,6 +17,7 @@ import ts from 'typescript';
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
 const liveMode = process.argv.includes('--live');
+const analysisMode = process.argv.includes('--analysis');
 const plannerMode = process.argv.includes('--planner');
 const settingsMode = process.argv.includes('--settings');
 const dashboardMode = process.argv.includes('--dashboard');
@@ -619,6 +620,141 @@ async function dashboardScenario(base, backendBase) {
   console.log(JSON.stringify({ mode: liveMode ? 'live-dashboard' : 'fixture-dashboard', passed: results.length, scenarios: results, artifactDirectory: artifactDir }, null, 2));
 }
 
+async function analysisScenario(base) {
+  await cdp.send('Network.enable');
+  const requestStart = browserRequests.length;
+  await navigate(`${base}/analysis`);
+  await waitFor(()=>evaluate(`document.querySelector('h1')?.textContent === 'Analysis & Revenue'`),'Analysis route');
+  assert.equal(await evaluate(`document.querySelectorAll('#primary-navigation a[href="/analysis"]').length`),1);
+  assert.equal(await evaluate(`document.querySelector('#primary-navigation a[href="/analysis"]').getAttribute('aria-current')`),'page');
+  assert.equal(await evaluate(`document.querySelector('#primary-navigation a[href="/analysis"]').textContent`),'Analysis & Revenue');
+  assert.match(await pageText(),/Demo analytics/);
+  for(const title of ['Traffic Over Time','Traffic by Channel','Users by Device','Top Pages','Revenue Calculator']) assert.ok((await pageText()).includes(title));
+  assert.equal(await evaluate(`document.querySelectorAll('[data-analysis-kpi]').length`),4);
+  assert.equal(await evaluate(`document.getElementById('customer-value').value`),'150');
+  assert.equal(await evaluate(`document.getElementById('assumed-conversion').value`),'2');
+  assert.equal(await evaluate(`document.getElementById('monthly-visitors').readOnly`),true);
+  const visitors=Number((await evaluate(`document.getElementById('monthly-visitors').value`)).replaceAll(',',''));
+  assert.equal(visitors,1254);
+  const usd=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);
+  async function setInput(id,value) {
+    await evaluate(`(() => {const node=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  }
+  async function revenue(expected) { await waitFor(()=>evaluate(`document.querySelector('[data-testid="estimated-revenue"]').textContent.startsWith(${JSON.stringify(expected)})`),'revenue update'); }
+  await revenue(usd(visitors*.02*150));
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Analytics summary"] article svg')).map(node=>({width:node.getBoundingClientRect().width,badge:node.parentElement.getBoundingClientRect().width}))`),Array.from({length:4},()=>({width:22,badge:36})));
+  assert.equal(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] polyline').getAttribute('stroke')`),'#22C55E');
+  assert.equal(await evaluate(`document.querySelector('section[aria-labelledby="revenue-title"] [role="status"] svg').getAttribute('width')`),'36');
+  const beforeEdits=browserRequests.length;
+  await setInput('customer-value','200');await revenue(usd(visitors*.02*200));
+  await setInput('assumed-conversion','3');await revenue(usd(visitors*.03*200));
+  for(const growth of [10,20]) {
+    const copy=await evaluate(`document.querySelector('[data-testid="traffic-scenario-${growth}"]').innerText`);
+    assert.ok(copy.includes(usd(visitors*(1+growth/100)*.03*200)));
+    assert.ok(copy.includes(usd(visitors*growth/100*.03*200)));
+  }
+  await setInput('customer-value','');await revenue('—');
+  await setInput('customer-value','-5');await revenue('—');
+  await setInput('customer-value','150');
+  await setInput('assumed-conversion','');await revenue('—');
+  await setInput('assumed-conversion','-2');await revenue('—');
+  await setInput('assumed-conversion','120');await revenue(usd(visitors*150));
+  assert.equal(await evaluate(`document.getElementById('assumed-conversion').value`),'100');
+  await setInput('assumed-conversion','0');await revenue('$0');
+  await setInput('assumed-conversion','2');await revenue(usd(visitors*.02*150));
+  await evaluate(`document.getElementById('customer-value').focus()`);
+  assert.equal(await evaluate(`document.activeElement.id`),'customer-value');
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowUp',code:'ArrowUp',windowsVirtualKeyCode:38});
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowUp',code:'ArrowUp',windowsVirtualKeyCode:38});
+  assert.ok(Number(await evaluate(`document.getElementById('customer-value').value`))>150);
+  await setInput('customer-value','150');
+  await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='sessions').click()`);
+  assert.match(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] svg').getAttribute('aria-label')`),/sessions/);
+  await delay(200);
+  assert.equal(browserRequests.length,beforeEdits,'Calculator changes and chart controls make no network requests');
+  assert.equal(browserRequests.slice(requestStart).filter(item=>item.url.includes('/api/')).length,0,'No analytics/operator APIs or database writes');
+  async function contrastAudit() {
+    return evaluate(`(${function () {
+      const ctx = document.createElement('canvas').getContext('2d', {willReadFrequently:true});
+      ctx.canvas.width=ctx.canvas.height=1;
+      const rgba=color=>{ctx.clearRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return Array.from(ctx.getImageData(0,0,1,1).data).map((value,index)=>index===3?value/255:value)};
+      const over=(fg,bg)=>[0,1,2].map(index=>fg[index]*(fg[3]??1)+bg[index]*(1-(fg[3]??1)));
+      const background=node=>{const chain=[];for(let current=node;current;current=current.parentElement)chain.unshift(current);return chain.reduce((bg,item)=>over(rgba(getComputedStyle(item).backgroundColor),bg),[255,255,255])};
+      const luminance=color=>color.map(value=>value/255).map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4).reduce((sum,value,index)=>sum+value*[.2126,.7152,.0722][index],0);
+      const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
+      const rows=[];
+      function check(group,selector,threshold=4.5,property='color',againstParent=false) {
+        for(const node of document.querySelectorAll(selector)) {
+          if(property==='color' && !node.textContent.trim() && !node.matches('input,svg')) continue;
+          const bg=background(againstParent?node.parentElement:node),raw=rgba(getComputedStyle(node)[property]),fg=over(raw,bg);
+          rows.push({group,label:(node.textContent||node.getAttribute('aria-label')||node.tagName).trim().slice(0,70),foreground:fg.map(Math.round),background:bg.map(Math.round),ratio:Number(contrast(fg,bg).toFixed(2)),threshold});
+        }
+      }
+      check('KPI labels','[aria-label="Analytics summary"] h2');
+      check('KPI values','[data-analysis-kpi]',3);
+      check('KPI icons','[aria-label="Analytics summary"] svg',3);
+      check('Channel legend text','section[aria-labelledby="channel-title"] li');
+      check('Channel legend text','section[aria-labelledby="channel-title"] li span');
+      check('Channel legend dots','section[aria-labelledby="channel-title"] li span[style]',3,'backgroundColor',true);
+      check('Traffic axis labels','section[aria-labelledby="traffic-title"] svg text');
+      check('Calculator labels','section[aria-labelledby="revenue-title"] label');
+      check('Input text','section[aria-labelledby="revenue-title"] input');
+      check('Input boundaries','section[aria-labelledby="revenue-title"] input',3,'borderTopColor',true);
+      check('Input boundaries against fill','section[aria-labelledby="revenue-title"] input',3,'borderTopColor');
+      check('Estimated Revenue label','section[aria-labelledby="revenue-title"] [role="status"] h3');
+      check('Estimated Revenue value','[data-testid="estimated-revenue"]',3);
+      check('Estimated Revenue supporting text','section[aria-labelledby="revenue-title"] [role="status"] p:not([data-testid]), [data-testid="estimated-revenue"] span');
+      check('Scenario text','[data-testid^="traffic-scenario-"] h3, [data-testid^="traffic-scenario-"] p, [data-testid^="traffic-scenario-"] p span');
+      check('Disclaimer','section[aria-labelledby="revenue-title"] > div:last-child p');
+      check('Calculator icon badge','section[aria-labelledby="revenue-title"] header svg',3);
+      check('Coins icon','section[aria-labelledby="revenue-title"] [role="status"] svg',3);
+      check('Scenario icons','[data-testid^="traffic-scenario-"] svg',3);
+      check('Traffic line','section[aria-labelledby="traffic-title"] polyline',3,'stroke');
+      check('Traffic points','section[aria-labelledby="traffic-title"] circle',3,'fill');
+      check('Metric control text','[aria-label="Traffic metric"] button');
+      const input=document.getElementById('customer-value');input.focus();
+      const outline=getComputedStyle(input);
+      check('Keyboard focus on card','#customer-value',3,'outlineColor',true);
+      check('Keyboard focus on input','#customer-value',3,'outlineColor');
+      return {rows,focus:{visible:input.matches(':focus-visible'),style:outline.outlineStyle,width:outline.outlineWidth},nativeTooltip:'SVG title: browser/OS controlled, no author-specified text/background colors'};
+    }.toString()})()`);
+  }
+  const contrastReport=await contrastAudit();
+  await writeFile(path.join(artifactDir,'analysis-contrast.json'),JSON.stringify(contrastReport,null,2));
+  console.log('Analysis contrast:',JSON.stringify(Object.fromEntries([...new Set(contrastReport.rows.map(item=>item.group))].map(group=>[group,Math.min(...contrastReport.rows.filter(item=>item.group===group).map(item=>item.ratio))]))),JSON.stringify(contrastReport.focus));
+  const contrastFailures=contrastReport.rows.filter(item=>item.ratio<item.threshold);
+  assert.deepEqual(contrastFailures,[],'Analysis contrast thresholds');
+  assert.equal(contrastReport.focus.visible,true,'Keyboard focus visibly rendered');
+  assert.notEqual(contrastReport.focus.style,'none');
+  for(const width of [1440,768,390,320]) {
+    await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<768});
+    await evaluate('window.scrollTo(0,0)');await delay(120);
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth+1'),true,`Analysis fits ${width}px`);
+    const boxes = await evaluate(`Object.fromEntries(['traffic-title','revenue-title','channel-title','device-title','pages-title'].map(id=>{const r=document.getElementById(id).closest('section').getBoundingClientRect();return [id,{top:r.top,bottom:r.bottom,left:r.left,right:r.right}]}))`);
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Analytics summary"] article h2')).every(node=>node.scrollWidth<=node.clientWidth+1)`),true,'KPI labels fit without overflow');
+    assert.equal(await evaluate(`document.querySelector('[data-testid="estimated-revenue"]').scrollWidth<=document.querySelector('[data-testid="estimated-revenue"]').clientWidth+1`),true,'Revenue and Coins fit');
+    const chart=boxes['traffic-title'],calculator=boxes['revenue-title'],channel=boxes['channel-title'],device=boxes['device-title'],pages=boxes['pages-title'];
+    if(width===1440) {
+      assert.ok(Math.abs(chart.top-calculator.top)<2,'Calculator and chart align at the top');
+      assert.ok(Math.abs(channel.top-chart.bottom-20)<2,'Breakdown starts one existing gap below the chart');
+      assert.ok(Math.abs(channel.top-device.top)<2 && Math.abs(channel.top-pages.top)<2,'Three breakdown cards share a desktop row');
+      assert.ok(channel.top<calculator.bottom,'Calculator height does not delay breakdown placement');
+      assert.ok(pages.right<=calculator.left && channel.right<=device.left && device.right<=pages.left,'Columns do not overlap');
+    } else {
+      assert.ok(chart.bottom<=calculator.top && calculator.bottom<=channel.top,'Stacked chart, calculator, then breakdown order');
+      if(width<768) assert.ok(channel.bottom<=device.top && device.bottom<=pages.top,'Mobile breakdown cards stack');
+      else assert.ok(Math.abs(channel.top-device.top)<2 && pages.top>=Math.max(channel.bottom,device.bottom),'Tablet breakdown uses readable two-column rows');
+    }
+    await screenshot(`analysis-revenue-${width}.png`);
+  }
+  await evaluate(`document.querySelector('button[aria-controls="primary-navigation"]').click()`);
+  assert.equal(await evaluate(`getComputedStyle(document.getElementById('primary-navigation')).visibility`),'visible');
+  assert.equal(await evaluate(`document.querySelectorAll('a[href="/analysis"]').length`),1);
+  assert.deepEqual(browserErrors,[]);
+  pass('Analysis route/active/mobile navigation, demo graphics, calculator defaults/math/scenarios/input validation/keyboard, zero network writes, and four responsive widths');
+  console.log(JSON.stringify({passed:results,artifactDirectory:artifactDir},null,2));
+}
+
 async function plannerScenario(base) {
   await cdp.send('Network.enable');
   const requestStart=browserRequests.length;
@@ -645,7 +781,7 @@ async function plannerScenario(base) {
   };
   const reload=async()=>{await evaluate('window.plannerReloadPending=true');await cdp.send('Page.reload');await waitFor(()=>evaluate(`!window.plannerReloadPending&&document.querySelector('p[role="status"]')?.textContent.startsWith('Planner loaded from the backend.')`),'planner reload');await ready();for(let attempt=0;attempt<6;attempt++){const first=await evaluate(`document.querySelector('[data-calendar-slot]').dataset.calendarSlot.split(':')[0]`);if(first===days[0])break;await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);}};
   assert.equal(await evaluate(`document.querySelector('h1').textContent`),'Smart Planner');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node=>node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node=>node.textContent)`),['Dashboard','Website','Social Media','Analysis & Revenue','Smart Planner','Connections & Settings']);
   assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length));assert.equal(await kpi('Done'),'0');
   assert.equal(await evaluate(`document.querySelector('button[role="switch"]').getAttribute('aria-checked')`),'false','Old localStorage is not imported');
   assert.equal(await evaluate(`new Set(Array.from(document.querySelectorAll('[data-calendar-slot]')).map(node=>node.dataset.calendarSlot.split(':')[0])).size`),5);
@@ -986,7 +1122,7 @@ async function settingsScenario(base) {
   await evaluate(`document.querySelector('a[href="/settings#connected-assets"]').click()`);
   await waitFor(() => evaluate(`location.pathname === '/settings' && location.hash === '#connected-assets' && document.activeElement?.id === 'settings-assets-title'`), 'Dashboard to Settings focus');
   assert.equal(await evaluate(`document.querySelector('h1').textContent`), 'Connections & Settings');
-  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`), ['Dashboard', 'Website', 'Social Media', 'Analysis', 'Smart Planner', 'Connections & Settings']);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node => node.textContent)`), ['Dashboard', 'Website', 'Social Media', 'Analysis & Revenue', 'Smart Planner', 'Connections & Settings']);
   assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
   const connected = await evaluate(`${assets}.querySelector('[aria-label="Currently connected assets"]').innerText`);
   assert.match(connected, /guzmantaxaccounting.com/); assert.match(connected, /Guzman Tax Accounting/);
@@ -1000,19 +1136,21 @@ async function settingsScenario(base) {
     assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
   }
   pass('Connections title, original navigation, two demo assets, three groups, and six commerce options');
-  const otherPlatforms = ['Google Analytics (GA4)', 'Google Search Console', 'Google Business Profile', 'Google Ads', 'Google Merchant Center', 'Lighthouse'];
+  const otherPlatforms = ['Google Analytics (GA4)', 'Google Search Console', 'Google Business Profile', 'Google Ads', 'Google Merchant Center', 'Lighthouse', 'monday.com', 'Google Calendar', 'Apple Calendar', 'Jira', 'GitHub'];
   const marketplaces = ['Amazon', 'eBay', 'Etsy', 'TikTok Shop', 'Facebook Marketplace'];
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] section > h4')).map(node => node.textContent)`), ['Other Connections', 'Marketplace Connections']);
   for (const [id, names] of [['google', otherPlatforms], ['marketplaces', marketplaces]]) {
     assert.deepEqual(await evaluate(`Array.from(document.getElementById('available-${id}').closest('section').querySelectorAll('button')).map(node => node.getAttribute('aria-label').replace(' (demo connection option)', '').replace(' (demo tool option)', ''))`), names);
   }
   assert.equal(await evaluate(`document.querySelector('[data-testid="secondary-connections"]').previousElementSibling.querySelectorAll('section').length`), 3, 'Primary groups stay above the secondary groups');
+  const secondaryRequestStart = browserRequests.length;
   for (const name of [...otherPlatforms, ...marketplaces]) {
     await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).find(node => node.getAttribute('aria-label').startsWith(${JSON.stringify(name)} + ' (')).click()`);
     assert.match(await pageText(), name === 'Lighthouse' ? /No sign-in is required and no analysis has been started/ : /No account or store has been connected/);
   }
   assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
-  pass('Six supporting tools and five marketplaces use demo-only feedback with neutral Lighthouse wording');
+  assert.equal(browserRequests.length, secondaryRequestStart, 'Demo supporting options make no network requests');
+  pass('Eleven supporting options and five marketplaces use demo-only feedback with neutral Lighthouse wording');
 
   await evaluate(`Array.from(${assets}.querySelectorAll('button')).find(node => node.textContent === 'Add Connection').focus()`);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
@@ -1021,6 +1159,14 @@ async function settingsScenario(base) {
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('dialog section > h3')).map(node => node.textContent)`), ['Websites', 'Meta Platforms', 'Other Social Platforms', 'E-commerce Platforms', 'Google & SEO', 'Marketplaces']);
   const pickerText = await evaluate(`document.querySelector('dialog').innerText`);
   for (const name of [...commerce, ...otherPlatforms, ...marketplaces, 'Pinterest', 'Snapchat', 'Reddit']) assert.ok(pickerText.includes(name));
+  const demoRequestStart = browserRequests.length;
+  for (const name of ['monday.com', 'Google Calendar', 'Apple Calendar', 'Jira', 'GitHub']) {
+    await evaluate(`document.querySelector('button[aria-label="Connect ${name} (demo)"]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    assert.ok((await pageText()).includes(`${name}: Demo connection — integration will be available in the full product. No account has been connected.`));
+  }
+  assert.equal(browserRequests.length, demoRequestStart, 'New demo picker options make no network requests');
   await evaluate(`document.querySelector('button[aria-label="Preview Lighthouse tool (demo)"]').click()`);
   assert.match(await pageText(), /No sign-in is required and no analysis has been started/);
   await evaluate(`document.querySelector('button[aria-label="Connect Shopify (demo)"]').click()`);
@@ -1058,8 +1204,13 @@ async function settingsScenario(base) {
       assert.equal(new Set(bounds).size, 1, 'Three equal-priority groups align on desktop');
       for (const [id, columns] of [['google', 6], ['marketplaces', 5]]) assert.equal(await evaluate(`getComputedStyle(document.getElementById('available-${id}').nextElementSibling.nextElementSibling).gridTemplateColumns.split(' ').length`), columns, 'Supporting platforms form compact desktop rows');
     }
-    const svgChecks = await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).map(button => { const svg = button.querySelector('svg'); return svg && Array.from(svg.querySelectorAll('path')).every(path => { const box = path.getBBox(); return box.width > 0 && box.height > 0; }); })`);
-    assert.equal(svgChecks.length, 11); assert.ok(svgChecks.every(Boolean), 'All supporting platform marks are nonempty local SVGs');
+    const svgChecks = await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).map(button => { const svg = button.querySelector('svg'); if (!svg) return false; const box = svg.getBBox(); return box.width > 0 && box.height > 0 && !svg.querySelector('image, use, script'); })`);
+    assert.equal(svgChecks.length, 16); assert.ok(svgChecks.every(Boolean), 'All supporting platform marks are nonempty local SVGs');
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button > span:last-child')).every(node => node.scrollWidth <= node.clientWidth + 1)`), true, 'Supporting option labels fit');
+    await evaluate(`document.querySelector('button[aria-label="Jira (demo connection option)"]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate(`(() => { const node = document.activeElement; const style = getComputedStyle(node); return node.getAttribute('aria-label') === 'GitHub (demo connection option)' && node.matches(':focus-visible') && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2; })()`), true, 'Demo option keyboard focus stays visible');
     const secondaryBounds = await evaluate(`(() => { const r = document.querySelector('[data-testid="secondary-connections"]').getBoundingClientRect(); return {x:r.x+scrollX, y:r.y+scrollY, width:r.width, height:r.height, scale:1}; })()`);
     const secondaryShot = await cdp.send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true, clip:secondaryBounds});
     await writeFile(path.join(artifactDir, `secondary-${width}.png`), Buffer.from(secondaryShot.data, 'base64'));
@@ -1184,7 +1335,9 @@ try {
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
 
-  if (plannerMode) {
+  if (analysisMode) {
+    await analysisScenario(base);
+  } else if (plannerMode) {
     await plannerScenario(base);
   } else if (settingsMode) {
     await settingsScenario(base);

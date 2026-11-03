@@ -4,7 +4,7 @@ export const navigation = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/website', label: 'Website', icon: Globe },
   { path: '/social-media', label: 'Social Media', icon: Share2 },
-  { path: '/analysis', label: 'Analysis', icon: ChartNoAxesCombined },
+  { path: '/analysis', label: 'Analysis & Revenue', icon: ChartNoAxesCombined },
   { path: '/recommendations', label: 'Smart Planner', icon: ListChecks },
   { path: '/settings', label: 'Connections & Settings', icon: Settings },
 ]
