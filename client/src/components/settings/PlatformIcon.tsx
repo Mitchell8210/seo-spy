@@ -1,10 +1,12 @@
-import { Ghost, Globe, MessagesSquare, Pin } from 'lucide-react'
+import { CalendarDays, Ghost, Globe, MessagesSquare, Pin } from 'lucide-react'
 import type { ConnectionPlatform } from '../../types/settings'
 import { useId } from 'react'
 import { platformBrandMarks } from './platformBrandMarks'
 
-const icons = { website: Globe, pinterest: Pin, snapchat: Ghost, reddit: MessagesSquare }
+const icons = { 'apple-calendar': CalendarDays, website: Globe, pinterest: Pin, snapchat: Ghost, reddit: MessagesSquare }
 const tones: Record<ConnectionPlatform, string> = {
+  monday: 'border-slate-400/25 bg-slate-950 text-white', 'google-calendar': 'border-blue-400/25 bg-blue-500/10 text-blue-300',
+  'apple-calendar': 'border-slate-400/25 bg-slate-950 text-white', jira: 'border-blue-400/25 bg-blue-500/10 text-blue-300', github: 'border-slate-400/25 bg-slate-950 text-white',
   website: 'border-blue-400/25 bg-blue-500/15 text-blue-300', facebook: 'border-blue-400/25 bg-blue-600 text-white',
   instagram: 'border-pink-400/25 bg-pink-500/15 text-pink-300', whatsapp: 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300',
   threads: 'border-slate-400/25 bg-slate-950 text-white', tiktok: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-300',

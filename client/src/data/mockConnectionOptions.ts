@@ -25,6 +25,7 @@ export const mockConnectionOptions: ConnectionOption[] = [
   { id: 'google-ads', icon: 'google-ads', state: 'demo-only', category: 'google', name: 'Google Ads', description: 'Bring your advertising visibility into one place.', action: 'Connect' },
   { id: 'merchant-center', icon: 'merchant-center', state: 'demo-only', category: 'google', name: 'Google Merchant Center', description: 'Review your store’s product visibility on Google.', action: 'Connect' },
   { id: 'lighthouse', icon: 'lighthouse', state: 'demo-only', category: 'google', name: 'Lighthouse', description: 'Preview Lighthouse website analysis. No account authorization is required.', action: 'Preview Tool' },
+  ...([['monday', 'monday.com'], ['google-calendar', 'Google Calendar'], ['apple-calendar', 'Apple Calendar'], ['jira', 'Jira'], ['github', 'GitHub']] as const).map(([id, name]): ConnectionOption => ({ id, icon: id, state: 'demo-only', category: 'google', name, description: `Explore ${name} connection options.`, action: 'Connect' })),
   ...([['amazon', 'Amazon'], ['ebay', 'eBay'], ['etsy', 'Etsy'], ['tiktok-shop', 'TikTok Shop'], ['facebook-marketplace', 'Facebook Marketplace']] as const).map(([id, name]): ConnectionOption => ({ id, icon: id, state: 'demo-only', category: 'marketplaces', name, description: `Explore ${name} marketplace connection options.`, action: 'Connect' })),
 ]
 
@@ -33,6 +34,6 @@ export const connectionGroups: { id: ConnectionOption['category']; title: string
   { id: 'meta', title: 'Meta Platforms', description: 'Connect your Meta business accounts.', overview: ['facebook', 'instagram', 'whatsapp', 'threads'] },
   { id: 'social', title: 'Other Social Platforms', description: 'Connect popular social media platforms.', overview: ['tiktok', 'linkedin', 'youtube', 'x'] },
   { id: 'commerce', title: 'E-commerce Platforms', description: 'Connect your online store or e-commerce platform.', overview: ['shopify', 'woocommerce', 'lightspeed', 'wix', 'bigcommerce', 'square'] },
-  { id: 'google', title: 'Google & SEO', overviewTitle: 'Other Connections', secondary: true, description: 'Connect additional Google and SEO tools for deeper visibility and performance insights.', overview: ['analytics', 'search', 'business-profile', 'google-ads', 'merchant-center', 'lighthouse'] },
+  { id: 'google', title: 'Google & SEO', overviewTitle: 'Other Connections', secondary: true, description: 'Connect additional Google and SEO tools for deeper visibility and performance insights.', overview: ['analytics', 'search', 'business-profile', 'google-ads', 'merchant-center', 'lighthouse', 'monday', 'google-calendar', 'apple-calendar', 'jira', 'github'] },
   { id: 'marketplaces', title: 'Marketplaces', overviewTitle: 'Marketplace Connections', secondary: true, description: 'Connect the marketplaces where you sell to bring additional commerce and visibility signals into SEO Spy.', overview: ['amazon', 'ebay', 'etsy', 'tiktok-shop', 'facebook-marketplace'] },
 ]

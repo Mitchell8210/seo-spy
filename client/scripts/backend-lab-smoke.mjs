@@ -933,19 +933,21 @@ async function settingsScenario(base) {
     assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
   }
   pass('Connections title, original navigation, two demo assets, three groups, and six commerce options');
-  const otherPlatforms = ['Google Analytics (GA4)', 'Google Search Console', 'Google Business Profile', 'Google Ads', 'Google Merchant Center', 'Lighthouse'];
+  const otherPlatforms = ['Google Analytics (GA4)', 'Google Search Console', 'Google Business Profile', 'Google Ads', 'Google Merchant Center', 'Lighthouse', 'monday.com', 'Google Calendar', 'Apple Calendar', 'Jira', 'GitHub'];
   const marketplaces = ['Amazon', 'eBay', 'Etsy', 'TikTok Shop', 'Facebook Marketplace'];
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] section > h4')).map(node => node.textContent)`), ['Other Connections', 'Marketplace Connections']);
   for (const [id, names] of [['google', otherPlatforms], ['marketplaces', marketplaces]]) {
     assert.deepEqual(await evaluate(`Array.from(document.getElementById('available-${id}').closest('section').querySelectorAll('button')).map(node => node.getAttribute('aria-label').replace(' (demo connection option)', '').replace(' (demo tool option)', ''))`), names);
   }
   assert.equal(await evaluate(`document.querySelector('[data-testid="secondary-connections"]').previousElementSibling.querySelectorAll('section').length`), 3, 'Primary groups stay above the secondary groups');
+  const secondaryRequestStart = browserRequests.length;
   for (const name of [...otherPlatforms, ...marketplaces]) {
     await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).find(node => node.getAttribute('aria-label').startsWith(${JSON.stringify(name)} + ' (')).click()`);
     assert.match(await pageText(), name === 'Lighthouse' ? /No sign-in is required and no analysis has been started/ : /No account or store has been connected/);
   }
   assert.equal(await evaluate(`${assets}.querySelectorAll('[aria-label="Currently connected assets"] article').length`), 2);
-  pass('Six supporting tools and five marketplaces use demo-only feedback with neutral Lighthouse wording');
+  assert.equal(browserRequests.length, secondaryRequestStart, 'Demo supporting options make no network requests');
+  pass('Eleven supporting options and five marketplaces use demo-only feedback with neutral Lighthouse wording');
 
   await evaluate(`Array.from(${assets}.querySelectorAll('button')).find(node => node.textContent === 'Add Connection').focus()`);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
@@ -954,6 +956,14 @@ async function settingsScenario(base) {
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('dialog section > h3')).map(node => node.textContent)`), ['Websites', 'Meta Platforms', 'Other Social Platforms', 'E-commerce Platforms', 'Google & SEO', 'Marketplaces']);
   const pickerText = await evaluate(`document.querySelector('dialog').innerText`);
   for (const name of [...commerce, ...otherPlatforms, ...marketplaces, 'Pinterest', 'Snapchat', 'Reddit']) assert.ok(pickerText.includes(name));
+  const demoRequestStart = browserRequests.length;
+  for (const name of ['monday.com', 'Google Calendar', 'Apple Calendar', 'Jira', 'GitHub']) {
+    await evaluate(`document.querySelector('button[aria-label="Connect ${name} (demo)"]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    assert.ok((await pageText()).includes(`${name}: Demo connection — integration will be available in the full product. No account has been connected.`));
+  }
+  assert.equal(browserRequests.length, demoRequestStart, 'New demo picker options make no network requests');
   await evaluate(`document.querySelector('button[aria-label="Preview Lighthouse tool (demo)"]').click()`);
   assert.match(await pageText(), /No sign-in is required and no analysis has been started/);
   await evaluate(`document.querySelector('button[aria-label="Connect Shopify (demo)"]').click()`);
@@ -991,8 +1001,13 @@ async function settingsScenario(base) {
       assert.equal(new Set(bounds).size, 1, 'Three equal-priority groups align on desktop');
       for (const [id, columns] of [['google', 6], ['marketplaces', 5]]) assert.equal(await evaluate(`getComputedStyle(document.getElementById('available-${id}').nextElementSibling.nextElementSibling).gridTemplateColumns.split(' ').length`), columns, 'Supporting platforms form compact desktop rows');
     }
-    const svgChecks = await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).map(button => { const svg = button.querySelector('svg'); return svg && Array.from(svg.querySelectorAll('path')).every(path => { const box = path.getBBox(); return box.width > 0 && box.height > 0; }); })`);
-    assert.equal(svgChecks.length, 11); assert.ok(svgChecks.every(Boolean), 'All supporting platform marks are nonempty local SVGs');
+    const svgChecks = await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button')).map(button => { const svg = button.querySelector('svg'); if (!svg) return false; const box = svg.getBBox(); return box.width > 0 && box.height > 0 && !svg.querySelector('image, use, script'); })`);
+    assert.equal(svgChecks.length, 16); assert.ok(svgChecks.every(Boolean), 'All supporting platform marks are nonempty local SVGs');
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('[data-testid="secondary-connections"] button > span:last-child')).every(node => node.scrollWidth <= node.clientWidth + 1)`), true, 'Supporting option labels fit');
+    await evaluate(`document.querySelector('button[aria-label="Jira (demo connection option)"]').focus()`);
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate(`(() => { const node = document.activeElement; const style = getComputedStyle(node); return node.getAttribute('aria-label') === 'GitHub (demo connection option)' && node.matches(':focus-visible') && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2; })()`), true, 'Demo option keyboard focus stays visible');
     const secondaryBounds = await evaluate(`(() => { const r = document.querySelector('[data-testid="secondary-connections"]').getBoundingClientRect(); return {x:r.x+scrollX, y:r.y+scrollY, width:r.width, height:r.height, scale:1}; })()`);
     const secondaryShot = await cdp.send('Page.captureScreenshot', {format:'png', captureBeyondViewport:true, clip:secondaryBounds});
     await writeFile(path.join(artifactDir, `secondary-${width}.png`), Buffer.from(secondaryShot.data, 'base64'));
