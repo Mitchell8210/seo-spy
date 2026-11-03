@@ -70,7 +70,7 @@ export function plannerTasks(response: PlannerResponse): PlannerTask[] {
     estimatedDurationMinutes: task.estimatedDurationMinutes ?? 60, durationEstimateSource: task.durationEstimateSource ?? 'legacy-default', scheduledBy: task.scheduledBy ?? (schedule ? 'legacy-unknown' : null),
     ...(schedule ? { schedule } : {}), ...(destination !== null ? { destination } : {}), ...(notes !== null ? { notes } : {}) }))
 }
-export async function requestPlanner(businessId: string, signal: AbortSignal, method: 'GET' | 'POST' | 'PATCH' = 'GET', suffix = '', body?: object): Promise<PlannerResponse> {
+export async function requestPlanner(businessId: string, signal: AbortSignal, method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET', suffix = '', body?: object): Promise<PlannerResponse> {
   let response: Response
   try {
     response = await fetch(`/api/businesses/${encodeURIComponent(businessId)}/smart-planner${suffix}`, {

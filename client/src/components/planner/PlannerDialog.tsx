@@ -7,15 +7,16 @@ import { primaryAction, secondaryAction } from './plannerVisuals'
 import { durationChoices, durationLabel, taskDuration } from '../../services/plannerTiming'
 
 export type PlannerDialogRequest = { kind: 'ai' | 'manual'; task: PlannerTask } | { kind: 'editor'; task?: PlannerTask }
-export function PlannerDialog({ request, tasks, monday, useWeekends, onClose, onComplete, onSchedule, onCreate }: {
+export function PlannerDialog({ request, tasks, monday, useWeekends, onClose, onComplete, onUndoDone, onSchedule, onCreate, onDelete }: {
   request: PlannerDialogRequest; tasks: PlannerTask[]; monday: string; useWeekends: boolean; onClose: () => void;
-  onComplete: (task: PlannerTask) => Promise<boolean>; onSchedule: (id: string, schedule: TaskSchedule | null, estimatedDurationMinutes?: number) => Promise<boolean>; onCreate: (task: PlannerTask) => Promise<boolean>
+  onComplete: (task: PlannerTask) => Promise<boolean>; onUndoDone: (task: PlannerTask) => Promise<boolean>; onSchedule: (id: string, schedule: TaskSchedule | null, estimatedDurationMinutes?: number) => Promise<boolean>; onCreate: (task: PlannerTask) => Promise<boolean>; onDelete: (task: PlannerTask) => Promise<boolean>
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [selectedId, setSelectedId] = useState(request.task?.id ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const selectedTask = tasks.find(task => task.id === selectedId)
   const submitting = useRef(false)
   async function save(action: () => Promise<boolean>) {
@@ -29,7 +30,7 @@ export function PlannerDialog({ request, tasks, monday, useWeekends, onClose, on
   return <dialog ref={ref} aria-labelledby="planner-dialog-title" onClose={onClose} className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-blue-400/30 bg-surface p-5 text-ink shadow-2xl backdrop:bg-black/75 sm:p-6">
     <header className="mb-5 flex items-center justify-between gap-3"><h2 id="planner-dialog-title" className="flex items-center gap-2 text-lg font-semibold">{request.kind === 'ai' ? <Sparkles size={22} className="text-blue-300" aria-hidden="true" /> : <Pencil size={22} className="text-cyan-300" aria-hidden="true" />}{title}</h2><button type="button" onClick={() => ref.current?.close()} aria-label="Close planner dialog" className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-line"><X size={18} aria-hidden="true" /></button></header>
     {request.kind === 'editor' ? <>
-      <label htmlFor="planner-task-choice" className="text-xs font-medium text-secondary">Task</label><select id="planner-task-choice" value={selectedId} disabled={saving} onChange={event => { setSelectedId(event.target.value); setConfirmed(false); setError('') }} className="mt-2 min-h-11 w-full rounded-lg border border-line bg-elevated px-3 text-sm"><option value="">Create a custom task</option>{tasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}</select>
+      <label htmlFor="planner-task-choice" className="text-xs font-medium text-secondary">Task</label><select id="planner-task-choice" value={selectedId} disabled={saving} onChange={event => { setSelectedId(event.target.value); setConfirmed(false); setDeleting(false); setError('') }} className="mt-2 min-h-11 w-full rounded-lg border border-line bg-elevated px-3 text-sm"><option value="">Create a custom task</option>{tasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}</select>
       {selectedTask && <section aria-label="Task details" className="mt-4 rounded-xl border border-line bg-elevated p-4">
         <h3 className="break-words text-base font-semibold leading-6">{selectedTask.title}</h3>
         <p className="mt-2 text-xs text-muted">{selectedTask.source} · {selectedTask.mode === 'saved' ? 'Saved evidence' : selectedTask.mode === 'demo' ? 'Demo finding' : 'User-created task'}</p>
@@ -48,6 +49,7 @@ export function PlannerDialog({ request, tasks, monday, useWeekends, onClose, on
           <p className="mt-2 text-xs leading-5 text-muted">Done records your completion. It does not verify that the source issue is resolved.</p>
           <button type="button" disabled={!confirmed || saving} onClick={() => { void save(() => onComplete(selectedTask)) }} className={`${primaryAction} mt-3 w-full`}><Check size={15} aria-hidden="true" />Mark as Done</button>
         </>}
+        {selectedTask.status === 'Done' && <button type="button" disabled={saving} onClick={() => { void save(() => onUndoDone(selectedTask)) }} className={`${secondaryAction} mt-3 w-full`}>Undo Done</button>}
       </section>}
       <form key={selectedId} className="mt-4 space-y-4" onSubmit={event => {
         event.preventDefault(); const values = new FormData(event.currentTarget)
@@ -71,6 +73,12 @@ export function PlannerDialog({ request, tasks, monday, useWeekends, onClose, on
         {!selectedId && <div><label htmlFor="planner-notes" className="text-xs text-secondary">Notes (optional)</label><textarea id="planner-notes" name="notes" rows={3} maxLength={2000} className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 text-sm" /><p className="mt-1 text-[11px] text-muted">User-created planner task · Not an SEO Spy finding</p></div>}
         <p role="alert" className="text-xs text-red-300">{saving ? 'Saving planner changes…' : error}</p><div className="flex flex-wrap gap-2"><button type="submit" disabled={saving} className={primaryAction}>{selectedId ? 'Save Schedule' : 'Add Task'}</button>{selectedId && <button type="button" disabled={saving} onClick={() => { void save(() => onSchedule(selectedId, null)) }} className={secondaryAction}>Unschedule</button>}<button type="button" onClick={() => ref.current?.close()} className={secondaryAction}>Cancel</button></div>
       </form>
+      {selectedTask?.mode === 'custom' && <div role="group" aria-label="Custom task deletion" className="mt-4">
+        {deleting ? <>
+          <p className="text-xs leading-5 text-secondary">Delete this custom task? This permanently removes it from your task list and calendar.</p>
+          <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={saving} onClick={() => { void save(() => onDelete(selectedTask)) }} className={secondaryAction}>Confirm Delete</button><button type="button" disabled={saving} onClick={() => setDeleting(false)} className={secondaryAction}>Cancel</button></div>
+        </> : <button type="button" disabled={saving} onClick={() => setDeleting(true)} className={secondaryAction}>Delete custom task</button>}
+      </div>}
     </> : <>
       <h3 className="text-base font-semibold leading-6">{request.task.title}</h3><p className="mt-2 text-xs text-muted">{request.task.source} · {request.task.mode === 'saved' ? 'Saved evidence' : request.task.mode === 'demo' ? 'Demo finding' : 'User-created task'}</p>
       {request.kind === 'ai' && <p className="mt-4 rounded-lg border border-blue-400/25 bg-elevated p-3 text-xs leading-6 text-blue-200">Preview using existing guidance. No AI service is called and no website or account is changed.</p>}

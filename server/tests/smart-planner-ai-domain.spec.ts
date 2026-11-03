@@ -29,6 +29,22 @@ function place(entry: AiPlanEntry, day: string, hour: number, minute: 0 | 30 = 0
 function totals(snapshot: AiSnapshot, output: AiPlanOutput) { output.weeklyWorkloads = computeWorkloads(snapshot, output.entries); return output; }
 
 describe("Muse planner immutable snapshots and offline impact-first roadmap", () => {
+  it("explicit whole-schedule planning selects every unfinished task without changing saved preferences or completed work", () => {
+    const settings = structuredClone(defaultAiSettings);
+    const source = state([task(1), task(2, { schedule: { day: "2026-12-01", hour: 9 }, scheduledBy: "manual" }), task(3, { status: "Done", completedAt: now.toISOString(), schedule: { day: "2026-11-02", hour: 9 } })]);
+    const before = structuredClone(source);
+    const snapshot = makeAiSnapshot(source, settings, "2026-11-02", [], now, "all");
+    expect(snapshot.candidateIds).toEqual([uuid(1), uuid(2)]);
+    expect(snapshot.tasks.find(item => item.id === uuid(3))?.protected).toBe(true);
+    expect(snapshot.planningScope).toBe("all"); expect(settings.protectExistingSchedules).toBe(true); expect(source).toEqual(before);
+    expect(validateAiProposal(snapshot, offlineAiProposal(snapshot)).valid).toBe(true);
+  });
+  it("unscheduled-only mode protects scheduled work even if an older saved setting disabled protection", () => {
+    const source = state([task(1), task(2, { schedule: { day: "2026-11-02", hour: 10 } })]);
+    const snapshot = makeAiSnapshot(source, { ...defaultAiSettings, protectExistingSchedules: false }, "2026-11-02", [], now, "unscheduled");
+    expect(snapshot.candidateIds).toEqual([uuid(1)]); expect(snapshot.tasks.find(item => item.id === uuid(2))?.protected).toBe(true);
+    expect(() => makeAiSnapshot(source, defaultAiSettings, "2026-11-02", [uuid(2)], now, "all")).toThrow("AI_SCOPE_INVALID");
+  });
   it("keeps source facts separate from estimated impact and does not mutate task state", () => {
     const original = state([task(1, { priority: "Low", sourceSeverity: "critical" }), task(2, { priority: "Urgent", sourceSeverity: "low" })]);
     const before = structuredClone(original);

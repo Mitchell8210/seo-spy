@@ -46,7 +46,7 @@ export class PlannerSession {
     } finally { if (epoch === this.epoch) this.update({ loading: false }) }
   }
   serverId(taskKey: string) { return this.response?.tasks.find(task => task.taskKey === taskKey)?.id }
-  mutate(method: 'POST' | 'PATCH', suffix: string, body: object, message: string): Promise<boolean> {
+  mutate(method: 'POST' | 'PATCH' | 'DELETE', suffix: string, body: object, message: string): Promise<boolean> {
     const signature = JSON.stringify([method, suffix, body])
     const existing = this.inflight.get(signature)
     if (existing) return existing

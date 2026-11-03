@@ -12,8 +12,8 @@ import { configureApp } from "../src/configure-app.js";
 import { MetaMuseProvider } from "../src/integrations/ai/meta-muse.provider.js";
 import { PlannerController } from "../src/modules/smart-planner/planner.controller.js";
 import { PlannerAiController } from "../src/modules/smart-planner/planner-ai.controller.js";
-import { defaultAiSettings, offlineAiProposal, type AiPlanOutput } from "../src/modules/smart-planner/planner-ai.domain.js";
-import { PlannerAiGateway } from "../src/modules/smart-planner/planner-ai.gateway.js";
+import { computeWorkloads, defaultAiSettings, offlineAiProposal, type AiPlanOutput } from "../src/modules/smart-planner/planner-ai.domain.js";
+import { PlannerAiGateway, PlannerAiGenerationError } from "../src/modules/smart-planner/planner-ai.gateway.js";
 import { PlannerAiService } from "../src/modules/smart-planner/planner-ai.service.js";
 import { PlannerAiStore } from "../src/modules/smart-planner/planner-ai.store.js";
 import { SQLitePlannerRepository } from "../src/modules/smart-planner/planner.repository.js";
@@ -119,6 +119,27 @@ describe("isolated Muse Smart Planner proposal HTTP workflow", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("supports both simple planning scopes without saving settings or touching completed tasks during generation", async () => {
+    const pending = await setupTasks();
+    const scheduled = await create("Manual scheduled task", { schedule: { day: "2026-12-01", hour: 9 } });
+    const completed = await create("Completed task");
+    const done = await request(app.getHttpServer()).patch(`${base}/tasks/${completed.id}`).send({ ...mutation(revision), status: "Done", completionConfirmed: true }).expect(200);
+    revision = done.body.revision;
+    const before = await planner();
+    const settings = (await request(app.getHttpServer()).get(`${base}/ai-preferences`).expect(200)).body;
+    const unscheduled = await generate({ scope: "unscheduled" });
+    expect(unscheduled.output?.entries.map(entry => entry.taskId)).toEqual([pending.id]);
+    const all = await generate({ scope: "all" });
+    expect(new Set(all.output?.entries.map(entry => entry.taskId))).toEqual(new Set([pending.id, scheduled.id]));
+    expect(await planner()).toEqual(before);
+    expect((await request(app.getHttpServer()).get(`${base}/ai-preferences`).expect(200)).body).toEqual(settings);
+    await request(app.getHttpServer()).post(`${base}/ai-proposals`).send({ ...mutation(revision), mode: "mock", weekStart: "2026-11-02", scope: "other" }).expect(400);
+    await request(app.getHttpServer()).post(`${base}/ai-proposals`).send({ ...mutation(revision), mode: "mock", weekStart: "2026-11-02", scope: "all", reconsiderTaskIds: [scheduled.id] }).expect(422);
+    const applied = await request(app.getHttpServer()).post(`${base}/ai-proposals/${all.id}/apply`).send({ ...mutation(revision), confirmed: true }).expect(201);
+    expect(applied.body.tasks.find((task: TaskView) => task.id === completed.id)).toEqual(before.tasks.find((task: TaskView) => task.id === completed.id));
+    expect(applied.body.tasks.find((task: TaskView) => task.id === scheduled.id).schedule.day < "2026-12-01").toBe(true);
+  });
+
   it("replays identical generation requests durably and rejects reused IDs with changed content", async () => {
     await setupTasks(); const body = { ...mutation(revision), mode: "mock", weekStart: "2026-11-02" };
     const first = await generate({}, body);
@@ -127,6 +148,75 @@ describe("isolated Muse Smart Planner proposal HTTP workflow", () => {
     expect(app.get(AppDatabase).connection().prepare("SELECT COUNT(*) count FROM smart_planner_ai_proposals").get()?.count).toBe(1);
     await app.close(); await start();
     expect(await generate({}, body)).toEqual(first);
+  });
+
+  it("stores compact live prompt provenance and reopens it without changing the v1 review/apply contract", async () => {
+    await setupTasks();
+    jest.spyOn(app.get(PlannerAiGateway), "generate").mockImplementationOnce(async source => ({ output: offlineAiProposal(source), model: "muse-spark-1.3", requestIdentity: "a".repeat(64), accountingAttemptId: "offline-live-attempt" }));
+    const proposal = await app.get(PlannerAiService).generate("demo-guzman", { ...mutation(revision), mode: "live", weekStart: "2026-11-02", scope: "all" }, { actor: "a".repeat(64), businessId: "demo-guzman", siteUrl: "https://example.com/" });
+    expect(proposal.promptVersion).toBe("seo-impact-roadmap-v3-typed"); expect(proposal.output?.schemaVersion).toBe("planner-muse-proposal-v1");
+    await app.close(); await start();
+    expect((await request(app.getHttpServer()).get(`${base}/ai-proposals/${proposal.id}`).expect(200)).body.promptVersion).toBe("seo-impact-roadmap-v3-typed");
+    // Historical compact-v1 wire responses were never stored; their expanded
+    // proposals and original prompt provenance must remain readable.
+    const previous = app.get(PlannerAiStore).get("demo-guzman", proposal.id);
+    previous.promptVersion = "seo-impact-roadmap-v2-compact";
+    app.get(PlannerAiStore).update(previous);
+    await app.close(); await start();
+    expect((await request(app.getHttpServer()).get(`${base}/ai-proposals/${proposal.id}`).expect(200)).body.promptVersion).toBe("seo-impact-roadmap-v2-compact");
+  });
+
+  it("turns over-capacity Muse dates into a persisted reviewable plan without changing tasks until explicit Apply", async () => {
+    await setupTasks(); for (let i = 0; i < 5; i++) await create(`Capacity fixture ${i}`);
+    await saveSettings({ weeklyAvailableMinutes: 420, targetUtilization: 60 });
+    const before = await planner();
+    jest.spyOn(app.get(PlannerAiGateway), "generate").mockImplementationOnce(async snapshot => {
+      const output = offlineAiProposal(snapshot);
+      for (const [i, entry] of output.entries.entries()) {
+        const day = `2026-11-0${2 + Math.floor(i / 2)}`;
+        entry.proposedStart = { day, hour: 9 + i % 2, minute: 0 }; entry.proposedEnd = { day, hour: 10 + i % 2, minute: 0 }; entry.deferredReason = null;
+      }
+      output.weeklyWorkloads = computeWorkloads(snapshot, output.entries);
+      return { output, model: "muse-spark-1.3", requestIdentity: "c".repeat(64), accountingAttemptId: "offline-capacity-attempt" };
+    });
+    const proposal = await app.get(PlannerAiService).generate("demo-guzman", { ...mutation(revision), mode: "live", weekStart: "2026-11-02", scope: "all" },
+      { actor: "a".repeat(64), businessId: "demo-guzman", siteUrl: "https://example.com/" });
+    expect(proposal.status).toBe("ready"); expect(proposal.output!.weeklyWorkloads.every(week => week.totalMinutes <= 240)).toBe(true);
+    expect(proposal.output!.tradeoffs[0]).toContain("Review this revised schedule before Apply Plan");
+    expect(await planner()).toEqual(before);
+    await app.close(); await start();
+    expect(app.get(PlannerAiStore).get("demo-guzman", proposal.id).output).toEqual(proposal.output);
+    const apply = { ...mutation(revision), confirmed: true };
+    const result = (await request(app.getHttpServer()).post(`${base}/ai-proposals/${proposal.id}/apply`).send(apply).expect(201)).body;
+    expect(result.tasks.filter((task: TaskView) => task.schedule)).toHaveLength(6);
+    expect((await request(app.getHttpServer()).post(`${base}/ai-proposals/${proposal.id}/apply`).send(apply).expect(201)).body).toEqual(result);
+  });
+
+  it("persists explicit completion undo with its history and invalidates an older AI proposal", async () => {
+    const task = await setupTasks();
+    const done = await request(app.getHttpServer()).patch(`${base}/tasks/${task.id}`).send({ ...mutation(revision), status: "Done", completionConfirmed: true, schedule: { day: "2026-11-02", hour: 10 } }).expect(200);
+    revision = done.body.revision;
+    await create("Still pending task"); const proposal = await generate();
+    const body = mutation(revision);
+    const undone = await request(app.getHttpServer()).post(`${base}/tasks/${task.id}/undo-completion`).send(body).expect(200);
+    revision = undone.body.revision;
+    await app.close(); await start();
+    expect((await planner()).tasks.find((item: TaskView) => item.id === task.id)).toMatchObject({ status: "Needs Action", completedAt: null, schedule: { day: "2026-11-02", hour: 10 } });
+    expect((await request(app.getHttpServer()).post(`${base}/tasks/${task.id}/undo-completion`).send(body).expect(200)).body).toEqual(undone.body);
+    const history = JSON.parse(String(app.get(AppDatabase).connection().prepare("SELECT data_json FROM smart_planner_tasks WHERE id=?").get(task.id)?.data_json)).completionUndoHistory;
+    expect(history).toEqual([{ completedAt: done.body.tasks.find((item: TaskView) => item.id === task.id).completedAt, undoneAt: expect.any(String) }]);
+    await request(app.getHttpServer()).post(`${base}/ai-proposals/${proposal.id}/apply`).send({ ...mutation(revision), confirmed: true }).expect(409);
+  });
+
+  it("keeps custom deletion and its receipt durable after restart and invalidates older AI proposals", async () => {
+    const task = await setupTasks(), proposal = await generate();
+    const body = { ...mutation(revision), confirmed: true };
+    const deleted = await request(app.getHttpServer()).delete(`${base}/tasks/${task.id}`).send(body).expect(200);
+    revision = deleted.body.revision;
+    await app.close(); await start();
+    expect((await planner()).tasks.some((item: TaskView) => item.id === task.id)).toBe(false);
+    expect((await request(app.getHttpServer()).delete(`${base}/tasks/${task.id}`).send(body).expect(200)).body).toEqual(deleted.body);
+    await request(app.getHttpServer()).post(`${base}/ai-proposals/${proposal.id}/apply`).send({ ...mutation(revision), confirmed: true }).expect(409);
   });
 
   it("blocks unauthenticated live generation before financial authorization or central dispatch", async () => {
@@ -205,6 +295,21 @@ describe("isolated Muse Smart Planner proposal HTTP workflow", () => {
     expect(proposal.status).toBe("invalid"); expect(proposal.output).toBeNull(); expect(proposal.diagnostics.length).toBeGreaterThan(0);
     expect(JSON.stringify(app.get(PlannerAiStore).get("demo-guzman", proposal.id))).not.toContain("untrusted invalid output");
     expect(await planner()).toEqual(before);
+  });
+
+  it("persists safe response rejection diagnostics and the accounting link across restart without retry", async () => {
+    await setupTasks(); const before = await planner(), body = { ...mutation(revision), mode: "live" as const, weekStart: "2026-11-02" };
+    const frontend = { actor: "a".repeat(64), businessId: "demo-guzman", siteUrl: "https://example.com/" };
+    const diagnostic = { code: "AI_RESPONSE_MISSING_TASKS", detail: "Muse returned 1 of 2 eligible tasks; every task must be scheduled or explicitly deferred." };
+    const receipt = { model: "muse-spark-1.3", requestIdentity: "b".repeat(64), accountingAttemptId: "offline-settled-attempt" };
+    const gateway = jest.spyOn(app.get(PlannerAiGateway), "generate").mockRejectedValueOnce(new PlannerAiGenerationError("AI_PLANNING_RESPONSE_INVALID", diagnostic.detail, [diagnostic], receipt));
+    const proposal = await app.get(PlannerAiService).generate("demo-guzman", body, frontend);
+    expect(proposal.status).toBe("failed"); expect(proposal.diagnostics).toContainEqual(diagnostic);
+    expect(app.get(PlannerAiStore).get("demo-guzman", proposal.id)).toMatchObject(receipt);
+    expect(await app.get(PlannerAiService).generate("demo-guzman", body, frontend)).toEqual(proposal); expect(gateway).toHaveBeenCalledTimes(1);
+    expect((await planner()).tasks).toEqual(before.tasks);
+    await app.close(); await start();
+    expect(app.get(PlannerAiStore).get("demo-guzman", proposal.id)).toMatchObject({ ...receipt, diagnostics: expect.arrayContaining([diagnostic]) });
   });
 
   it("records provider failure without automatic retry or leaking exception details", async () => {

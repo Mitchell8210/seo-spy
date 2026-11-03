@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
 import { createHash } from "node:crypto";
+import { authenticateAiAdministrator } from "../../modules/ai/ai-admin.guard.js";
 import { AiUsageStore } from "./ai-usage.store.js";
 import type { WordPressAllowanceScope, FrontendAllowanceScope } from "./muse-wordpress-allowance.js";
 import { AiUsageError, type AiLiveMode, type AiModel, type AiUsageIntent, type AiUsageLimits } from "./ai-usage.types.js";
@@ -31,7 +32,7 @@ const failure = (code: string, message: string) => new MetaMuseError(code, messa
 
 export interface MetaMuseHttpResponse { status: number; body: string; requestId: string | null; providerError?: { code: string | null; type: string | null; message: string | null } }
 export interface MetaMuseGeneration { output: unknown; model: string; usage: { inputTokens: number; outputTokens: number }; requestId: string | null; attemptId?: string; diagnostics?: MetaMuseDiagnostics }
-export interface MetaMuseInput { instructions: string; input: unknown; schema: Record<string, unknown>; reasoningEffort?: "minimal" }
+export interface MetaMuseInput { instructions: string; input: unknown; schema: Record<string, unknown>; reasoningEffort?: "minimal"; plannerMaxOutputTokens?: number }
 export interface MetaMusePrepared extends MuseCostEstimate { payload: string; requestHash: string; model: AiModel }
 export interface MetaMuseAuthorization { intentId: string; actor: string; scope: string }
 export interface MuseHelloReport {
@@ -116,9 +117,9 @@ export class MetaMuseProvider {
   }
   private developmentLimits(): AiUsageLimits {
     return {
-      budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 2_000_000, 0, 2_000_000),
-      dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 500_000, 0, 500_000),
-      maxCalls: this.integer("AI_DEV_MAX_CALLS", 10, 0, 10),
+      budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 25_000_000, 0, 25_000_000),
+      dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 25_000_000, 0, 25_000_000),
+      maxCalls: this.integer("AI_DEV_MAX_CALLS", Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
     };
   }
 
@@ -209,7 +210,12 @@ export class MetaMuseProvider {
     const effort = input.reasoningEffort ?? this.config.get<string>("AI_REASONING_EFFORT") ?? "low";
     if (!MODELS.has(model) || processingMode !== "standard" || !["minimal", "low"].includes(effort)) throw failure("AI_NOT_CONFIGURED", "Only the configured Standard model and conservative reasoning settings are supported.");
     const maximumBytes = this.integer("AI_MAX_INPUT_BYTES", 32768, 4096, 32768);
-    const maximumTokens = this.integer("AI_MAX_OUTPUT_TOKENS", 1500, 16, 1500);
+    const plannerTokens = input.plannerMaxOutputTokens;
+    const plannerSnapshot = object(object(input.input)?.snapshot);
+    if (plannerTokens !== undefined && (!Number.isSafeInteger(plannerTokens) || plannerTokens < 512 || plannerTokens > 16384
+      || plannerSnapshot?.version !== "planner-snapshot-v1" || input.reasoningEffort !== "minimal"))
+      throw failure("AI_INVALID_INPUT", "Only a bounded planner snapshot may use a planner output allowance.");
+    const maximumTokens = plannerTokens ?? this.integer("AI_MAX_OUTPUT_TOKENS", 1500, 16, 1500);
     this.integer("AI_MAX_CONCURRENCY", 1, 1, 1);
     let payload: string;
     try {
@@ -229,7 +235,7 @@ export class MetaMuseProvider {
         inputPriceMicrosPerMillion: this.integer("AI_INPUT_PRICE_MICROS_PER_MILLION", MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_INPUT_PRICE_MICROS_PER_MILLION, 1_000_000_000),
         outputPriceMicrosPerMillion: this.integer("AI_OUTPUT_PRICE_MICROS_PER_MILLION", MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, 1_000_000_000),
       };
-      return { payload, requestHash: hash(payload), model: model as AiModel, ...estimateMuseCost(payload, maximumTokens, prices) };
+      return { payload, requestHash: hash(payload), model: model as AiModel, ...estimateMuseCost(payload, maximumTokens, prices, Date.now(), plannerTokens === undefined ? "standard" : "planner") };
     } catch (error) {
       if (error instanceof MuseCostError) throw failure(error.code, error.message);
       throw error;
@@ -243,10 +249,6 @@ export class MetaMuseProvider {
     void _payload;
     try {
       const mode = this.mode() === "demo" ? "demo" : "poc";
-      if (["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(object(input.input)?.schemaVersion))) {
-        if (mode !== "poc") throw failure("AI_APPROVAL_REQUIRED", "The exact WordPress-alt funding path cannot borrow demo authorization.");
-        return await this.ledger.estimateWordPressAlt({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode });
-      }
       return await this.ledger.estimate({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode }, mode === "poc" ? this.developmentLimits() : undefined);
     } catch (error) { throw this.accountingError(error); }
   }
@@ -294,7 +296,8 @@ export class MetaMuseProvider {
       ? snapshot?.version === "planner-snapshot-v1" && snapshot.businessId === context.businessId && Array.isArray(snapshot.tasks) && /^[a-f0-9]{64}$/.test(String(source?.snapshotHash))
       : context.task === "wordpress-alt" && ["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source?.schemaVersion))
         && source?.capability === "wordpress.media.alt_text.update" && allowancePageBelongsToSite(object(source.target)?.pageUrl, context.siteUrl);
-    if (!validTask || input.reasoningEffort !== "minimal" || prepared.model !== "muse-spark-1.3" || prepared.maxOutputTokens !== 1500 || object(request?.reasoning)?.effort !== "minimal")
+    if (!validTask || input.reasoningEffort !== "minimal" || prepared.model !== "muse-spark-1.3"
+      || (context.task !== "planner" && (prepared.maxOutputTokens !== 1500 || input.plannerMaxOutputTokens !== undefined)) || object(request?.reasoning)?.effort !== "minimal")
       throw failure("AI_APPROVAL_MISMATCH", "Only a supported, authenticated frontend action may use this allowance.");
     const { payload: _payload, ...cost } = prepared; void _payload;
     const intent = await this.ledger.estimateFrontend({ ...cost, actor: context.actor, scope: `frontend:${context.task}:${context.businessId}:${context.resourceKey}`,
@@ -307,6 +310,18 @@ export class MetaMuseProvider {
     finally { await this.ledger.completeFrontendReceipt(context.actor, intent.id); }
   }
 
+  /** Internal entry point for explicitly initiated, authenticated developer diagnostics.
+   * Never expose without an existing operator guard. No retries or external writes. */
+  async generateDiagnostic(input: MetaMuseInput, credential: string, scope: string, signal?: AbortSignal) {
+    const context = { actor: authenticateAiAdministrator(this.config.get<string>("AI_ADMIN_KEY") ?? "", credential), scope };
+    if (!context.scope) throw failure("AI_APPROVAL_REQUIRED", "An initiating authenticated actor and scope are required.");
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_REASONING_EFFORT", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc" }), this.transport, this.ledger);
+    return scoped.generate(input, signal, { ...context, intentId: "" });
+  }
+
   async generate(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization): Promise<MetaMuseGeneration> {
     const enabled = this.config.get("AI_ENABLED");
     if (enabled !== true && enabled !== "true") throw failure("AI_DISABLED", "Model analysis is disabled.");
@@ -315,9 +330,13 @@ export class MetaMuseProvider {
     if (mode === "mock" || mock !== false && mock !== "false") throw failure("AI_MOCK_MODE", "Mock mode cannot dispatch a real model request.");
     const key = this.config.get<string>("MODEL_API_KEY") ?? "";
     if (!key.trim() || key.length > 1024 || /[\r\n]/.test(key)) throw failure("AI_NOT_CONFIGURED", "An approved private model API key must be configured.");
-    if (!authorization?.intentId || !authorization.actor || !authorization.scope) throw failure("AI_APPROVAL_REQUIRED", "A fresh exact administrator-approved request is required for every real model call.");
+    if (!authorization?.actor || !authorization.scope) throw failure("AI_APPROVAL_REQUIRED", "An authenticated initiating actor and scope are required.");
     if (signal?.aborted) throw failure("AI_CANCELLED", "Model analysis was cancelled before dispatch.");
     const prepared = this.prepare(input);
+    if (!authorization.intentId) {
+      const intent = await this.estimate(input, { actor: authorization.actor, scope: authorization.scope, reason: "Explicit authenticated operation within the shared development allowance." });
+      authorization = { ...authorization, intentId: intent.id };
+    }
     const timeout = this.integer("AI_TIMEOUT_MS", 60000, 1000, 120000);
     let reservation;
     try {

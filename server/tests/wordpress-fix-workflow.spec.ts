@@ -24,7 +24,6 @@ import { operatorIdentity } from "../src/modules/wordpress/wordpress.guard.js";
 import { validateAltOutput } from "../src/modules/wordpress/wordpress-fix.types.js";
 import { WordPressFixSessions } from "../src/modules/wordpress/wordpress-fix-session.js";
 import { WordPressService } from "../src/modules/wordpress/wordpress.service.js";
-import { MUSE_TESTING_POLICY_HASH } from "../src/integrations/ai/muse-testing-ledger.js";
 import type { Request, Response } from "express";
 
 const businessId = "demo-guzman", operator = "offline-wordpress-operator-fixture-32-characters";
@@ -130,34 +129,13 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect(transport.mock.calls).toHaveLength(8);
     expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
   });
-  it("runs the three-step customer flow under one fixture allowance while global mock and write defaults stay disabled", async () => {
+  it("generates under the shared allowance while applying still requires independent write authorization", async () => {
     mediaId = 5658; pageId = 5652;
-    const ledger = app.get(AiUsageStore), admin = "a".repeat(64), actor = operatorIdentity(operator);
-    jest.useFakeTimers({ now: Date.now() - 6 * 60000, doNotFake: ["nextTick", "setImmediate", "setTimeout"] });
-    try {
-      for (const [index, reserveMicros] of [131460, 6544, 6544, 8196].entries()) {
-        const requestHash = String(index + 1).repeat(64);
-        const intent = await ledger.estimate({ actor: admin, scope: "offline-history", requestHash, cacheKey: requestHash, mode: "poc", model: "muse-spark-1.3", maxInputTokens: 10, maxOutputTokens: 128,
-          reserveMicros, priceVersion: "offline-price", reason: "Disposable historical fixture only" });
-        await ledger.approve(intent.id, admin);
-        const attempt = await ledger.reserve(intent.id, { actor: admin, requestHash, mode: "poc" });
-        await ledger.settle(attempt.id, index === 3 ? { status: "success", inputTokens: 10, outputTokens: 105, actualMicros: 460 } : { status: "failed", errorCode: "OFFLINE_FIXTURE" });
-        jest.setSystemTime(Date.now() + 61000);
-      }
-      await expect(ledger.estimate({ actor: admin, scope: "offline-history", requestHash: "e".repeat(64), cacheKey: "e".repeat(64), mode: "poc", model: "muse-spark-1.3", maxInputTokens: 1, maxOutputTokens: 16,
-        reserveMicros: 1000, priceVersion: "offline-price", reason: "Narrow disposable historical policy" }, { budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4 })).rejects.toBeDefined();
-      await ledger.activateTestingAllocation(admin, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: "f".repeat(64), maximumMicros: 10000 });
-    } finally { jest.useRealTimers(); }
     const text = "Ayuda para entender y responder cartas del IRS.";
     const evidence = await operatorPost(prefix + "/fix-operator/evidence", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId, mediaId, pageResource: "pages", pageId,
       purpose: "informative", verifiedDescription: text, proposalLanguage: "es", requiredTerms: ["ayuda", "cartas", "IRS"] });
     expect(evidence.status).toBe(201);
-    const blocked = await post("/fixes/customer-generations", { evidenceId: evidence.body.id });
-    expect(blocked.status).toBe(409); expect(blocked.body.error).toMatchObject({ code: "AI_WORDPRESS_ALLOWANCE_REQUIRED", message: "Complete the one-time Fix with AI setup before continuing." }); expect(muse).not.toHaveBeenCalled();
-    const scope = { actor, businessId, siteUrl: "https://example.com/", mediaIds: [5658] };
-    const preview = await ledger.prepareWordPressAllowance(admin, scope);
-    await ledger.activateWordPressAllowance(admin, scope, { confirmed: true, policyHash: preview.policyHash, fundingHash: preview.fundingHash });
-    const authorize = jest.spyOn(app.get(MetaMuseProvider), "authorizeAllowedWordPressAlt");
+    const authorize = jest.spyOn(app.get(MetaMuseProvider), "generateFrontend");
     for (const [code, message] of [["AI_RATE_LIMIT", "Please wait a minute before requesting a suggestion."], ["AI_USAGE_UNCERTAIN", "We could not confirm this request. Review its saved status before trying again."]]) {
       authorize.mockRejectedValueOnce(new MetaMuseError(code!, "Private provider diagnostics must not escape"));
       const denied = await post("/fixes/customer-generations", { evidenceId: evidence.body.id });
@@ -172,10 +150,14 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect((await request(app.getHttpServer()).post(prefix + "/fixes/customer-generations").set("Host", "localhost:5173").set("Origin", origin).send({ evidenceId: evidence.body.id })).status).toBe(401);
     expect((await request(app.getHttpServer()).post(prefix + `/fixes/proposals/${proposed.body.id}/customer-apply`).set("Host", "localhost:5173").set("Origin", origin).set("Cookie", cookie).send({ confirmed: true, proposalHash: proposed.body.hash })).status).toBe(403);
     expect((await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: "0".repeat(64) })).status).toBe(409); expect(writes).toBe(0);
-    const applied = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
-    expect(applied.status).toBe(201); expect(applied.body).toMatchObject({ outcome: { status: "applied", verification: "verified_stored_fields" }, verification: null }); expect(writes).toBe(1);
-    const replay = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
-    expect(replay.body.outcome).toEqual(applied.body.outcome); expect(writes).toBe(1); expect(muse).toHaveBeenCalledTimes(1);
+    const deniedApply = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(deniedApply.status).toBe(403); expect(writes).toBe(0);
+    config.set("WORDPRESS_WRITES_ENABLED", true);
+    const applied = await post(`/fixes/proposals/${proposed.body.id}/apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(applied.status).toBe(201); expect(applied.body).toMatchObject({ status: "applied", verification: "verified_stored_fields" }); expect(writes).toBe(1);
+    const replay = await post(`/fixes/proposals/${proposed.body.id}/apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(replay.body).toEqual(applied.body); expect(writes).toBe(1); expect(muse).toHaveBeenCalledTimes(1);
+    config.set("WORDPRESS_WRITES_ENABLED", false);
     const beforeVerificationReads = transport.mock.calls.length;
     const verified = await post(`/fixes/proposals/${proposed.body.id}/verifications`, { confirmed: true });
     expect(verified.body).toMatchObject({ status: "public_verified", receipt: { storedFieldMatches: true } });
@@ -294,11 +276,12 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     const wire = JSON.parse(muse.mock.calls[0][0]); expect(wire).toMatchObject({ tools: [], tool_choice: "auto", store: false, stream: false, background: false });
     expect((await ledger.status()).development.calls).toBe(1);
   });
-  it("rejects real generation without paid authorization while retaining mock-first provenance isolation", async () => {
+  it("automatically authorizes live generation while retaining mock-first provenance isolation", async () => {
     const { evidence } = await prepare();
     config.set("MOCK_AI", false); config.set("AI_MODE", "poc"); config.set("AI_ENABLED", true);
     expect((await post("/fixes/generations", { evidenceId: evidence.id })).status).toBeGreaterThanOrEqual(400);
-    expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+    expect(muse).toHaveBeenCalledTimes(1); expect(writes).toBe(0);
+    expect((await app.get(AiUsageStore).status()).development.calls).toBe(1);
   });
   it("checksums stored fix records and rejects corruption", async () => {
     await enroll(); app.get(AppDatabase).connection().prepare("UPDATE wordpress_fix_records SET payload='{}'").run();
@@ -337,18 +320,19 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect(expired.items[0].workflow).toMatchObject({ status: "expired", proposal: { id: proposal.id, hash: proposal.hash } });
     expect(transport).toHaveBeenCalledTimes(calls); expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
   });
-  it("reports pending administrator generation approval in the browser without creating spending authority", async () => {
+  it("retains saved generation status and accounts explicit live attempts without creating write authority", async () => {
     const evidence = await enroll(), ledger = app.get(AiUsageStore);
     const estimate = jest.spyOn(ledger, "estimateWordPressAlt"), approve = jest.spyOn(ledger, "approve"), reserve = jest.spyOn(ledger, "reserve");
     config.set("MOCK_AI", false); config.set("AI_MODE", "poc"); config.set("AI_ENABLED", true);
     const calls = transport.mock.calls.length;
     const listed = await get("/fixes");
     expect(listed.status).toBe(200);
-    expect(listed.body.items[0].workflow.generationApproval).toMatchObject({ status: "pending_approval" });
+    expect(listed.body.items[0].workflow.generationApproval).toMatchObject({ status: "not_required" });
+    expect(estimate).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
     expect(transport).toHaveBeenCalledTimes(calls);
     expect((await post("/fixes/generations", { evidenceId: evidence.id })).status).toBeGreaterThanOrEqual(400);
-    expect(estimate).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
-    expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+    expect(estimate).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(reserve).toHaveBeenCalledTimes(1);
+    expect(muse).toHaveBeenCalledTimes(1); expect(writes).toBe(0);
   });
   it("prefers an executed fix over a newer unexecuted proposal for the same evidence", async () => {
     const { generation, proposal } = await prepare();

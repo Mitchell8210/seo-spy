@@ -63,9 +63,9 @@ const environmentSchema = z.object({
   AI_MAX_INPUT_BYTES: z.coerce.number().int().min(4096).max(32768).default(32768),
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(16).max(1500).default(1500),
   AI_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(1).default(1),
-  AI_DEV_BUDGET_MICROS: z.coerce.number().int().min(0).max(2000000).default(2000000),
-  AI_DEV_DAILY_MICROS: z.coerce.number().int().min(0).max(500000).default(500000),
-  AI_DEV_MAX_CALLS: z.coerce.number().int().min(0).max(10).default(10),
+  AI_DEV_BUDGET_MICROS: z.coerce.number().int().min(0).max(25000000).default(25000000),
+  AI_DEV_DAILY_MICROS: z.coerce.number().int().min(0).max(25000000).default(25000000),
+  AI_DEV_MAX_CALLS: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(Number.MAX_SAFE_INTEGER),
   AI_INPUT_PRICE_MICROS_PER_MILLION: z.coerce.number().int().min(1250000).max(100000000).default(1250000),
   AI_OUTPUT_PRICE_MICROS_PER_MILLION: z.coerce.number().int().min(4250000).max(100000000).default(4250000),
   WORDPRESS_FRONTEND_ORIGIN: z.string().refine(value => {

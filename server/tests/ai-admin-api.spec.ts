@@ -57,18 +57,18 @@ describe("local AI administrator API never generates a model response", () => {
   });
   it("reports persistent zero usage and mock mode without disclosing credentials or querying billing", async () => {
     const response = await get("/status").expect(200);
-    expect(response.body).toMatchObject({ effectiveMode: "mock", providerBillingBalanceVerified: false, usage: { development: { chargedMicros: 0, calls: 0, budgetMicros: 2000000, dailyMicros: 500000, maxCalls: 10 }, demo: { calls: 0, authorization: null } } });
+    expect(response.body).toMatchObject({ effectiveMode: "mock", providerBillingBalanceVerified: false, usage: { development: { chargedMicros: 0, calls: 0, budgetMicros: 25000000, dailyMicros: 25000000, maxCalls: Number.MAX_SAFE_INTEGER }, demo: { calls: 0, authorization: null } } });
     expect(response.text).not.toContain(adminKey);
     expect(response.text).not.toContain(operatorKey);
   });
-  it("binds a single-use approval to the reviewed immutable estimate and maximum cost", async () => {
+  it("keeps compatibility approval idempotent and binds dispatch to the immutable estimate", async () => {
     const intent = await estimate();
     await get(`/intents/${intent.id}`).expect(200);
     await post(`/intents/${intent.id}/approve`, { confirmed: true, requestHash: "b".repeat(64), reserveMicros: intent.reserveMicros }).expect(409);
     await post(`/intents/${intent.id}/approve`, { confirmed: true, requestHash: hash, reserveMicros: intent.reserveMicros + 1 }).expect(409);
     await post(`/intents/${intent.id}/approve`, { requestHash: hash, reserveMicros: intent.reserveMicros }).expect(400);
     const approved = await post(`/intents/${intent.id}/approve`, { confirmed: true, requestHash: hash, reserveMicros: intent.reserveMicros }).expect(201);
-    expect(approved.body.approvedBy).toMatch(/^[a-f0-9]{64}$/);
+    expect(approved.body.approvedBy).toBe(intent.actor); // Compatibility approval is idempotent; initiating actor is preserved.
     expect((await usage.status()).development.calls).toBe(0);
     await usage.reserve(intent.id, { actor: intent.actor, requestHash: hash, mode: "poc" });
     await expect(usage.reserve(intent.id, { actor: intent.actor, requestHash: hash, mode: "poc" })).rejects.toBeDefined();

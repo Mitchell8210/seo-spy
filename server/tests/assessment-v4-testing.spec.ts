@@ -1,3 +1,4 @@
+import { withHistoricalAiPolicy, historicalTestingLimits } from "./fixtures/historical-ai-policy.js";
 import { jest } from "@jest/globals";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
@@ -23,7 +24,7 @@ const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(valu
 const admin = "offline-v4-fixture-admin-".repeat(3);
 const confirmed = (preview: { requestHash: string; inputHash: string; maximumMicros: number }) => ({ confirmed: true, requestHash: preview.requestHash, inputHash: preview.inputHash, maximumMicros: preview.maximumMicros });
 
-describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeline with isolated mock transport only", version => {
+describe.each(["v4", "v5"] as const)("%s historical testing operator compatibility, isolated mock transport only", version => {
   let directory: string, database: AppDatabase, ledger: AiUsageStore, store: AssessmentStore;
   let bundle: OpportunityBundle | TransparencyBundle, v3: Extract<ReturnType<typeof assessmentMuseEvidenceSchema.parse>, { schemaVersion: "seo-spy.assessment-muse-evidence.v3" }>;
   let service: AssessmentAnalysisService, testing: AssessmentTestingOperator, legacy: AssessmentTestingOperator;
@@ -69,7 +70,6 @@ describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeli
       await ledger.approve(intent.id, "offline-history"); const attempt = await ledger.reserve(intent.id, { actor: intent.actor, requestHash: intent.requestHash, mode: "poc" });
       await ledger.settle(attempt.id, index === 3 ? { status: "success", inputTokens: 10, outputTokens: 105, actualMicros: 460 } : { status: "failed", errorCode: "AI_PROVIDER_FAILED" }); now += 61000;
     }
-    await expect(ledger.estimate({ actor: "offline-history", scope: "reduce", requestHash: hash("reduce"), cacheKey: hash("reduce"), mode: "poc", model: "muse-spark-1.3", maxInputTokens: 100, maxOutputTokens: 512, reserveMicros: 6544, priceVersion: "offline-fixture", reason: "Preserve narrowed historical limits." }, { budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4 })).rejects.toBeDefined();
   });
   afterEach(async () => { jest.restoreAllMocks(); database.close(); ledger.onModuleDestroy(); await rm(directory, { recursive: true }); });
   function response(output: unknown) {
@@ -82,7 +82,7 @@ describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeli
   };
   async function activateAndUseHistoricalV3() {
     const preview = await legacy.previewTesting(bundle.businessId, bundle.assessmentId), exact = confirmed(preview);
-    await legacy.activate(bundle.businessId, bundle.assessmentId, admin, { ...exact, policyHash: MUSE_TESTING_POLICY_HASH });
+    await withHistoricalAiPolicy(join(directory, "usage.sqlite"), historicalTestingLimits, () => legacy.activate(bundle.businessId, bundle.assessmentId, admin, { ...exact, policyHash: MUSE_TESTING_POLICY_HASH }));
     const approval = await legacy.approveTesting(bundle.businessId, bundle.assessmentId, admin, { ...exact, authorizeOneRequest: true, reason: "Offline historical v3 fixture, no actual network." });
     const result = await legacy.executeTesting(bundle.businessId, bundle.assessmentId, admin, approval.intentId, { ...exact, poc: true });
     expect(result).toMatchObject({ receipt: { persisted: true } }); now += 61000; post.mockClear();
@@ -93,7 +93,7 @@ describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeli
     const approval = await testing.approveTesting(bundle.businessId, bundle.assessmentId, admin, { ...exact, authorizeOneRequest: true, reason: "Offline controlled v4 response fixture only." });
     return { preview, exact, approval };
   }
-  it("previews without authorization and cannot activate or borrow exhausted development capacity", async () => {
+  it("previews without spending and rejects activation before a historical testing grant exists", async () => {
     const before = await ledger.status(), preview = await testing.previewTesting(bundle.businessId, bundle.assessmentId);
     expect(preview).toMatchObject({ selectionVersion: version, noAuthorizationOrReservationCreated: true, gates: { singleUseApproval: false, allLiveGatesSatisfied: false } });
     expect(preview.allowedSelections.opportunities).toHaveLength(8);
@@ -120,7 +120,8 @@ describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeli
     else expect(analysis.output.summary).toContain("No improvement opportunities were selected");
     const replay = await testing.executeTesting(bundle.businessId, bundle.assessmentId, admin, approval.intentId, { ...exact, poc: true });
     expect(replay).toMatchObject({ cacheHit: true, modelDispatches: 0, providerCostMicros: 0 }); expect(post).toHaveBeenCalledTimes(1);
-    const after = await ledger.status(); expect(after.development).toEqual(before.development); expect(after.demo).toEqual(before.demo);
+    const after = await ledger.status(); expect(after.development.calls).toBe(before.development.calls + 1);
+    expect(after.development.budgetMicros).toBe(25000000); expect(after.demo).toEqual(before.demo);
     expect(after.recentAttempts.slice(1)).toEqual(before.recentAttempts);
     expect((await ledger.testingReceipts())[0].selectionVersion).toBeUndefined(); // Historical receipt untouched.
     expect(JSON.parse(post.mock.calls[0][0])).toMatchObject({ reasoning: { effort: "minimal" }, max_output_tokens: 1500, tools: [], store: false, stream: false, background: false });
@@ -157,7 +158,7 @@ describe.each(["v4", "v5"] as const)("%s testing operator, real protected pipeli
     await expect(testing.previewTesting(bundle.businessId, bundle.assessmentId)).rejects.toBeDefined();
     expect(await ledger.status()).toEqual(before); expect(post).not.toHaveBeenCalled();
   });
-  it.each(["credential", "request", "input", "cost", "confirmed"])("requires separate exact v4 approval: %s", async kind => {
+  it.each(["credential", "request", "input", "cost", "confirmed"])("validates historical v4 intent bindings: %s", async kind => {
     await activateAndUseHistoricalV3(); const before = await ledger.status(), preview = await testing.previewTesting(bundle.businessId, bundle.assessmentId), exact = confirmed(preview);
     if (kind === "request") exact.requestHash = "f".repeat(64);
     if (kind === "input") exact.inputHash = "f".repeat(64);

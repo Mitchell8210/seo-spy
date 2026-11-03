@@ -14,7 +14,8 @@ export class UpdateAiSettingsDto extends PlannerMutationDto {
   @ApiProperty({ type: AiSettingsDto }) @IsObject() @ValidateNested() @Type(() => AiSettingsDto) settings!: AiSettingsDto;
 }
 export class GenerateAiPlanDto extends PlannerMutationDto {
-  @ApiProperty({ enum: ["mock", "live"], description: "Explicit mock is an offline simulation, never a fallback; live requires separate planner financial authorization" }) @IsIn(["mock", "live"]) mode!: "mock" | "live";
+  @ApiPropertyOptional({ enum: ["all", "unscheduled"], description: "Reorganize all unfinished tasks, or only plan unscheduled tasks. Server selects task IDs; cannot be combined with reconsiderTaskIds." }) @ValidateIf((_object, value: unknown) => value !== undefined) @IsIn(["all", "unscheduled"]) scope?: "all" | "unscheduled";
+  @ApiProperty({ enum: ["mock", "live"], description: "Explicit mock is an offline simulation, never a fallback; authenticated explicit live generation uses the existing shared $25 cumulative AI budget" }) @IsIn(["mock", "live"]) mode!: "mock" | "live";
   @ApiProperty({ description: "Selected Monday civil date" }) @IsString() @MinLength(10) @MaxLength(10) weekStart!: string;
   @ApiPropertyOptional({ type: [String], description: "Explicit scheduled pending task IDs to reconsider, allowed only with protection disabled" }) @ValidateIf((_object, value: unknown) => value !== undefined) @IsArray() @ArrayMaxSize(60) @ArrayUnique() @IsUUID("all", { each: true }) reconsiderTaskIds?: string[];
 }

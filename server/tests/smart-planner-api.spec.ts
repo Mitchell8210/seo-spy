@@ -171,6 +171,94 @@ describe("Smart Planner offline HTTP contract", () => {
     expect(new Set(scheduled.body.tasks.map((task: { id: string }) => task.id)).size).toBe(2);
   });
 
+  it("explicitly undoes report completion, preserving its schedule and timestamp history without automatic reopening", async () => {
+    const id = (await request(app.getHttpServer()).get(base).expect(200)).body.tasks[0].id;
+    const done = await request(app.getHttpServer()).patch(`${base}/tasks/${id}`).send({ ...mutation(0), status: "Done", completionConfirmed: true, schedule: { day: "2026-11-02", hour: 10 } }).expect(200);
+    const completedAt = done.body.tasks[0].completedAt;
+    await request(app.getHttpServer()).patch(`${base}/tasks/${id}`).send({ ...mutation(1), status: "Needs Action" }).expect(400);
+    await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(mutation(0)).expect(409);
+    const business = (await app.get(SQLiteBusinessRepository).findById("demo-guzman"))!;
+    await app.get(SQLiteBusinessRepository).upsertBusiness({ ...business, id: "other", website: "https://other.example" });
+    await request(app.getHttpServer()).post(`/api/businesses/other/smart-planner/tasks/${id}/undo-completion`).send(mutation(0)).expect(404);
+    // Even if a source later retires, a user's explicit undo must not hide the task.
+    projection.tasks = []; projection.sources[0].availability = "empty";
+    const body = mutation(1);
+    const undone = await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(body).expect(200);
+    expect(undone.body.tasks[0]).toMatchObject({ id, status: "Needs Action", completedAt: null, schedule: done.body.tasks[0].schedule, guidance: "Original saved guidance" });
+    const stored = JSON.parse(String(app.get(AppDatabase).connection().prepare("SELECT data_json FROM smart_planner_tasks WHERE id=?").get(id)?.data_json));
+    expect(stored.completionUndoHistory).toEqual([{ completedAt, undoneAt: expect.any(String) }]);
+    expect((await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(body).expect(200)).body).toEqual(undone.body);
+    await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(mutation(2)).expect(400);
+    const redone = await request(app.getHttpServer()).patch(`${base}/tasks/${id}`).send({ ...mutation(2), status: "Done", completionConfirmed: true }).expect(200);
+    // Replaying an old undo must never undo a later completion.
+    expect((await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(body).expect(200)).body).toEqual(redone.body);
+    const refreshed = await request(app.getHttpServer()).post(`${base}/reconcile`).send({ ...mutation(3), confirmed: true }).expect(200);
+    expect(refreshed.body.tasks[0]).toMatchObject({ status: "Done", completedAt: redone.body.tasks[0].completedAt });
+    await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(mutation(4)).expect(200);
+    const history = JSON.parse(String(app.get(AppDatabase).connection().prepare("SELECT data_json FROM smart_planner_tasks WHERE id=?").get(id)?.data_json)).completionUndoHistory;
+    expect(history).toHaveLength(2); expect(history[0].completedAt).toBe(completedAt);
+  });
+
+  it("rolls back completion undo and its history if receipt storage fails", async () => {
+    const created = await request(app.getHttpServer()).post(`${base}/tasks`).send(custom(0)).expect(201);
+    const id = created.body.tasks.find((task: { mode: string }) => task.mode === "custom").id;
+    const done = await request(app.getHttpServer()).patch(`${base}/tasks/${id}`).send({ ...mutation(1), status: "Done", completionConfirmed: true }).expect(200);
+    app.get(AppDatabase).connection().exec("CREATE TEMP TRIGGER fail_undo_receipt BEFORE INSERT ON smart_planner_mutations BEGIN SELECT RAISE(ABORT,'Offline undo fixture'); END");
+    await request(app.getHttpServer()).post(`${base}/tasks/${id}/undo-completion`).send(mutation(2)).expect(503);
+    expect((await request(app.getHttpServer()).get(base).expect(200)).body).toEqual(done.body);
+  });
+
+  it("deletes only confirmed custom tasks with scoped, revision-protected durable receipts", async () => {
+    const created = await request(app.getHttpServer()).post(`${base}/tasks`).send({ ...custom(0), schedule: { day: "2026-11-02", hour: 9 } }).expect(201);
+    const customId = created.body.tasks.find((task: { mode: string }) => task.mode === "custom").id;
+    const sourceId = created.body.tasks.find((task: { mode: string }) => task.mode === "saved").id;
+    await request(app.getHttpServer()).patch(`${base}/tasks/${customId}`).send({ ...mutation(1), status: "Done", completionConfirmed: true }).expect(200);
+    const protectedResult = await request(app.getHttpServer()).delete(`${base}/tasks/${sourceId}`).send({ ...mutation(2), confirmed: true }).expect(400);
+    expect(protectedResult.body.error.code).toBe("PLANNER_TASK_PROTECTED");
+    await request(app.getHttpServer()).delete(`${base}/tasks/${customId}`).send(mutation(2)).expect(400);
+    await request(app.getHttpServer()).delete(`${base}/tasks/${customId}`).send({ ...mutation(1), confirmed: true }).expect(409);
+    const business = (await app.get(SQLiteBusinessRepository).findById("demo-guzman"))!;
+    await app.get(SQLiteBusinessRepository).upsertBusiness({ ...business, id: "other", website: "https://other.example" });
+    await request(app.getHttpServer()).delete(`/api/businesses/other/smart-planner/tasks/${customId}`).send({ ...mutation(0), confirmed: true }).expect(404);
+    const body = { ...mutation(2), confirmed: true };
+    const deleted = await request(app.getHttpServer()).delete(`${base}/tasks/${customId}`).send(body).expect(200);
+    expect(deleted.body.revision).toBe(3);
+    expect(deleted.body.tasks.some((task: { id: string }) => task.id === customId)).toBe(false);
+    expect(deleted.body.tasks.some((task: { id: string }) => task.id === sourceId)).toBe(true);
+    expect(app.get(AppDatabase).connection().prepare("SELECT COUNT(*) count FROM smart_planner_tasks WHERE id=?").get(customId)?.count).toBe(0);
+    expect((await request(app.getHttpServer()).delete(`${base}/tasks/${customId}`).send(body).expect(200)).body).toEqual(deleted.body);
+    expect((await request(app.getHttpServer()).get(base).expect(200)).body).toEqual(deleted.body);
+  });
+
+  it("rolls back physical custom deletion if the mutation receipt cannot be saved", async () => {
+    const created = await request(app.getHttpServer()).post(`${base}/tasks`).send(custom(0)).expect(201);
+    const id = created.body.tasks.find((task: { mode: string }) => task.mode === "custom").id;
+    const db = app.get(AppDatabase).connection();
+    db.exec("CREATE TEMP TRIGGER fail_custom_delete_receipt BEFORE INSERT ON smart_planner_mutations BEGIN SELECT RAISE(ABORT,'Offline receipt failure'); END");
+    await request(app.getHttpServer()).delete(`${base}/tasks/${id}`).send({ ...mutation(1), confirmed: true }).expect(503);
+    expect((await request(app.getHttpServer()).get(base).expect(200)).body).toEqual(created.body);
+    expect(db.prepare("SELECT COUNT(*) count FROM smart_planner_tasks WHERE id=?").get(id)?.count).toBe(1);
+  });
+
+  it("atomically unschedules all tasks, preserving Done history, scope and idempotent receipts", async () => {
+    const originalBusiness = (await app.get(SQLiteBusinessRepository).findById("demo-guzman"))!;
+    await app.get(SQLiteBusinessRepository).upsertBusiness({ ...originalBusiness, id: "other", website: "https://other.example" });
+    const first = await request(app.getHttpServer()).post(`${base}/tasks`).send({ ...custom(0), schedule: { day: "2026-11-02", hour: 9 } }).expect(201);
+    const taskId = first.body.tasks.find((task: { mode: string }) => task.mode === "custom").id;
+    const done = await request(app.getHttpServer()).patch(`${base}/tasks/${taskId}`).send({ ...mutation(1), status: "Done", completionConfirmed: true }).expect(200);
+    const other = await request(app.getHttpServer()).post("/api/businesses/other/smart-planner/tasks").send({ ...custom(0), schedule: { day: "2026-11-03", hour: 10 } }).expect(201);
+    await request(app.getHttpServer()).post(`${base}/unschedule-all`).send(mutation(1)).expect(409);
+    await request(app.getHttpServer()).post(`${base}/unschedule-all`).send({ expectedRevision: 2 }).expect(400);
+    const submission = mutation(2);
+    const cleared = await request(app.getHttpServer()).post(`${base}/unschedule-all`).send(submission).expect(200);
+    expect(cleared.body.revision).toBe(3); expect(cleared.body.tasks.every((task: { schedule: unknown }) => task.schedule === null)).toBe(true);
+    const completed = cleared.body.tasks.find((task: { id: string }) => task.id === taskId);
+    expect(completed).toMatchObject({ status: "Done", completedAt: done.body.tasks.find((task: { id: string }) => task.id === taskId).completedAt, guidance: "Original custom notes", scheduledBy: null });
+    expect((await request(app.getHttpServer()).post(`${base}/unschedule-all`).send(submission).expect(200)).body).toEqual(cleared.body);
+    expect((await request(app.getHttpServer()).get("/api/businesses/other/smart-planner").expect(200)).body).toEqual(other.body);
+    expect((await request(app.getHttpServer()).get(base).expect(200)).body.tasks).toEqual(cleared.body.tasks);
+  });
+
   it("isolates registered businesses and never resolves another business's task UUID", async () => {
     const businesses = app.get(SQLiteBusinessRepository);
     const original = (await businesses.findById("demo-guzman"))!;

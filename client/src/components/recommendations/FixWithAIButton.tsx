@@ -4,12 +4,13 @@ import type { FixReviewRequest } from '../../types/fixReview'
 import { FixReviewDialog } from './FixReviewDialog'
 import { fixCapability, fixActionLabel, type FixCapability } from '../../services/wordpressFix'
 
-export function FixWithAIButton({ review, className, children, onOpen, ariaLabel }: {
+export function FixWithAIButton({ review, className, children, onOpen, ariaLabel, iconOnly = false }: {
   review: FixReviewRequest
   className: string
   children?: ReactNode
   onOpen?: (hasExecution: boolean) => void
   ariaLabel?: string
+  iconOnly?: boolean
 }) {
   const [selected, setSelected] = useState<FixReviewRequest | null>(null)
   const { category, businessId, reportId, findingId } = review
@@ -31,7 +32,7 @@ export function FixWithAIButton({ review, className, children, onOpen, ariaLabel
       setResolved({ key, value })
       setSelected(structuredClone(review))
       onOpen?.(!!(value?.workflow?.proposal?.executionStarted || value?.workflow?.proposal?.outcome))
-    }}>{children}{label}</button>
+    }}>{children}{iconOnly ? <span className="sr-only">{label}</span> : label}</button>
     {selected && <FixReviewDialog review={selected} capability={capability} onClose={() => setSelected(null)} />}
   </>
 }

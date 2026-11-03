@@ -40,8 +40,8 @@ export function museUsageCostMicros(inputTokens: number, outputTokens: number, p
 export function estimateMuseCost(payload: string, maxOutputTokens: number, prices: MusePrices = {
   inputPriceMicrosPerMillion: MUSE_INPUT_PRICE_MICROS_PER_MILLION,
   outputPriceMicrosPerMillion: MUSE_OUTPUT_PRICE_MICROS_PER_MILLION,
-}, now = Date.now()): MuseCostEstimate {
-  if (typeof payload !== "string" || !payload || !Number.isFinite(now) || now < Date.parse("2026-10-31T00:00:00.000Z") || now >= Date.parse(MUSE_PRICE_VALID_UNTIL) || !integer(maxOutputTokens) || maxOutputTokens < 16 || maxOutputTokens > 1500) throw invalid();
+}, now = Date.now(), purpose: "standard" | "planner" = "standard"): MuseCostEstimate {
+  if (typeof payload !== "string" || !payload || !Number.isFinite(now) || now < Date.parse("2026-10-31T00:00:00.000Z") || now >= Date.parse(MUSE_PRICE_VALID_UNTIL) || !integer(maxOutputTokens) || maxOutputTokens < 16 || maxOutputTokens > (purpose === "planner" ? 16384 : 1500)) throw invalid();
   const bytes = Buffer.byteLength(payload);
   if (bytes > 32768) throw invalid();
   const maxInputTokens = bytes * 4 + 4096;

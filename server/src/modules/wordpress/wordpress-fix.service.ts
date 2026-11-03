@@ -188,16 +188,10 @@ export class WordPressFixService {
       const verification = receipt ? { receipt, status: !receipt.storedFieldMatches ? "stored_mismatch" : receipt.status === "verified" ? "public_verified" : receipt.status === "mismatch" ? "public_mismatch" : "stored_verified_public_inconclusive" } : null;
       const status = proposal?.restorationOf && outcome?.status === "applied" ? "restored" : verification?.status ?? outcome?.status
         ?? (proposal?.executionStarted ? "outcome_unknown" : proposal ? Date.parse(proposal.expiresAt) <= Date.now() ? "expired" : "pending_approval" : "draft");
-      let generationApproval: { status: "not_required" | "pending_approval" | "approved" | "expired" | "used"; intentId?: string } = { status: "not_required" };
-      if ([false, "false"].includes(this.config.get("MOCK_AI") ?? true) && this.config.get("AI_MODE") !== "mock") {
-        generationApproval = { status: proposal?.executionStarted || proposal?.outcome ? "used" : "pending_approval" };
-        if (!proposal?.executionStarted && !proposal?.outcome) {
-          try {
-            const effective = this.purposes?.hasBinding(owner) ? await this.purposes.resolve(owner, false) : owner;
-            generationApproval = await this.provider.wordPressAltApproval(this.modelInput(effective, ""), { actor, scope: `wordpress-alt:${businessId}:${owner.id}` });
-          } catch { /* Changed dependencies or missing authorization remain pending; a GET never refreshes or approves them. */ }
-        }
-      }
+      // Shared spending needs no per-request administrator approval. Proposal
+      // approvalRequired and independent write authorization remain separate.
+      const generationApproval = { status: [false, "false"].includes(this.config.get("MOCK_AI") ?? true)
+        && this.config.get("AI_MODE") !== "mock" && (proposal?.executionStarted || proposal?.outcome) ? "used" : "not_required" };
       items.push({ reportId: owner.source.reportId, findingId: owner.source.findingId, evidenceId: owner.id,
         workflow: { status, proposal, generation: generation ? publicRecord(generation) : null, verification, pageUrl: owner.target.pageUrl,
           target: owner.target, thumbnailUrl: await this.savedThumbnail(owner), pageTitle: owner.proposalContext?.page.title ?? null, completedAt: typeof outcome?.completedAt === "string" ? outcome.completedAt : null,
@@ -303,13 +297,9 @@ export class WordPressFixService {
     const local = !sufficient ? { schemaVersion: "wordpress-alt-output-v1", status: "insufficient_evidence", altText: null, reason: "INSUFFICIENT_CONTEXT" }
       : { schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText: evidence.purpose === "decorative" ? "" : mockDescription.replace(/\s+/g, " ").trim().slice(0, 300), reason: evidence.purpose === "decorative" ? "DECORATIVE" : "DESCRIPTION_EXCERPT" };
     if (!mock && !sufficient) throw unavailable("No reliable image content/purpose exists; real generation is unnecessary and blocked.");
-    if (customer) {
-      const intent = await this.provider.authorizeAllowedWordPressAlt(modelInput, { actor, businessId, siteUrl: new URL(evidence.siteUrl).href, mediaId: evidence.target.mediaId, evidenceId: evidence.id });
-      body.intentId = intent.id;
-    }
     let generation: MetaMuseGeneration | undefined, schemaValid = false, savedId: string | null = null, receiptAttempted = false;
     const publishReceipt = async (error?: unknown) => {
-      if (mock || !evidence.proposalContext || !body.intentId) return;
+      if (mock || customer || !evidence.proposalContext || !body.intentId) return;
       receiptAttempted = true;
       const diagnostics = error instanceof MetaMuseError ? error.diagnostics : undefined;
       const status = diagnostics?.responseStatus;
@@ -321,7 +311,7 @@ export class WordPressFixService {
     };
     try {
       generation = mock ? { output: local, model: prepared.model, usage: { inputTokens: 0, outputTokens: 0 }, requestId: null }
-        : customer ? await this.provider.generateAllowedWordPressAlt(modelInput, undefined, { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, intentId: body.intentId ?? "" })
+        : customer ? await this.provider.generateFrontend(modelInput, { actor, businessId, siteUrl: new URL(evidence.siteUrl).href, task: "wordpress-alt", resourceKey: evidence.id })
           : await this.provider.generate(modelInput, undefined, { actor, scope: `wordpress-alt:${businessId}:${evidence.id}`, intentId: body.intentId ?? "" });
       if (generation.model !== prepared.model) throw new BadGatewayException("The proposal model did not match the prepared request.");
       let output;

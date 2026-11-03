@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, MUSE_PRICE_VALID_UNTIL, MUSE_PRICE_VERSION, museUsageCostMicros } from "../../integrations/ai/muse-cost.js";
 import type { MetaMuseHttpResponse } from "../../integrations/ai/meta-muse.provider.js";
-import { aiOutputSchema, aiSnapshotSchema, plannerMuseInput, snapshotHash, type AiSnapshot } from "./planner-ai.domain.js";
+import { aiOutputSchema, aiSnapshotSchema, plannerMuseInput, snapshotHash, type AiSnapshot, type AiDiagnostic } from "./planner-ai.domain.js";
 import { canonical } from "./planner.types.js";
 
 export class PlannerMuseError extends Error {
-  constructor(public readonly code: string, message: string) { super(message); }
+  constructor(public readonly code: string, message: string, public readonly diagnostics: AiDiagnostic[] = [],
+    public readonly receipt?: { model: string; requestIdentity: string; accountingAttemptId: string }) { super(message); }
 }
 const fail = (code: string, message: string): never => { throw new PlannerMuseError(code, message); };
 const boundedInteger = (min: number, max: number) => z.preprocess(value => typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value, z.number().int().min(min).max(max));

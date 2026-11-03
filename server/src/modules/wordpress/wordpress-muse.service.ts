@@ -82,7 +82,7 @@ export class WordPressMuseService {
       throw error;
     }
   }
-  async create(businessId: string, reportId: string, authorization?: { intentId: string; actor: string }) {
+  async create(businessId: string, reportId: string, authorization?: { intentId?: string; actor: string }) {
     const bundle = await this.prepare(businessId, reportId);
     this.usable(bundle);
     const key = `${businessId}:${reportId}`;
@@ -100,10 +100,10 @@ export class WordPressMuseService {
         validateWordPressMuseOutput(cached.output, selected);
         return cached;
       }
-      if (settings.mode !== "mock" && (!authorization?.intentId || !authorization.actor)) throw new ServiceUnavailableException({ code: "AI_APPROVAL_REQUIRED", message: "Every real model request requires a separately approved administrator intent." });
+      if (settings.mode !== "mock" && !authorization?.actor) throw new ServiceUnavailableException({ code: "AI_APPROVAL_REQUIRED", message: "An authenticated operator must initiate real generation." });
       const generation = settings.mode === "mock"
         ? { output: buildMockWordPressMuseOutput(selected), model: settings.model, usage: { inputTokens: 0, outputTokens: 0 }, requestId: null, attemptId: undefined }
-        : await this.provider.generate({ instructions, input: selected, schema }, undefined, { ...authorization!, scope: `wordpress:${businessId}:${reportId}` });
+        : await this.provider.generate({ instructions, input: selected, schema }, undefined, { ...authorization!, intentId: authorization?.intentId ?? "", scope: `wordpress:${businessId}:${reportId}` });
       if (generation.model !== settings.model) throw new BadGatewayException({ code: "WORDPRESS_MUSE_OUTPUT_INVALID", message: "The model returned analysis for an unexpected configuration." });
       const output = validateWordPressMuseOutput(generation.output, selected);
       const record = wordpressMuseAnalysisSchema.parse({

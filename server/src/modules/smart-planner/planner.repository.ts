@@ -57,6 +57,7 @@ export class SQLitePlannerRepository implements PlannerRepository {
   async mutate(businessId: string, mutation: PlannerMutation, requestHash: string, apply: (state: PlannerState) => void): Promise<PlannerState> {
     return this.mutationTransaction(db => {
       const state = this.load(db, businessId);
+      const originalTasks = state.tasks.map(task => ({ id: task.id, mode: task.mode }));
       const receipt = db.prepare("SELECT request_hash,result_json,result_checksum FROM smart_planner_mutations WHERE business_id=? AND mutation_id=?").get(businessId, mutation.mutationId);
       if (receipt) {
         if (receipt.request_hash !== requestHash) throw conflict("PLANNER_MUTATION_MISMATCH");
@@ -86,6 +87,12 @@ export class SQLitePlannerRepository implements PlannerRepository {
         const result = upsert.run(task.id, businessId, task.taskKey, task.status, task.schedule?.day ?? null, task.schedule?.hour ?? null, task.schedule ? task.schedule.minute ?? 0 : null, position, payload, checksum(payload));
         if (result.changes !== 1) throw invalid();
       });
+      const retainedIds = new Set(state.tasks.map(task => task.id));
+      for (const task of originalTasks) if (!retainedIds.has(task.id)) {
+        // Report/history tasks may never disappear through a collection rewrite.
+        if (task.mode !== "custom") throw invalid();
+        if (db.prepare("DELETE FROM smart_planner_tasks WHERE business_id=? AND id=?").run(businessId, task.id).changes !== 1) throw invalid();
+      }
       const result = state.mutationResult ? JSON.stringify(planningOutcomeSchema.parse(state.mutationResult)) : null;
       if (result !== null && Buffer.byteLength(result) > MAX_RESULT_BYTES) throw invalid();
       db.prepare("INSERT INTO smart_planner_mutations(business_id,mutation_id,request_hash,revision,created_at,result_json,result_checksum) VALUES(?,?,?,?,?,?,?)").run(businessId, mutation.mutationId, requestHash, state.revision, now, result, result === null ? null : checksum(result));

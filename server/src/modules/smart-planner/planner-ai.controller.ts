@@ -15,7 +15,7 @@ export class PlannerAiController {
   preferences(@Param("businessId") id: string) { return this.plans.preferences(id); }
   @Patch("ai-preferences") @ApiOkResponse({ type: AiSettingsResponseDto }) @ApiOperation({ summary: "Save AI planning settings with planner revision/mutation protection" })
   save(@Param("businessId") id: string, @Body() body: UpdateAiSettingsDto) { return this.plans.savePreferences(id, body); }
-  @Post("ai-proposals") @ApiCreatedResponse({ type: AiProposalResponseDto }) @ApiOperation({ summary: "Explicitly generate an isolated proposal; live mode is blocked without dedicated authorization; no active task changes" })
+  @Post("ai-proposals") @ApiCreatedResponse({ type: AiProposalResponseDto }) @ApiOperation({ summary: "Generate a proposal; authenticated live requests use the shared $25 cumulative AI budget; no active task changes" })
   async generate(@Param("businessId") id: string, @Body() body: GenerateAiPlanDto, @Req() request: Request) {
     if (body.mode !== "live") return this.plans.generate(id, body);
     if (!this.sessions) throw new UnauthorizedException("Connect your authorized account before generating an AI plan.");

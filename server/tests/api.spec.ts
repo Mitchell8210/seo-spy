@@ -111,8 +111,10 @@ describe("demo API", () => {
         "/api/wordpress/businesses/{businessId}/smart-planner/ai-proposals",
         "/api/businesses/{businessId}/smart-planner/tasks",
         "/api/businesses/{businessId}/smart-planner/tasks/{taskId}",
+        "/api/businesses/{businessId}/smart-planner/tasks/{taskId}/undo-completion",
         "/api/businesses/{businessId}/smart-planner/preferences",
         "/api/businesses/{businessId}/smart-planner/auto-plan",
+        "/api/businesses/{businessId}/smart-planner/unschedule-all",
         "/api/businesses/{businessId}/smart-planner/reconcile",
         "/api/businesses/{businessId}/smart-planner/ai-preferences",
         "/api/businesses/{businessId}/smart-planner/ai-proposals",
@@ -205,6 +207,7 @@ describe("demo API", () => {
         "/api/wordpress/businesses/{businessId}/proposals/{id}/verifications/{verificationId}",
       ].sort(),
     );
+    expect(spec.body.paths["/api/businesses/{businessId}/smart-planner/tasks/{taskId}"].delete.requestBody.content["application/json"].schema.$ref).toBe("#/components/schemas/DeletePlannerTaskDto");
     const create = spec.body.paths["/api/businesses/{businessId}/audits"].post;
     expect(
       create.responses["202"].content["application/json"].schema.$ref,

@@ -29,6 +29,7 @@ export const taskSchema = z.object({
   notes: z.string().max(2000).nullable(), origin: z.record(z.string(), z.unknown()).nullable(),
   sourceChannel: z.enum(["website", "social", "consistency"]).nullable(), sourcePresent: z.boolean(),
   completedAt: z.string().datetime().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  completionUndoHistory: z.array(z.object({ completedAt: z.string().datetime(), undoneAt: z.string().datetime() }).strict()).max(500).optional(),
   payloadVersion: z.literal(2).optional(), estimatedDurationMinutes: z.number().refine(value => (durationOptions as readonly number[]).includes(value)).optional(),
   durationEstimateSource: z.enum(["default", "legacy-default", "user", "muse-estimate", "offline-estimate"]).optional(),
   scheduledBy: z.enum(["manual", "auto", "legacy-unknown", "muse", "offline-preview"]).nullable().optional(),

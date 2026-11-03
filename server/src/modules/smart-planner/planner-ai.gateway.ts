@@ -1,8 +1,9 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { MetaMuseProvider, type MetaMuseAuthorization, type MetaMuseHttpResponse } from "../../integrations/ai/meta-muse.provider.js";
-import { offlineAiProposal, plannerMuseInput, PLANNER_AI_SCOPE, type AiSnapshot } from "./planner-ai.domain.js";
+import { offlineAiProposal, PLANNER_AI_SCOPE, type AiSnapshot } from "./planner-ai.domain.js";
 import { parsePlannerMuseResponse, plannerMuseConfig, PlannerMuseError, preparePlannerMuse, type PlannerMuseRequest } from "./planner-muse.request.js";
+import { compactPlannerMuseInput, expandCompactPlan } from "./planner-muse.compact.js";
 
 export const PLANNER_AI_AUTHORIZATION = Symbol("PLANNER_AI_AUTHORIZATION");
 export const PLANNER_MUSE_EXECUTOR = Symbol("PLANNER_MUSE_EXECUTOR");
@@ -37,21 +38,33 @@ export class PlannerAiGateway {
     if (mode === "mock") return { output: offlineAiProposal(snapshot), model: "offline-simulation", requestIdentity: null, accountingAttemptId: null };
     if (frontend) {
       if (!this.provider || frontend.businessId !== snapshot.businessId) throw new PlannerAiGenerationError("AI_PLANNING_APPROVAL_REQUIRED", "Your account is not authorized for this planning request.");
-      const input = { ...plannerMuseInput(snapshot), reasoningEffort: "minimal" as const };
+      const input = compactPlannerMuseInput(snapshot, Number(this.config?.get("PLANNER_MUSE_MAX_OUTPUT_TOKENS") ?? 8000));
+      let receipt: PlannerMuseError["receipt"];
       try {
         const prepared = this.provider.prepare(input);
         const generated = await this.provider.generateFrontend(input, { ...frontend, task: "planner", resourceKey: generationId });
-        if (!generated.attemptId || generated.model !== prepared.model) throw new Error("Unmatched accounting result");
-        return { output: generated.output, model: generated.model, requestIdentity: prepared.requestHash, accountingAttemptId: generated.attemptId };
+        if (typeof generated.attemptId !== "string" || !generated.attemptId || generated.model !== prepared.model) throw new Error("Unmatched accounting result");
+        receipt = { model: generated.model, requestIdentity: prepared.requestHash, accountingAttemptId: generated.attemptId };
+        return { output: expandCompactPlan(snapshot, generated.output), model: generated.model, requestIdentity: prepared.requestHash, accountingAttemptId: generated.attemptId };
       } catch (error) {
         const code = error && typeof error === "object" && "code" in error ? String(error.code) : "AI_PLANNING_PROVIDER_FAILED";
-        const message = /COST|LIMIT|FUNDING/.test(code)
-          ? "This planning request exceeds the current AI allowance. Increase the allowance before generating; no calendar changes were made."
-          : "The AI planning request could not complete within your authorized allowance. Check your saved result and allowance before requesting again.";
-        throw new PlannerAiGenerationError(code, message);
+        const message = code === "AI_TRUNCATED"
+          ? "Muse reached its response limit before finishing the plan. No calendar changes or automatic paid retry occurred."
+          : code === "AI_DEVELOPMENT_BUDGET"
+          ? "This plan would exceed the remaining shared $25 AI budget, including previous usage and outstanding reservations. No calendar changes were made."
+          : code === "AI_RATE_LIMIT"
+            ? "AI requests are temporarily rate-limited. Wait before explicitly requesting another plan; no automatic retry or calendar change occurred."
+            : ["AI_INPUT_TOO_LARGE", "AI_FRONTEND_COST_LIMIT"].includes(code)
+              ? "This plan exceeds the current per-request size or cost limit. The shared $25 budget does not raise provider limits. No calendar changes were made."
+              : ["AI_INVALID_OUTPUT", "AI_PLANNING_RESPONSE_INVALID"].includes(code)
+                ? "Muse did not return a complete valid plan. No calendar changes or automatic paid retry occurred."
+                : "The AI planning request could not complete. Check the saved result and shared AI budget before explicitly requesting again; no calendar changes were made.";
+        const diagnostics = error instanceof PlannerMuseError ? error.diagnostics : [];
+        const detail = diagnostics[0]?.detail;
+        throw new PlannerAiGenerationError(code, detail ? `Muse's plan was rejected: ${detail} No calendar changes or automatic paid retry occurred.` : message, diagnostics, receipt);
       }
     }
-    if (!this.authorization || !this.executor) throw new PlannerAiGenerationError("AI_PLANNING_APPROVAL_REQUIRED", "Muse scheduling is not enabled for this business yet. A separate scheduling allowance is required. No model request was made; Offline Preview remains available.");
+    if (!this.authorization || !this.executor) throw new PlannerAiGenerationError("AI_PLANNING_APPROVAL_REQUIRED", "Connect your authenticated account before generating a Muse plan using the shared AI budget. No model request was made; Offline Preview remains available.");
     // Feature limits are independent; existing application-wide safety switches
     // still prohibit dispatch. Reading them does not alter their configuration.
     const enabled = this.config?.get("AI_ENABLED"), mock = this.config?.get("MOCK_AI"), aiMode = this.config?.get("AI_MODE");

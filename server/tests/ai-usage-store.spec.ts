@@ -5,10 +5,11 @@ import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { activateTesting, MUSE_TESTING_POLICY_HASH } from "../src/integrations/ai/muse-testing-ledger.js";
 import { AiUsageStore } from "../src/integrations/ai/ai-usage.store.js";
 import type { AiUsageEstimateInput, AiUsageIntent } from "../src/integrations/ai/ai-usage.types.js";
 
-describe("persistent real-AI budget and exact per-call approvals", () => {
+describe("shared cumulative AI allowance and protected dispatch", () => {
   let directory: string;
   let path: string;
   let store: AiUsageStore;
@@ -36,21 +37,16 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
     await store.settle(reserved.id, { status: "failed", errorCode: "AI_PROVIDER_FAILED" });
     return reserved;
   };
-  it("invalidates old demo intents when an administrator authorizes a new limit set", async () => {
-    await store.authorizeDemo("administrator", { budgetMicros: 2000000, dailyMicros: 500000, maxCalls: 10 });
-    const intent = await approved({ mode: "demo" });
+  it("uses one shared allowance regardless of legacy demo grants", async () => {
+    const intent = await store.estimate(input({ mode: "demo" }));
     await store.authorizeDemo("administrator", { budgetMicros: 100000, dailyMicros: 50000, maxCalls: 1 });
-    await expect(store.reserve(intent.id, auth(intent))).rejects.toMatchObject({ code: "AI_DEMO_APPROVAL_REQUIRED" });
-    expect((await store.status()).demo.calls).toBe(0);
+    await store.reserve(intent.id, auth(intent));
+    expect((await store.status()).development.chargedMicros).toBe(550);
   });
-
-  it("rejects an unaffordable estimate under reduced caps and keeps the reduction across restart", async () => {
-    await expect(store.estimate(input(), { budgetMicros: 500, dailyMicros: 500, maxCalls: 1 })).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
-    const restarted = makeStore();
-    await expect(restarted.estimate(input())).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
-    expect((await restarted.status()).development).toMatchObject({ budgetMicros: 500, dailyMicros: 500, maxCalls: 1, calls: 0 });
+  it("ignores obsolete per-request capacity configuration across restart", async () => {
+    await store.estimate(input(), { budgetMicros: 0, dailyMicros: 0, maxCalls: 0 });
+    expect((await makeStore().status()).development.budgetMicros).toBe(25000000);
   });
-
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "seo-spy-ai-usage-"));
     path = join(directory, "usage.sqlite");
@@ -67,18 +63,16 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
     await rm(target, { recursive: true, force: true });
   });
 
-  it("starts with the protected development allocation and never authorizes a call from an estimate alone", async () => {
+  it("automatically authorizes accounting for an authenticated initiating operation", async () => {
     const intent = await store.estimate(input());
-    expect(intent).toMatchObject({ approvedAt: null, consumedAt: null, inputPriceMicrosPerMillion: 1_250_000, outputPriceMicrosPerMillion: 4_250_000 });
-    expect(Date.parse(intent.expiresAt) - now).toBe(15 * 60_000);
-    await expect(store.reserve(intent.id, auth(intent))).rejects.toMatchObject({ code: "AI_APPROVAL_REQUIRED" });
-    expect(await store.status()).toMatchObject({ development: { budgetMicros: 2_000_000, dailyMicros: 500_000, maxCalls: 10, calls: 0, chargedMicros: 0 }, demo: { authorization: null, chargedMicros: 0 }, activeAttemptId: null, halted: false });
+    expect(intent.approvedAt).toBeTruthy();
+    await store.reserve(intent.id, auth(intent));
+    expect((await store.status()).development).toMatchObject({ budgetMicros: 25000000, chargedMicros: 550 });
   });
-
   it("reserves the maximum before dispatch and allows exactly one use of an approved request", async () => {
     const intent = await approved();
     const reservation = await store.reserve(intent.id, auth(intent));
-    expect(reservation.intent).toMatchObject({ approvedBy: "administrator-hash", consumedAt: new Date(now).toISOString() });
+    expect(reservation.intent).toMatchObject({ approvedBy: "operator-hash", consumedAt: new Date(now).toISOString() });
     expect(await store.status()).toMatchObject({ development: { calls: 1, chargedMicros: 550 }, activeAttemptId: reservation.id });
     await expect(store.reserve(intent.id, auth(intent))).rejects.toMatchObject({ code: "AI_APPROVAL_REQUIRED" });
     await expect(store.approve(intent.id, "administrator-hash")).rejects.toMatchObject({ code: "AI_APPROVAL_STALE" });
@@ -159,67 +153,45 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
     expect(await store.status()).toMatchObject({ halted: true, development: { chargedMicros: 999 }, recentAttempts: [{ status: "unknown", chargedMicros: 999 }] });
   });
 
-  it("reserves against the UTC daily limit and preserves cumulative usage after midnight", async () => {
-    await settledFailure({ reserveMicros: 400_000 });
-    now += 61_000;
-    await expect(store.estimate(input({ reserveMicros: 100_001 }))).rejects.toMatchObject({ code: "AI_DAILY_BUDGET" });
-    now = Date.parse("2026-11-01T00:00:00.000Z");
-    expect(await store.status()).toMatchObject({ development: { chargedMicros: 400_000, todayChargedMicros: 0, calls: 1 } });
-    await settledFailure({ reserveMicros: 200_000 });
-    expect(await store.status()).toMatchObject({ development: { chargedMicros: 600_000, todayChargedMicros: 200_000, calls: 2 } });
+  it("does not replenish cumulative headroom at midnight", async () => {
+    await settledFailure({ reserveMicros: 24000000 });
+    now += 61000;
+    await expect(store.estimate(input({ reserveMicros: 1000001 }))).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+    now = Date.parse("2026-11-01T00:00:00Z");
+    await expect(makeStore().estimate(input({ reserveMicros: 1000001 }))).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+    expect((await store.status()).development.chargedMicros).toBe(24000000);
   });
-
-  it("never resets or increases the two-dollar cumulative development allocation", async () => {
-    for (let day = 0; day < 4; day++) {
-      now = Date.parse("2026-10-31T12:00:00.000Z") + day * 24 * 60 * 60_000;
-      await settledFailure({ reserveMicros: 500_000 });
-    }
-    now += 24 * 60 * 60_000;
+  it("never resets the twenty-five-dollar cumulative allowance", async () => {
+    await settledFailure({ reserveMicros: 25000000 });
+    now += 86400000;
     await expect(makeStore().estimate(input())).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
-    expect(await store.status()).toMatchObject({ development: { chargedMicros: 2_000_000, calls: 4 } });
   });
-
-  it("limits all initial development attempts to ten including failed requests", async () => {
-    for (let call = 0; call < 10; call++) { now += 60_000; await settledFailure(); }
-    now += 24 * 60 * 60_000;
-    await expect(store.estimate(input())).rejects.toMatchObject({ code: "AI_REQUEST_LIMIT" });
-    expect((await makeStore().status()).development.calls).toBe(10);
+  it("allows more than ten operations within the shared monetary budget", async () => {
+    for (let call = 0; call < 11; call++) { now += 60000; await settledFailure(); }
+    expect((await makeStore().status()).development.calls).toBe(11);
   });
-
-  it("allows stricter configured limits but never automatically increases them on later requests", async () => {
+  it("does not let obsolete configured limits disable the established grant", async () => {
     const intent = await approved();
-    const reserved = await store.reserve(intent.id, auth(intent), { budgetMicros: 1000, dailyMicros: 1000, maxCalls: 2 });
-    await store.settle(reserved.id, { status: "failed" });
-    now += 60_000;
-    expect(await makeStore().status()).toMatchObject({ development: { budgetMicros: 1000, dailyMicros: 1000, maxCalls: 2, chargedMicros: 550 } });
+    await store.reserve(intent.id, auth(intent), { budgetMicros: 0, dailyMicros: 0, maxCalls: 0 });
+    expect((await makeStore().status()).development).toMatchObject({ budgetMicros: 25000000, chargedMicros: 550 });
+  });
+  it("preserves the grant after a mismatched reservation", async () => {
+    const intent = await approved();
+    await expect(store.reserve(intent.id, { ...auth(intent), actor: "wrong" }, { budgetMicros: 0, dailyMicros: 0, maxCalls: 0 })).rejects.toMatchObject({ code: "AI_APPROVAL_MISMATCH" });
+    expect((await makeStore().status()).development.budgetMicros).toBe(25000000);
+  });
+  it("rejects any policy attempt to raise the hard development caps", async () => {
+    const intent = await approved({ reserveMicros: 25000000 });
+    const attempt = await store.reserve(intent.id, auth(intent), { budgetMicros: 100000000, dailyMicros: 100000000, maxCalls: 100000 });
+    await store.settle(attempt.id, { status: "failed" }); now += 61000;
     await expect(store.estimate(input())).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
   });
-
-  it("keeps a stricter limit even when the reservation that supplied it is rejected", async () => {
-    const intent = await approved();
-    await expect(store.reserve(intent.id, auth(intent), { budgetMicros: 100, dailyMicros: 100, maxCalls: 1 })).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
-    expect(await makeStore().status()).toMatchObject({ development: { budgetMicros: 100, dailyMicros: 100, maxCalls: 1, calls: 0 } });
-    await expect(store.reserve(intent.id, auth(intent), { budgetMicros: 2_000_000, dailyMicros: 500_000, maxCalls: 10 })).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+  it("counts all demo and development spending against the same ceiling", async () => {
+    await settledFailure({ reserveMicros: 24999450, mode: "demo" }); now += 61000;
+    await settledFailure(); now += 61000;
+    await expect(store.estimate(input({ mode: "demo" }))).rejects.toMatchObject({ code: "AI_DEVELOPMENT_BUDGET" });
+    expect((await store.status()).development.chargedMicros).toBe(25000000);
   });
-
-  it("rejects any policy attempt to raise the hard development caps", async () => {
-    const intent = await approved();
-    await expect(store.reserve(intent.id, auth(intent), { budgetMicros: 2_000_001, dailyMicros: 500_000, maxCalls: 10 })).rejects.toMatchObject({ code: "AI_BUDGET_POLICY_INVALID" });
-    expect((await store.readIntent(intent.id)).consumedAt).toBeNull();
-  });
-
-  it("requires separate bounded demo authorization and never borrows from its reserve during development", async () => {
-    await expect(store.estimate(input({ mode: "demo" }))).rejects.toMatchObject({ code: "AI_DEMO_APPROVAL_REQUIRED" });
-    await expect(store.authorizeDemo("admin", { budgetMicros: 148_000_001, dailyMicros: 500_000, maxCalls: 1 })).rejects.toMatchObject({ code: "AI_DEMO_APPROVAL_REQUIRED" });
-    const authorization = await store.authorizeDemo("admin", { budgetMicros: 10_000_000, dailyMicros: 1_000_000, maxCalls: 3 });
-    const intent = await approved({ mode: "demo" });
-    expect(intent.demoAuthorizationId).toBe(authorization.id);
-    await expect(store.reserve(intent.id, auth(intent), { budgetMicros: 11_000_000, dailyMicros: 1_000_000, maxCalls: 3 })).rejects.toMatchObject({ code: "AI_DEMO_APPROVAL_REQUIRED" });
-    const reserved = await store.reserve(intent.id, auth(intent), authorization);
-    await store.settle(reserved.id, { status: "failed" });
-    expect(await store.status()).toMatchObject({ development: { chargedMicros: 0, calls: 0 }, demo: { chargedMicros: 550, calls: 1 } });
-  });
-
   it("validates estimates, rate snapshots and proof-of-concept reasons before any usage", async () => {
     for (const patch of [{ reserveMicros: 1 }, { inputPriceMicrosPerMillion: 1 }, { outputPriceMicrosPerMillion: 1 }, { reason: "" }, { maxOutputTokens: 1501 }, { mode: "mock" }, { model: "expensive-model" }])
       await expect(store.estimate(input(patch as Partial<AiUsageEstimateInput>))).rejects.toMatchObject({ code: "AI_ESTIMATE_INVALID" });
@@ -227,13 +199,14 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
   });
 
   it("serializes competing connections so only one approved request reserves capacity", async () => {
+    await settledFailure({ reserveMicros: 24999450 }); now += 61000;
     const first = await approved();
     const second = await approved();
     const other = makeStore();
     const outcomes = await Promise.allSettled([store.reserve(first.id, auth(first)), other.reserve(second.id, auth(second))]);
     expect(outcomes.filter(outcome => outcome.status === "fulfilled")).toHaveLength(1);
     expect(outcomes.filter(outcome => outcome.status === "rejected")).toHaveLength(1);
-    expect(await store.status()).toMatchObject({ development: { calls: 1, chargedMicros: 550 } });
+    expect(await store.status()).toMatchObject({ development: { calls: 2, chargedMicros: 25000000 } });
     expect((await other.status()).activeAttemptId).not.toBeNull();
   });
 
@@ -247,8 +220,44 @@ describe("persistent real-AI budget and exact per-call approvals", () => {
     store = makeStore();
     expect(await store.status()).toMatchObject({ development: { chargedMicros: 550, calls: 1 }, demo: { authorization: { id: authorization.id } }, recentAttempts: [{ id: reserved.id }] });
     const migrated = new DatabaseSync(path);
-    expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(2);
+    expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(3);
     migrated.close();
+  });
+
+  it("upgrades a narrowed v2 policy once without changing receipts, charges or accounting halts", async () => {
+    await settledFailure(); store.onModuleDestroy();
+    const legacy = new DatabaseSync(path);
+    const before = legacy.prepare("SELECT * FROM attempts").all();
+    legacy.exec("UPDATE policy SET budget=550,daily=550,calls=1,halted=1; PRAGMA user_version=2;");
+    legacy.close();
+    const upgraded = makeStore();
+    expect(await upgraded.status()).toMatchObject({ halted: true, development: { budgetMicros: 25000000, chargedMicros: 550, calls: 1 } });
+    const inspected = new DatabaseSync(path);
+    expect(inspected.prepare("SELECT * FROM attempts").all()).toEqual(before);
+    expect(inspected.prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+    inspected.close(); upgraded.onModuleDestroy();
+    const restarted = makeStore(), intent = await restarted.estimate(input());
+    await expect(restarted.reserve(intent.id, auth(intent))).rejects.toMatchObject({ code: "AI_USAGE_HALTED" });
+  });
+
+  it("keeps legacy testing receipt fingerprints verifiable after the shared-policy upgrade", async () => {
+    for (const [index, reserveMicros] of [131460, 6544, 6544, 8196].entries()) {
+      const intent = await store.estimate(input({ reserveMicros, maxInputTokens: 10, maxOutputTokens: 128 }));
+      const attempt = await store.reserve(intent.id, auth(intent));
+      await store.settle(attempt.id, index === 3 ? { status: "success", inputTokens: 10, outputTokens: 105, actualMicros: 460 } : { status: "failed" });
+      now += 61000;
+    }
+    store.onModuleDestroy();
+    const legacy = new DatabaseSync(path);
+    legacy.exec("DROP TABLE ai_policy_before_shared; UPDATE policy SET budget=152744,daily=152744,calls=4; PRAGMA user_version=2;");
+    activateTesting(legacy, "a".repeat(64), { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: "c".repeat(64), maximumMicros: 10000 });
+    const original = legacy.prepare("SELECT * FROM muse_testing_allocation").all();
+    legacy.close();
+    const upgraded = makeStore();
+    expect(await upgraded.status()).toMatchObject({ development: { budgetMicros: 25000000, chargedMicros: 145008 }, testing: { calls: 0 } });
+    const inspected = new DatabaseSync(path);
+    expect(inspected.prepare("SELECT * FROM muse_testing_allocation").all()).toEqual(original);
+    inspected.close();
   });
 
   it("rejects corrupt databases and never replaces them with a fresh budget", async () => {

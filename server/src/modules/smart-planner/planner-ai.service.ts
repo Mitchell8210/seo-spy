@@ -5,6 +5,8 @@ import { PLANNER_CLOCK, PlannerService } from "./planner.service.js";
 import { PlannerAiStore, type AiProposalRecord } from "./planner-ai.store.js";
 import { PlannerAiGateway, PlannerAiGenerationError, type PlannerFrontendContext } from "./planner-ai.gateway.js";
 import { PlannerMuseError } from "./planner-muse.request.js";
+import { PLANNER_COMPACT_PROMPT_VERSION } from "./planner-muse.compact.js";
+import { fitAiProposalCapacity } from "./planner-ai.capacity.js";
 import { aiSettingsSchema, makeAiSnapshot, plannerStateHash, PLANNER_AI_PROMPT_VERSION, PLANNER_AI_SCHEMA_VERSION, snapshotHash, validateAiProposal, weeklyBudget } from "./planner-ai.domain.js";
 import type { ApplyAiPlanDto, GenerateAiPlanDto, UpdateAiSettingsDto } from "./planner-ai.dto.js";
 
@@ -45,10 +47,10 @@ export class PlannerAiService {
     const current = await this.planner.read(businessId);
     if (current.revision !== body.expectedRevision) throw conflict();
     let snapshot;
-    try { snapshot = makeAiSnapshot(current, this.store.settings(businessId), body.weekStart, body.reconsiderTaskIds ?? [], this.now()); }
+    try { snapshot = makeAiSnapshot(current, this.store.settings(businessId), body.weekStart, body.reconsiderTaskIds ?? [], this.now(), body.scope); }
     catch (error) { throw new UnprocessableEntityException({ code: error instanceof Error ? error.message : "AI_SNAPSHOT_INVALID", message: "Planning needs a confirmed time zone, a valid future planning window, eligible tasks and permitted schedule selections. At most 60 tasks can be evaluated at once." }); }
     const now = this.now(), createdAt = now.toISOString();
-    const record: AiProposalRecord = { id: randomUUID(), businessId, mutationId: body.mutationId, requestHash, createdAt, expiresAt: new Date(now.getTime() + 7 * 86400000).toISOString(), promptVersion: PLANNER_AI_PROMPT_VERSION, schemaVersion: PLANNER_AI_SCHEMA_VERSION,
+    const record: AiProposalRecord = { id: randomUUID(), businessId, mutationId: body.mutationId, requestHash, createdAt, expiresAt: new Date(now.getTime() + 7 * 86400000).toISOString(), promptVersion: body.mode === "live" && frontend ? PLANNER_COMPACT_PROMPT_VERSION : PLANNER_AI_PROMPT_VERSION, schemaVersion: PLANNER_AI_SCHEMA_VERSION,
       snapshot, snapshotHash: snapshotHash(snapshot), mode: body.mode, model: null, status: "generating", output: null, diagnostics: [], appliedAt: null, applicationMutationId: null, applicationRequestHash: null, requestIdentity: null, accountingAttemptId: null };
     const reserved = this.store.reserve(record);
     if (!reserved.created) return this.view(reserved.record);
@@ -57,11 +59,19 @@ export class PlannerAiService {
       const validation = validateAiProposal(snapshot, generated.output, this.now());
       record.model = generated.model; record.requestIdentity = generated.requestIdentity; record.accountingAttemptId = generated.accountingAttemptId;
       if (validation.valid) { record.status = "ready"; record.output = validation.output; }
-      else { record.status = "invalid"; record.diagnostics = validation.diagnostics; }
+      else {
+        const revised = body.mode === "live" ? fitAiProposalCapacity(snapshot, generated.output, this.now()) : null;
+        if (revised) { record.status = "ready"; record.output = revised; }
+        else { record.status = "invalid"; record.diagnostics = validation.diagnostics; }
+      }
     } catch (error) {
       const approval = error instanceof PlannerAiGenerationError && ["AI_PLANNING_APPROVAL_REQUIRED", "AI_PLANNING_ALLOWANCE_UNAVAILABLE"].includes(error.code);
       record.status = approval ? "approval_required" : "failed";
-      record.diagnostics = [{ code: error instanceof PlannerMuseError ? error.code : "AI_GENERATION_FAILED", detail: error instanceof PlannerMuseError ? error.message : "Generation failed or its outcome is uncertain. It was not automatically retried; no planner changes were made." }];
+      record.diagnostics = [{ code: error instanceof PlannerMuseError ? error.code : "AI_GENERATION_FAILED", detail: error instanceof PlannerMuseError ? error.message : "Generation failed or its outcome is uncertain. It was not automatically retried; no planner changes were made." },
+        ...(error instanceof PlannerMuseError ? error.diagnostics.slice(0, 10) : [])];
+      if (error instanceof PlannerMuseError && error.receipt) {
+        record.model = error.receipt.model; record.requestIdentity = error.receipt.requestIdentity; record.accountingAttemptId = error.receipt.accountingAttemptId;
+      }
     }
     this.store.update(record);
     return this.view(record);

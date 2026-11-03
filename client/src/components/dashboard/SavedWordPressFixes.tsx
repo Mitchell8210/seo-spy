@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
-import { ArrowUpRight, Check, CheckCircle2, ChevronRight, Clock3 } from 'lucide-react'
+import { ArrowUpRight, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3 } from 'lucide-react'
 import { StatusBadge } from '../common/StatusBadge'
 import { wordpressFix, type FixWorkflow } from '../../services/wordpressFix'
 
@@ -30,14 +30,17 @@ export function SavedWordPressFixes({ businessId }: { businessId: string }) {
   }, [businessId])
   const current = state?.businessId === businessId ? state : null
   return <section aria-label="Recently Fixed" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-5 sm:px-6">
-      <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"><CheckCircle2 size={21} aria-hidden="true" /></span>
-        <div><h2 className="text-xl font-semibold text-ink">Recently Fixed</h2><p className="mt-1 text-sm leading-5 text-secondary">Applied changes and their saved verification results.</p></div>
+    <details className="group/recent-fixes">
+    <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-300 sm:px-6 [&::-webkit-details-marker]:hidden">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"><CheckCircle2 size={18} aria-hidden="true" /></span>
+        <h2 className="text-base font-semibold text-ink">Recently Fixed</h2>
+        {current && !current.error && <span className="text-xs text-muted">({current.items.length})</span>}
       </div>
       {current && !current.error && <StatusBadge label={`${current.items.filter(item => item.workflow.status === 'public_verified').length} fully verified`} tone="success" />}
-    </header>
-    <div className="p-5 sm:p-6">
+      <ChevronDown size={16} className="shrink-0 text-muted transition-transform group-open/recent-fixes:rotate-180" aria-hidden="true" />
+    </summary>
+    <div className="border-t border-line p-4 sm:p-6">
     {current?.error ? <div className="mt-3 space-y-3 text-sm text-secondary">
       <p role="status">{current.error}</p>
       <button type="button" onClick={() => window.dispatchEvent(new Event('wordpress-fix-updated'))} className="min-h-11 rounded-lg border border-blue-400/40 px-3 py-2 text-blue-200 hover:bg-blue-500/10">Retry saved receipts</button>
@@ -79,5 +82,6 @@ export function SavedWordPressFixes({ businessId }: { businessId: string }) {
         </li>
       })}</ul>}
     </div>
+    </details>
   </section>
 }

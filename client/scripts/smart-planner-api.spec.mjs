@@ -70,6 +70,8 @@ try {
  globalThis.fetch=async(url,options)=>{request={url,options};return new Response(JSON.stringify(response(1)),{status:200,headers:{'content-type':'application/json'}})};
  await requestPlanner('business-a',new AbortController().signal,'PATCH','/preferences',{useWeekends:true,expectedRevision:0,mutationId:'id'});
  assert.equal(request.options.method,'PATCH');assert.equal(request.url,'/api/businesses/business-a/smart-planner/preferences');
+ await requestPlanner('business-a',new AbortController().signal,'DELETE','/tasks/custom-id',{confirmed:true,expectedRevision:1,mutationId:'delete-id'});
+ assert.equal(request.options.method,'DELETE');assert.equal(request.url,'/api/businesses/business-a/smart-planner/tasks/custom-id');assert.equal(JSON.parse(request.options.body).confirmed,true);
  globalThis.fetch=async()=>{throw Error('network down')};await assert.rejects(()=>requestPlanner('business-a',new AbortController().signal,'POST','/tasks',{}),error=>error.status===0&&/not confirmed/.test(error.message));
  globalThis.fetch=async()=>new Response(JSON.stringify({error:{message:'Stale revision'}}),{status:409});await assert.rejects(()=>requestPlanner('business-a',new AbortController().signal),error=>error.status===409);
 } finally {globalThis.fetch=originalFetch}

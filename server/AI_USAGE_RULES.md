@@ -1,3 +1,15 @@
+# Current shared backend AI allowance
+
+Effective November 2, 2026: the existing protected SQLite ledger enforces a single $25 cumulative allowance across Muse, Smart Planner, diagnostics and supported AI features, including all historical charges in every mode. This policy supersedes the historical allocations and manual spending approvals below; they describe previous runs only.
+
+Schema version 3 upgrades the existing policy exactly once, preserving attempts, receipts, reservations and accounting halts. No restart, day rollover, environment change or feature activation replenishes the allowance. Every reservation checks total charged microdollars, including pending/unknown full reservations, in BEGIN IMMEDIATE before dispatch. Failed calls retain their reservation; validated successful usage reconciles conservatively. Unknown/overrun outcomes halt further calls. Provider-side billing outside this installation is outside this ledger's scope.
+
+Authenticated, explicitly initiated supported frontend actions spend automatically through generateFrontend. Existing live operator analysis calls create their accounting intent automatically when omitted. Explicit authorized developer diagnostics may call the internal MetaMuseProvider.generateDiagnostic(input, credential, scope) entry point, which authenticates the existing AI_ADMIN_KEY credential; this requires no per-call environment edits, request-hash approval or capacity amendment. It is not a public unauthenticated endpoint. Ordinary reads/startup and offline tests never initiate paid work; ordinary mock behavior remains unchanged.
+
+Authentication, provider/model/token/rate limits, private single-use payload-bound transport grants, no automatic retries, storage protections and WordPress write approvals remain in force. Spending permission grants no external write or deployment permission. Old per-feature funding APIs are historical compatibility tools, not required execution steps and cannot bypass the global $25 reservation ceiling.
+
+## Historical policy and receipts (superseded)
+
 # Meta API credit protection
 
 The [prepared one-attempt WordPress-alt earmark](WORDPRESS_ALT_FUNDING.md) adds no automatic funding. A future separately approved additive grant may explicitly reallocate at most33615micros and one existing assessment-testing slot to one administrator/operator/business/context/request/settings/rates tuple. Original history/caps remain intact; effective assessment headroom decreases and the$148 reserve is untouched. Funding activation, exact paid-intent approval and dispatch are separate. Shared daily/concurrency/unknown/receipt locks remain enforced; no expired-intent recycling or automatic release. No grant or paid authorization was activated during preparation.

@@ -39,7 +39,7 @@ const historyTables = ["policy", "demo_authorizations", "intents", "attempts", "
 const history = (db: DatabaseSync) => Object.fromEntries(historyTables.filter(table => exists(db, table)).map(table => {
   // Halt is a mutable safety latch, not a spending cap. Unknown settlement must
   // still permit its immutable receipt to be written and independently read.
-  const sql = table === "policy" ? "SELECT budget,daily,calls FROM policy" : `SELECT * FROM ${table}${table === "intents" ? " WHERE consumed_at IS NOT NULL" : ""}`;
+  const sql = table === "policy" ? (exists(db, "ai_policy_before_shared") ? "SELECT budget,daily,calls FROM ai_policy_before_shared" : "SELECT budget,daily,calls FROM policy") : `SELECT * FROM ${table}${table === "intents" ? " WHERE consumed_at IS NOT NULL" : ""}`;
   return [table, db.prepare(sql).all().map(row => digest(row)).sort()];
 }));
 

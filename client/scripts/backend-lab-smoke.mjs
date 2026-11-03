@@ -237,7 +237,7 @@ async function servePlannerAiFixture(req,res,route) {
     plannerFixtureState.revision++;plannerAiLatest.status='applied';plannerAiLatest.appliedAt=stamp();value=plannerFixtureResponse();
   }else{
     plannerAiGenerationCount++;
-    const snapshot=plannerAiDomain.makeAiSnapshot(state,plannerAiSettings,body.weekStart,body.reconsiderTaskIds??[],new Date());
+    const snapshot=plannerAiDomain.makeAiSnapshot(state,plannerAiSettings,body.weekStart,body.reconsiderTaskIds??[],new Date(),body.scope);
     const output=body.mode==='mock'?plannerAiDomain.offlineAiProposal(snapshot):null;
     if(output)assert.equal(plannerAiDomain.validateAiProposal(snapshot,output,new Date()).valid,true);
     plannerAiLatest={id:crypto.randomUUID(),businessId,mode:body.mode,model:body.mode==='mock'?'offline-simulation':null,status:body.mode==='mock'?'ready':'approval_required',createdAt:stamp(),appliedAt:null,snapshot,output,diagnostics:body.mode==='mock'?[]:[{code:'AI_PLANNING_APPROVAL_REQUIRED',detail:'Muse planning needs its own approved spending authorization. No model request was made. You can explicitly choose an offline preview.'}]};
@@ -261,6 +261,8 @@ async function servePlannerFixture(req,res,route) {
   if(route.endsWith('/preferences')){
     for(const key of ['useWeekends','dailyCapacityMinutes','maxTasksPerDay','horizonWeeks','timeZone'])if(key in body)plannerFixtureState.preferences[key]=body[key];
     if(body.useWeekends===false)for(const task of plannerFixtureState.tasks)if(task.schedule&&[0,6].includes(new Date(`${task.schedule.day}T12:00:00`).getDay()))task.schedule=null;
+  } else if(route.endsWith('/unschedule-all')){
+    for(const task of plannerFixtureState.tasks){task.schedule=null;task.scheduledBy=null;}
   } else if(route.endsWith('/auto-plan')){
     if(!plannerFixtureState.preferences.timeZone)return reply(res,400,{error:{message:'Confirm a time zone in Planning settings first.'}});
     const result=plannerAutoSchedule(plannerFixtureState.tasks,{weekStart:body.weekStart,...plannerFixtureState.preferences,now:new Date()});
@@ -271,15 +273,25 @@ async function servePlannerFixture(req,res,route) {
   } else if(req.method==='POST'&&route.endsWith('/tasks')){
     const id=crypto.randomUUID();plannerFixtureState.tasks.push({id,taskKey:`custom:${id}`,title:body.title,priority:body.priority,category:body.category,notes:body.notes??'',explanation:body.notes??'',guidance:body.notes||'Complete your described task.',source:'Custom task',mode:'custom',status:'Needs Action',schedule:body.schedule??null,destination:null,estimatedDurationMinutes:body.estimatedDurationMinutes??60,durationEstimateSource:'estimatedDurationMinutes'in body?'user':'default',scheduledBy:body.schedule?'manual':null});
   } else {
-    const task=plannerFixtureState.tasks.find(task=>route.endsWith(`/tasks/${task.id}`));
+    const task=plannerFixtureState.tasks.find(task=>route.endsWith(`/tasks/${task.id}`)||route.endsWith(`/tasks/${task.id}/undo-completion`));
     if(!task)return reply(res,404,{error:{message:'Task not found'}});
+    if(req.method==='DELETE'){
+      if(task.mode!=='custom'||body.confirmed!==true)return reply(res,400,{error:{message:'Only confirmed custom tasks can be deleted'}});
+      plannerFixtureState.tasks=plannerFixtureState.tasks.filter(item=>item.id!==task.id);
+    } else if(route.endsWith('/undo-completion')){
+      if(task.status!=='Done')return reply(res,400,{error:{message:'Task is not marked Done'}});
+      task.completionUndoHistory=[...(task.completionUndoHistory??[]),{completedAt:task.completedAt,undoneAt:stamp()}];task.status='Needs Action';task.completedAt=null;
+    } else {
     if('schedule'in body){task.schedule=body.schedule;task.scheduledBy=body.schedule?'manual':null;}if('estimatedDurationMinutes'in body){task.estimatedDurationMinutes=body.estimatedDurationMinutes;task.durationEstimateSource='user';}if(body.status){task.status=body.status;task.completedAt=stamp();}
+    }
   }
   plannerFixtureState.revision++;const result=structuredClone({...plannerFixtureResponse(),...(planning?{planning}:{})});plannerReceipts.set(body.mutationId,result);return reply(res,200,result);
 }
 
 async function serveFixture(req, res) {
   apiRequests++;
+  if(plannerMode&&req.method==='GET'&&req.url==='/api/wordpress/browser-session')return reply(res,200,{connected:true,businessId,csrf:'x'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()});
+  if(plannerMode&&req.url.startsWith(`/api/wordpress/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
   if(plannerMode&&req.url.startsWith(`/api/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
   if(plannerMode&&req.method==='GET'&&req.url==='/api/businesses/planner-other-business/smart-planner')return reply(res,200,{
     businessId:'planner-other-business',revision:0,preferences:{useWeekends:false,dailyCapacityMinutes:120,maxTasksPerDay:3,horizonWeeks:4,timeZone:null},
@@ -625,6 +637,12 @@ async function plannerScenario(base) {
   async function setField(id,value) { await evaluate(`(()=>{const node=document.getElementById(${JSON.stringify(id)});const proto=node.tagName==='SELECT'?HTMLSelectElement.prototype:node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`); }
   const dialogClosed=()=>waitFor(()=>evaluate(`!document.querySelector('dialog[open]')`),'save acknowledged and dialog closed');
   const openSchedule=async id=>{await evaluate(`(document.querySelector('[data-task-id="${id}"] button[aria-label^="Schedule or reschedule:"]')??document.querySelector('[data-calendar-task="${id}"]')).click()`);await waitFor(()=>evaluate(`Boolean(document.querySelector('dialog[open]'))`),'task details and schedule dialog');};
+  const openTaskEditor=async key=>{
+    await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    await clickText('Plan Manually');
+    await waitFor(()=>evaluate(`Boolean(document.querySelector('dialog[open] #planner-task-choice'))`),`task editor ${key}`);
+    await setField('planner-task-choice',key);
+  };
   const reload=async()=>{await evaluate('window.plannerReloadPending=true');await cdp.send('Page.reload');await waitFor(()=>evaluate(`!window.plannerReloadPending&&document.querySelector('p[role="status"]')?.textContent.startsWith('Planner loaded from the backend.')`),'planner reload');await ready();for(let attempt=0;attempt<6;attempt++){const first=await evaluate(`document.querySelector('[data-calendar-slot]').dataset.calendarSlot.split(':')[0]`);if(first===days[0])break;await evaluate(`document.querySelector('[aria-label="Next week"]').click()`);}};
   assert.equal(await evaluate(`document.querySelector('h1').textContent`),'Smart Planner');
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('#primary-navigation a')).map(node=>node.textContent)`),['Dashboard','Website','Social Media','Analysis','Smart Planner','Connections & Settings']);
@@ -671,11 +689,28 @@ async function plannerScenario(base) {
   await openSchedule('website:meta-description');await setField('planner-day',days[1]);await setField('planner-hour','15');await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
   assert.notEqual(plannerFixtureState.tasks.find(task=>task.taskKey==='website:meta-description').durationEstimateSource,'user','Rescheduling without changing duration preserves its default provenance');
   assert.equal(await evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-slot="${days[1]}:15"] [data-calendar-task]').length`),2,'Manual overlap preserved');
-  await clickText('Auto Plan (Free)');await ready();
+  async function seedScheduledFixture() {
+    const result=plannerAutoSchedule(plannerFixtureState.tasks,{weekStart:days[0],...plannerFixtureState.preferences,now:new Date()});
+    for(const task of plannerFixtureState.tasks)if(result.assignments[task.id]){task.schedule=result.assignments[task.id];task.scheduledBy='auto';}
+    await clickText('Re-scan');await ready();
+  }
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(button=>button.textContent.includes('Auto Plan (Free)'))`),false);
+  await seedScheduledFixture();
   await waitFor(()=>evaluate(`document.querySelectorAll('[data-testid="desktop-week-grid"] [data-calendar-task]').length === ${plannerExpectedTasks.length}`),'automatic planning');
   assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),0,'The left list is empty when every task is planned');
   assert.equal(await kpi('Active Tasks'),String(plannerExpectedTasks.length),'Summary still includes scheduled tasks');
-  pass('Recommendation dragging, calendar moves, manual overlap and deterministic Auto Plan save through the backend');
+  const scheduledBeforeClear=structuredClone(plannerFixtureState.tasks);
+  plannerSaveFailure=true;await clickText('Unschedule All');await ready();
+  assert.deepEqual(plannerFixtureState.tasks,scheduledBeforeClear,'Failed bulk save preserves all scheduled tasks');
+  assert.match(await pageText(),/not saved|not confirmed/);
+  plannerSaveFailure=false;await clickText('Unschedule All');await ready();
+  await waitFor(()=>evaluate(`document.querySelectorAll('[data-task-id]').length === ${plannerExpectedTasks.length}`),'all unscheduled tasks return to list');
+  assert.ok(plannerFixtureState.tasks.every(task=>task.schedule===null));
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Unschedule All').disabled`),true);
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Auto Plan (AI)').className.includes('bg-blue')`),true);
+  await screenshot('smart-planner-unschedule-all-1440.png');
+  await seedScheduledFixture();
+  pass('Recommendation dragging, calendar moves, manual overlap, primary Muse action and atomic Unschedule All with failed-save retry');
   await openSchedule('website:image-alt');
   const imageTask=plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt');
   const details=await evaluate(`document.querySelector('[aria-label="Task details"]').textContent`);
@@ -696,6 +731,26 @@ async function plannerScenario(base) {
   await reload();assert.equal(await kpi('Done'),'1');
   assert.equal(await kpi('Plan Completion (This Week)'),'0%','Current-week completion is not replaced by a future planning horizon');
   pass('Completion requires confirmation and server acknowledgement; saved reconciliation and browser reload preserve Done and its original timestamp');
+  const scheduleBeforeUndo=structuredClone(plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt').schedule);
+  await openTaskEditor('website:image-alt');
+  await screenshot('smart-planner-undo-done-1440.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:true});
+  await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).find(button=>button.textContent==='Undo Done').scrollIntoView({block:'nearest'})`);
+  await screenshot('smart-planner-undo-done-390.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
+  plannerSaveFailure=true;await clickText('Undo Done',"document.querySelector('dialog')");
+  await waitFor(()=>evaluate(`document.querySelector('dialog [role="alert"]').textContent.includes('not confirmed')`),'failed undo retains Done');
+  assert.equal(plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt').status,'Done');
+  plannerSaveFailure=false;await clickText('Undo Done',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(await kpi('Done'),'0');
+  const undoneTask=plannerFixtureState.tasks.find(task=>task.taskKey==='website:image-alt');
+  assert.equal(undoneTask.status,'Needs Action');assert.equal(undoneTask.completedAt,null);assert.deepEqual(undoneTask.schedule,scheduleBeforeUndo);
+  assert.equal(undoneTask.completionUndoHistory[0].completedAt,completedAt);
+  await reload();await openTaskEditor('website:image-alt');
+  assert.equal(await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).some(button=>button.textContent==='Undo Done')`),false);
+  await evaluate(`document.querySelector('dialog input[type="checkbox"]').click()`);await clickText('Mark as Done',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(await kpi('Done'),'1');
+  pass('Explicit Undo Done preserves the schedule and completion history, retains Done on failed saves, persists across reload and permits marking Done again');
   await clickText('Add Custom Task');await setField('planner-task-name','Review local business notes');await setField('planner-notes','Review the full appointment notes.\nKeep the follow-up instructions available from the calendar.');
   plannerSaveFailure=true;await clickText('Add Task',"document.querySelector('dialog')");await waitFor(async()=>/not confirmed/.test(await pageText()),'save failure shown');
   assert.doesNotMatch(await evaluate(`document.querySelector('p[role="status"]').textContent`),/Saving planner changes/,'A failed save must not leave stale saving feedback');
@@ -784,12 +839,11 @@ async function plannerScenario(base) {
   const rolloverTasks=Array.from({length:12},(_,index)=>({id:crypto.randomUUID(),taskKey:`custom:rollover-${index}`,title:`Future workload ${index+1}`,explanation:'Offline duration fixture',guidance:'Review the saved task.',priority:'Medium',category:'Review',source:'Custom task',mode:'custom',status:'Needs Action',schedule:null,destination:null,notes:'',estimatedDurationMinutes:60,durationEstimateSource:'user'}));
   const oversized={...rolloverTasks[0],id:crypto.randomUUID(),taskKey:'custom:oversized',title:'Task larger than daily budget',estimatedDurationMinutes:240};
   plannerFixtureState.tasks.push(...rolloverTasks,oversized);plannerFixtureState.revision++;await reload();
-  await clickText('Auto Plan (Free)');await ready();
+  await seedScheduledFixture();
   await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-task-id="custom:oversized"]'))`),'duration overflow remains visible');
   assert.ok(rolloverTasks.every(task=>plannerFixtureState.tasks.find(item=>item.id===task.id).schedule),'Feasible tasks are assigned through the horizon');
   const nextWeek=new Date(`${days[0]}T12:00:00`);nextWeek.setDate(nextWeek.getDate()+7);const nextWeekKey=`${nextWeek.getFullYear()}-${String(nextWeek.getMonth()+1).padStart(2,'0')}-${String(nextWeek.getDate()).padStart(2,'0')}`;
   assert.ok(rolloverTasks.some(task=>plannerFixtureState.tasks.find(item=>item.id===task.id).schedule.day>=nextWeekKey),'Workload carries into later weeks');
-  assert.match(await pageText(),/duration exceeds the daily budget/);
   assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),1,'Only unscheduled overflow remains on the left');
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});await setView('monthly');await screenshot('smart-planner-multiweek-1440.png');
   await openSchedule(customId);await setField('planner-day',days[0]);await setField('planner-hour','9.5');await setField('planner-duration','90');await clickText('Save Schedule',"document.querySelector('dialog')");await dialogClosed();
@@ -800,9 +854,31 @@ async function plannerScenario(base) {
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:true});await screenshot('smart-planner-duration-390.png');
   await clickText('Planning settings');await screenshot('smart-planner-settings-390.png');await evaluate(`document.querySelector('[aria-label="Close planning settings"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'settings dialog closed');
   pass('Planning settings persist confirmed time zone and workload limits; duration-aware Auto Plan rolls forward, leaves oversized work visible, and renders exact half-hour intervals');
+  const openDeleteEditor=openTaskEditor;
+  await openDeleteEditor('website:image-alt');
+  assert.equal(await evaluate(`Array.from(document.querySelector('dialog').querySelectorAll('button')).some(button=>button.textContent==='Delete custom task')`),false,'Report tasks have no delete control');
+  await evaluate(`document.querySelector('[aria-label="Close planner dialog"]').click()`);await dialogClosed();
+  const reportsBeforeDelete=structuredClone(plannerFixtureState.tasks.filter(task=>task.mode!=='custom'));
+  await openDeleteEditor(customId);await clickText('Delete custom task',"document.querySelector('dialog')");
+  await clickText('Cancel',"document.querySelector('[aria-label=\"Custom task deletion\"]')");assert.ok(plannerFixtureState.tasks.some(task=>task.taskKey===customId));
+  await clickText('Delete custom task',"document.querySelector('dialog')");
+  await screenshot('smart-planner-delete-confirm-390.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});await screenshot('smart-planner-delete-confirm-1440.png');
+  plannerSaveFailure=true;await clickText('Confirm Delete',"document.querySelector('dialog')");
+  await waitFor(()=>evaluate(`document.querySelector('dialog [role="alert"]').textContent.includes('not confirmed')`),'failed delete keeps dialog');
+  assert.ok(plannerFixtureState.tasks.some(task=>task.taskKey===customId));
+  plannerSaveFailure=false;await clickText('Confirm Delete',"document.querySelector('dialog')");await dialogClosed();
+  assert.equal(plannerFixtureState.tasks.some(task=>task.taskKey===customId),false);
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-calendar-task="${customId}"]'))`),false);
+  await openDeleteEditor(oversized.taskKey);await clickText('Delete custom task',"document.querySelector('dialog')");await clickText('Confirm Delete',"document.querySelector('dialog')");await dialogClosed();
+  await reload();assert.equal(plannerFixtureState.tasks.some(task=>[customId,oversized.taskKey].includes(task.taskKey)),false);
+  assert.deepEqual(plannerFixtureState.tasks.filter(task=>task.mode!=='custom'),reportsBeforeDelete);
+  pass('Only custom tasks offer confirmed deletion; cancellation and failed saves preserve tasks, retry removes scheduled/unscheduled tasks durably and report history remains unchanged');
   const aiTasks=Array.from({length:3},(_,index)=>({id:crypto.randomUUID(),taskKey:`custom:ai-browser-${index}`,title:['Review important indexing instructions','Improve useful service content','Review low-impact metadata'][index],explanation:'Offline saved SEO planning fixture',guidance:'Review the supplied saved finding before making any change.',priority:index===0?'Urgent':index===2?'Low':'Medium',sourceSeverity:index===0?'critical':index===2?'low':'medium',category:'Review',source:'Custom task',mode:'custom',status:'Needs Action',schedule:null,destination:null,notes:'',estimatedDurationMinutes:[90,60,30][index],durationEstimateSource:'user'}));
-  plannerFixtureState.tasks.push(...aiTasks);plannerFixtureState.revision++;await reload();
-  const openAi=async()=>{await clickText('AI Plan with Muse');await waitFor(()=>evaluate(`Boolean(document.getElementById('ai-weekly-hours'))&&!document.getElementById('ai-weekly-hours').closest('fieldset').disabled`),'AI planning settings loaded');};
+  // A distinct fixture keeps AI deferral coverage after the deletion scenario;
+  // never restore the ID of the oversized custom task that was just deleted.
+  plannerFixtureState.tasks.push({ ...oversized, id:crypto.randomUUID(), taskKey:'custom:ai-deferral-fixture', title:'Large task for offline deferral preview' },...aiTasks);plannerFixtureState.revision++;await reload();
+  const openAi=async()=>{await clickText('Auto Plan (AI)');await waitFor(()=>evaluate(`Boolean(document.getElementById('ai-weekly-hours'))&&!document.getElementById('ai-weekly-hours').closest('fieldset').disabled`),'AI planning settings loaded');};
   const aiIdle=()=>waitFor(()=>evaluate(`Boolean(document.getElementById('ai-weekly-hours'))&&!document.getElementById('ai-weekly-hours').closest('fieldset').disabled`),'AI planning idle');
   const aiButtonEnabled=text=>evaluate(`!Array.from(document.querySelector('dialog').querySelectorAll('button')).find(button=>button.textContent.trim()===${JSON.stringify(text)}).disabled`);
   const closeAi=async()=>{await evaluate(`document.querySelector('[aria-label="Close AI planning"]').click()`);await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'AI dialog closed');};
@@ -810,57 +886,86 @@ async function plannerScenario(base) {
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
   await openAi();assert.equal(plannerAiGenerationCount,beforeAiOpen,'Opening AI planning never generates a proposal');
   assert.equal(await evaluate(`document.getElementById('ai-weekly-hours').value`),'10');assert.match(await evaluate(`document.querySelector('[data-testid="ai-weekly-budget"]').textContent`),/7 hr/);
-  assert.equal(await evaluate(`document.getElementById('ai-protect-schedules').checked`),true);assert.equal(await evaluate(`document.querySelector('[aria-label="AI working day Sat"]').checked`),false);
+  assert.equal(await evaluate(`document.getElementById('ai-scope-unscheduled').checked`),true);assert.equal(await evaluate(`document.querySelector('dialog details').open`),false,'Advanced options start collapsed');await screenshot('smart-planner-ai-simple-1440.png');await evaluate(`document.querySelector('dialog details').open=true`);assert.equal(await evaluate(`document.querySelector('[aria-label="AI working day Sat"]').checked`),false);
   await setField('ai-weekly-hours','8');await setField('ai-utilization','75');await setField('ai-horizon','4');
-  assert.match(await evaluate(`document.querySelector('[data-testid="ai-weekly-budget"]').textContent`),/6 hr/);assert.equal(await aiButtonEnabled('Generate Proposal'),false,'Unsaved settings cannot be used to generate');
+  assert.match(await evaluate(`document.querySelector('[data-testid="ai-weekly-budget"]').textContent`),/6 hr/);assert.equal(await aiButtonEnabled('Generate Plan'),false,'Unsaved settings cannot be used to generate');
   await clickText('Save AI Settings',"document.querySelector('dialog')");await aiIdle();await waitFor(async()=>/AI planning settings saved/.test(await pageText()),'AI settings acknowledged');
   await screenshot('smart-planner-ai-settings-1440.png');await closeAi();await openAi();
   assert.deepEqual(await evaluate(`['ai-weekly-hours','ai-utilization','ai-horizon'].map(id=>document.getElementById(id).value)`),['8','75','4']);
   const beforeGeneration=JSON.stringify(plannerAiState());
-  await clickText('Generate Proposal',"document.querySelector('dialog')");await waitFor(async()=>/own approved spending authorization/.test(await pageText()),'Live Muse approval block');await aiIdle();
+  await clickText('Generate Plan',"document.querySelector('dialog')");await waitFor(async()=>/own approved spending authorization/.test(await pageText()),'Live Muse approval block');await aiIdle();
   assert.equal(plannerAiLatest.status,'approval_required');assert.equal(JSON.stringify(plannerAiState()),beforeGeneration,'Blocked live request never changes current planner state');
-  assert.equal(await evaluate(`Boolean(document.getElementById('ai-confirm-apply'))`),false,'Approval-required proposal cannot be applied');
+  assert.equal(await evaluate(`Boolean(Array.from(document.querySelector('dialog')?.querySelectorAll('button')??[]).find(button=>button.textContent.trim()==='Apply Plan'))`),false,'Approval-required proposal cannot be applied');
   await screenshot('smart-planner-ai-approval-required-1440.png');
-  await setField('ai-generation-mode','mock');plannerAiDelayMs=500;
-  await clickText('Generate Proposal',"document.querySelector('dialog')");await waitFor(async()=>/Building offline proposal/.test(await pageText()),'AI generation pending');
+  await evaluate(`document.querySelector('dialog details').open=true`);await setField('ai-generation-mode','mock');plannerAiDelayMs=500;
+  await clickText('Generate Plan',"document.querySelector('dialog')");await waitFor(async()=>/Building offline proposal/.test(await pageText()),'AI generation pending');
   assert.equal(JSON.stringify(plannerAiState()),beforeGeneration,'Generating a proposal preserves the existing calendar');await screenshot('smart-planner-ai-generating-1440.png');
-  await waitFor(()=>evaluate(`Boolean(document.getElementById('ai-confirm-apply'))`),'Offline proposal preview');await aiIdle();plannerAiDelayMs=0;
+  await waitFor(()=>evaluate(`Boolean(Array.from(document.querySelector('dialog')?.querySelectorAll('button')??[]).find(button=>button.textContent.trim()==='Apply Plan'))`),'Offline proposal preview');await aiIdle();plannerAiDelayMs=0;
   assert.equal(JSON.stringify(plannerAiState()),beforeGeneration,'Reviewing a proposal never changes current planner state');
   assert.equal(plannerAiLatest.status,'ready');assert.equal(plannerAiLatest.mode,'mock');
-  assert.equal(await evaluate(`document.querySelectorAll('section[aria-label="AI proposal review"] tbody tr').length`),4,'All planning weeks are shown');
-  assert.match(await pageText(),/Offline simulation.*no Muse request/);assert.match(await pageText(),/Estimated SEO impact: Critical/);assert.match(await pageText(),/Deferred:/);assert.match(await pageText(),/Protected scheduled tasks/);
-  assert.equal(await aiButtonEnabled('Apply Plan'),false,'Applying requires explicit review confirmation');
+  assert.equal(await evaluate(`document.querySelectorAll('details[aria-label="AI proposal review"] tbody tr').length`),4,'All planning weeks are shown');
+  assert.match(await pageText(),/Offline simulation.*no Muse request/);assert.match(await pageText(),/Critical estimated impact/);assert.match(await pageText(),/Deferred:/);
+  await evaluate(`Array.from(document.querySelectorAll('dialog summary')).find(node=>node.textContent==='Workload and reasoning').parentElement.open=true`);assert.match(await pageText(),/Protected scheduled tasks/);
+  await evaluate(`Array.from(document.querySelectorAll('dialog summary')).find(node=>node.textContent==='Workload and reasoning').parentElement.open=false`);
+  assert.equal(await aiButtonEnabled('Apply Plan'),true,'The explicit Apply Plan action is the review confirmation');
   for(const width of [1440,390,320]){
     await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<768});
     await evaluate(`document.querySelector('dialog').scrollTop=0`);await delay(80);
     assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,`AI review no page overflow at ${width}`);
     assert.equal(await evaluate(`(()=>{const box=document.querySelector('dialog').getBoundingClientRect();return box.left>=0&&box.right<=window.innerWidth&&box.height<=window.innerHeight})()`),true,`AI review dialog stays inside viewport at ${width}`);
     await screenshot(`smart-planner-ai-review-${width}.png`);
-    await evaluate(`document.querySelector('section[aria-label="AI proposal review"]').scrollIntoView({block:'start'})`);await screenshot(`smart-planner-ai-workload-${width}.png`);
+    await evaluate(`document.querySelector('details[aria-label="AI proposal review"]').scrollIntoView({block:'start'})`);await screenshot(`smart-planner-ai-workload-${width}.png`);
   }
-  await evaluate(`document.getElementById('ai-confirm-apply').click()`);plannerAiApplyFailure=true;
+  plannerAiApplyFailure=true;
   await clickText('Apply Plan',"document.querySelector('dialog')");await waitFor(async()=>/AI plan persistence temporarily unavailable/.test(await pageText()),'AI apply failure');await aiIdle();
   assert.equal(JSON.stringify(plannerAiState()),beforeGeneration,'Failed apply leaves existing tasks and schedules intact');assert.equal(plannerAiLatest.status,'ready');assert.doesNotMatch(await pageText(),/Plan applied and saved/);
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-testid="ai-plan-applied"]'))`),false);
+  await delay(2100);assert.equal(await evaluate(`Boolean(document.querySelector('dialog[open]'))`),true,'Failed apply does not auto-close');
   await screenshot('smart-planner-ai-apply-error-320.png');
   const protectedBefore=plannerAiLatest.snapshot.tasks.filter(task=>task.protected).map(task=>structuredClone(plannerFixtureState.tasks.find(item=>item.id===task.id)));
   plannerAiApplyFailure=false;plannerAiApplyDelayMs=500;
   await clickText('Apply Plan',"document.querySelector('dialog')");await waitFor(async()=>/Applying the reviewed plan/.test(await pageText()),'AI apply pending');
-  assert.doesNotMatch(await pageText(),/Plan applied and saved/,'No success before backend persistence acknowledgement');
-  await waitFor(async()=>/Plan applied and saved to the backend/.test(await pageText()),'AI apply acknowledged');await aiIdle();plannerAiApplyDelayMs=0;
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-testid="ai-plan-applied"]'))`),false,'No success before backend persistence acknowledgement');
+  await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-testid="ai-plan-applied"]'))`),'AI apply acknowledged with success feedback');plannerAiApplyDelayMs=0;
   assert.equal(plannerAiLatest.status,'applied');for(const task of protectedBefore)assert.deepEqual(plannerFixtureState.tasks.find(item=>item.id===task.id),task,'Protected and Done records remain unchanged');
   assert.ok(aiTasks.every(task=>plannerFixtureState.tasks.find(item=>item.id===task.id).schedule),'Feasible AI preview tasks are persisted after explicit approval');
-  await screenshot('smart-planner-ai-applied-320.png');await closeAi();await reload();await openAi();
-  assert.match(await pageText(),/Applied schedule/);assert.equal(await evaluate(`Boolean(document.getElementById('ai-confirm-apply'))`),false,'Reloaded applied proposal cannot apply twice');await closeAi();
+  await delay(450);await screenshot('smart-planner-ai-applied-320.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});await screenshot('smart-planner-ai-applied-1440.png');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.planner-apply-success-icon')).animationName`),'planner-apply-pop');
+  await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.planner-apply-success-icon')).animationName`),'none','Reduced motion keeps the confirmation without animation');
+  await cdp.send('Emulation.setEmulatedMedia',{features:[]});
+  await waitFor(()=>evaluate(`!document.querySelector('dialog')`),'applied plan closes automatically');
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:320,height:1000,deviceScaleFactor:1,mobile:true});
+  await reload();await openAi();
+  assert.equal(await evaluate(`Boolean(document.querySelector('[data-testid="ai-plan-applied"]'))`),false,'Reading a historical applied proposal does not trigger the new-apply animation');
+  await evaluate(`document.querySelector('details[aria-label="AI proposal review"]').open=true`);
+  assert.match(await pageText(),/Applied schedule/);assert.equal(await evaluate(`Boolean(Array.from(document.querySelector('dialog')?.querySelectorAll('button')??[]).find(button=>button.textContent.trim()==='Apply Plan'))`),false,'Reloaded applied proposal cannot apply twice');await closeAi();
   pass('AI settings persist, live Muse is approval-blocked, offline proposals preserve the calendar until confirmed apply, and apply retries/reloads retain protected history');
+  pass('Successful Apply Plan shows an animated saved confirmation and closes automatically; failures stay open, pending saves never show success and reduced motion is respected');
+  // Whole-schedule selection is explicit; the server selects all unfinished IDs.
+  await openAi();await evaluate(`document.getElementById('ai-scope-all').click()`);
+  await screenshot('smart-planner-ai-simple-320.png');
+  await evaluate(`document.querySelector('dialog details').open=true`);await setField('ai-generation-mode','mock');
+  const beforeReorganize=JSON.stringify(plannerAiState());
+  await clickText('Generate Plan',"document.querySelector('dialog')");await aiIdle();
+  assert.equal(plannerAiLatest.snapshot.planningScope,'all');
+  assert.deepEqual(new Set(plannerAiLatest.snapshot.candidateIds),new Set(plannerFixtureState.tasks.filter(task=>task.status!=='Done').map(task=>task.id)),'Whole schedule includes every unfinished scheduled and unscheduled task');
+  assert.ok(plannerAiLatest.snapshot.tasks.filter(task=>task.status==='Done').every(task=>task.protected),'Completed history stays protected');
+  assert.equal(JSON.stringify(plannerAiState()),beforeReorganize,'Reorganizing is still preview-only until Apply Plan');
+  await closeAi();
+  pass('Simple planning choices select either unscheduled work or every unfinished task without changing settings or completed history');
   // Stale proposals require regeneration; a delayed response from the prior business is ignored.
   const extraAi={...aiTasks[1],id:crypto.randomUUID(),taskKey:'custom:ai-stale',title:'Fresh task for stale proposal review',schedule:null};
-  plannerFixtureState.tasks.push(extraAi);plannerFixtureState.revision++;await reload();await openAi();await setField('ai-generation-mode','mock');
-  await clickText('Generate Proposal',"document.querySelector('dialog')");await waitFor(()=>evaluate(`Boolean(document.getElementById('ai-confirm-apply'))`),'Fresh AI proposal');await aiIdle();
-  plannerFixtureState.revision++;await evaluate(`document.getElementById('ai-confirm-apply').click()`);await clickText('Apply Plan',"document.querySelector('dialog')");
+  plannerFixtureState.tasks.push(extraAi);plannerFixtureState.revision++;await reload();await openAi();
+  assert.equal(await evaluate(`document.getElementById('ai-scope-all').checked`),true,'Reopening a whole-schedule proposal preserves its scope');
+  await evaluate(`document.getElementById('ai-scope-unscheduled').click()`);await setField('ai-generation-mode','mock');
+  await clickText('Generate Plan',"document.querySelector('dialog')");await waitFor(()=>evaluate(`Boolean(Array.from(document.querySelector('dialog')?.querySelectorAll('button')??[]).find(button=>button.textContent.trim()==='Apply Plan'))`),'Fresh AI proposal');await aiIdle();
+  plannerFixtureState.revision++;await clickText('Apply Plan',"document.querySelector('dialog')");
   await waitFor(async()=>/stale because the planner/.test(await pageText()),'Stale proposal feedback');await aiIdle();
   assert.equal(await aiButtonEnabled('Apply Plan'),false,'Stale proposal cannot overwrite newer planner changes');assert.equal(extraAi.schedule,null);
   await screenshot('smart-planner-ai-stale-320.png');await closeAi();
-  plannerAiDelayMs=700;await clickText('AI Plan with Muse');await waitFor(async()=>/Loading AI planning/.test(await pageText()),'AI loading pending');
+  plannerAiDelayMs=700;await clickText('Auto Plan (AI)');await waitFor(async()=>/Loading AI planning/.test(await pageText()),'AI loading pending');
   await evaluate(`history.pushState({},'', '/recommendations?businessId=planner-other-business');window.dispatchEvent(new PopStateEvent('popstate'));`);
   await waitFor(()=>evaluate(`Boolean(document.querySelector('[data-task-id="custom:other-business"]'))`),'AI business switch');await delay(850);plannerAiDelayMs=0;
   assert.equal(await evaluate(`Boolean(document.querySelector('dialog'))`),false,'AI dialog is cleared on business switching');assert.equal(await evaluate(`document.querySelectorAll('[data-task-id]').length`),1,'Delayed AI responses cannot replace another business');

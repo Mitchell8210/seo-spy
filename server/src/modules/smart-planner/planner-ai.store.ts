@@ -3,6 +3,7 @@ import { AppDatabase, AppDatabaseError } from "../../persistence/sqlite/app-data
 import { z } from "zod";
 import { canonical, checksum } from "./planner.types.js";
 import { aiOutputSchema, aiSettingsSchema, aiSnapshotSchema, defaultAiSettings, snapshotHash, PLANNER_AI_PROMPT_VERSION, PLANNER_AI_SCHEMA_VERSION, type AiDiagnostic, type AiPlanOutput, type AiPlannerSettings, type AiSnapshot } from "./planner-ai.domain.js";
+import { PLANNER_COMPACT_PROMPT_VERSION, PLANNER_PREVIOUS_COMPACT_PROMPT_VERSION } from "./planner-muse.compact.js";
 
 export interface AiProposalRecord {
   id: string; businessId: string; mutationId: string; requestHash: string; createdAt: string; expiresAt: string;
@@ -15,7 +16,7 @@ export interface AiProposalRecord {
 const invalid = () => new AppDatabaseError("DATABASE_RECORD_INVALID", "The saved AI planning record could not be accessed safely.");
 const recordSchema = z.object({
   id: z.string().uuid(), businessId: z.string().min(1).max(160), mutationId: z.string().uuid(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
-  promptVersion: z.literal(PLANNER_AI_PROMPT_VERSION), schemaVersion: z.literal(PLANNER_AI_SCHEMA_VERSION), mode: z.enum(["mock", "live"]), model: z.string().max(100).nullable(),
+  promptVersion: z.enum([PLANNER_AI_PROMPT_VERSION, PLANNER_PREVIOUS_COMPACT_PROMPT_VERSION, PLANNER_COMPACT_PROMPT_VERSION]), schemaVersion: z.literal(PLANNER_AI_SCHEMA_VERSION), mode: z.enum(["mock", "live"]), model: z.string().max(100).nullable(),
   status: z.enum(["generating", "ready", "invalid", "failed", "approval_required", "applied"]), snapshot: aiSnapshotSchema, snapshotHash: z.string().regex(/^[a-f0-9]{64}$/), output: aiOutputSchema.nullable(),
   diagnostics: z.array(z.object({ code: z.string().max(100), detail: z.string().max(2000), taskId: z.string().uuid().optional() }).strict()).max(50),
   appliedAt: z.string().datetime().nullable(), applicationMutationId: z.string().uuid().nullable(), applicationRequestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),

@@ -1,13 +1,14 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { BUSINESS_REPOSITORY, SMART_PLANNER_REPOSITORY, type BusinessRepository, type PlannerRepository } from "../../persistence/repositories.js";
-import type { AutoPlanDto, CreatePlannerTaskDto, PlannerResponseDto, ReconcilePlannerDto, UpdatePlannerPreferencesDto, UpdatePlannerTaskDto } from "./planner.dto.js";
+import type { AutoPlanDto, CreatePlannerTaskDto, DeletePlannerTaskDto, PlannerMutationDto, PlannerResponseDto, ReconcilePlannerDto, UpdatePlannerPreferencesDto, UpdatePlannerTaskDto } from "./planner.dto.js";
+import { clearPlannerSchedules } from "./planner-unschedule.js";
 import { schedulePlannerV2 } from "./planner-scheduler-v2.js";
 import { PlannerSourcesService, type PlannerSourceProjection } from "./planner-sources.js";
 import { canonical, checksum, scheduleSchema, sourceTaskId, validDay, validPlannerTimeZone, weekend, type PlannerMutation, type PlannerSchedule, type PlannerState } from "./planner.types.js";
 
 const bad = (message: string) => new BadRequestException({ code: "PLANNER_INPUT_INVALID", message });
-const visible = (state: PlannerState) => state.tasks.filter(task => task.mode === "custom" || task.status === "Done" || task.sourcePresent);
+const visible = (state: PlannerState) => state.tasks.filter(task => task.mode === "custom" || task.status === "Done" || task.sourcePresent || task.completionUndoHistory?.length);
 export const PLANNER_CLOCK = Symbol("PLANNER_CLOCK");
 
 @Injectable()
@@ -108,6 +109,26 @@ export class PlannerService {
       task.updatedAt = new Date().toISOString();
     });
   }
+  undoCompletion(businessId: string, id: string, body: PlannerMutationDto): Promise<PlannerResponseDto> {
+    return this.write(businessId, `undo-completion:${id}`, body, state => {
+      const task = state.tasks.find(item => item.id === id);
+      if (!task) throw new NotFoundException({ code: "PLANNER_TASK_NOT_FOUND", message: "Planner task not found for this business." });
+      if (task.status !== "Done" || !task.completedAt) throw bad("This task is not marked Done. Reload the planner before trying again.");
+      if ((task.completionUndoHistory?.length ?? 0) >= 500) throw bad("This task's completion history has reached its storage limit. No status change was saved.");
+      const now = new Date().toISOString();
+      task.completionUndoHistory = [...(task.completionUndoHistory ?? []), { completedAt: task.completedAt, undoneAt: now }];
+      task.status = "Needs Action"; task.completedAt = null; task.updatedAt = now;
+    });
+  }
+  deleteCustom(businessId: string, id: string, body: DeletePlannerTaskDto): Promise<PlannerResponseDto> {
+    if (body.confirmed !== true) throw bad("Confirm custom task deletion.");
+    return this.write(businessId, `delete-custom:${id}`, body, state => {
+      const task = state.tasks.find(item => item.id === id);
+      if (!task) throw new NotFoundException({ code: "PLANNER_TASK_NOT_FOUND", message: "Planner task not found for this business." });
+      if (task.mode !== "custom" || task.origin !== null) throw new BadRequestException({ code: "PLANNER_TASK_PROTECTED", message: "Only user-created custom tasks can be deleted. Report tasks are protected." });
+      state.tasks = state.tasks.filter(item => item.id !== id);
+    });
+  }
   preferences(businessId: string, body: UpdatePlannerPreferencesDto): Promise<PlannerResponseDto> {
     const keys = ["useWeekends", "dailyCapacityMinutes", "maxTasksPerDay", "horizonWeeks", "timeZone"] as const;
     if (keys.every(key => body[key] === undefined)) throw bad("Supply at least one planning preference.");
@@ -122,6 +143,9 @@ export class PlannerService {
         task.schedule = null; task.scheduledBy = null; task.updatedAt = new Date().toISOString();
       }
     });
+  }
+  unscheduleAll(businessId: string, body: PlannerMutationDto): Promise<PlannerResponseDto> {
+    return this.write(businessId, "unschedule-all", body, state => { clearPlannerSchedules(state); });
   }
   autoPlan(businessId: string, body: AutoPlanDto): Promise<PlannerResponseDto> {
     if (!validDay(body.weekStart) || new Date(`${body.weekStart}T12:00:00Z`).getUTCDay() !== 1) throw bad("Auto Plan requires a valid Monday calendar date.");

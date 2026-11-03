@@ -1,3 +1,4 @@
+import { withHistoricalAiPolicy, historicalTestingLimits } from "./fixtures/historical-ai-policy.js";
 import { jest } from "@jest/globals";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
@@ -149,7 +150,6 @@ describe("isolated single assessment POC operator (offline transport only)", () 
       await ledger.approve(intent.id,"offline-history");const attempt=await ledger.reserve(intent.id,{actor:intent.actor,requestHash:intent.requestHash,mode:"poc"});
       await ledger.settle(attempt.id,index===3?{status:"success",inputTokens:10,outputTokens:105,actualMicros:460}:{status:"failed",errorCode:"AI_PROVIDER_FAILED"});now+=61000;
     }
-    await expect(ledger.estimate({actor:"offline-history",scope:"unused",requestHash:hash("unused"),cacheKey:hash("unused"),mode:"poc",model:"muse-spark-1.3",maxInputTokens:4800,maxOutputTokens:128,reserveMicros:6544,priceVersion:"offline-test",reason:"Reduce permanent development limits"},{budgetMicros:152744,dailyMicros:152744,maxCalls:4})).rejects.toBeDefined();
     return new AssessmentTestingOperator(config,service,store,ledger,{post:send} as unknown as MetaMuseTransport,()=>ledger.status());
   };
   it.each(["success","schema","ids","incomplete","http","network","persistence"])("runs controlled testing %s through the real v3 pipeline with offline transport",async kind=>{
@@ -158,7 +158,7 @@ describe("isolated single assessment POC operator (offline transport only)", () 
     expect(preview.request).toMatchObject({reasoning:{effort:"minimal"},max_output_tokens:1500,tools:[],tool_choice:"auto",text:{format:{strict:true}}});
     expect(send).not.toHaveBeenCalled();expect(await ledger.status()).toEqual(before);
     await expect(testing.approveTesting(targetBusiness,targetAssessment,admin,{...confirmed,authorizeOneRequest:true,reason:"Offline single report test"})).rejects.toBeDefined();
-    await testing.activate(targetBusiness,targetAssessment,admin,{...confirmed,policyHash:MUSE_TESTING_POLICY_HASH});
+    await withHistoricalAiPolicy(join(directory,"usage.sqlite"),historicalTestingLimits,()=>testing.activate(targetBusiness,targetAssessment,admin,{...confirmed,policyHash:MUSE_TESTING_POLICY_HASH}));
     const approval=await testing.approveTesting(targetBusiness,targetAssessment,admin,{...confirmed,authorizeOneRequest:true,reason:"Offline single report test"});
     const original=send.getMockImplementation()!;
     send.mockImplementation(async(...args)=>{
@@ -175,7 +175,7 @@ describe("isolated single assessment POC operator (offline transport only)", () 
     const result=await testing.executeTesting(targetBusiness,targetAssessment,admin,approval.intentId,{...confirmed,poc:true});
     expect("receipt" in result).toBe(true);if(!("receipt" in result)||!result.receipt)throw new Error("Missing attempt receipt");
     expect(result.receipt).toMatchObject({assessmentId:targetAssessment,inputHash:preview.inputHash,requestHash:preview.requestHash,model:"muse-spark-1.3",reasoning:"minimal",cacheHit:false,persisted:kind==="success"});
-    expect(send).toHaveBeenCalledTimes(1);expect((await ledger.status()).development).toEqual(before.development);expect((await ledger.status()).demo).toEqual(before.demo);
+    expect(send).toHaveBeenCalledTimes(1);expect((await ledger.status()).development.calls).toBe(before.development.calls + 1);expect((await ledger.status()).demo).toEqual(before.demo);
     expect((await ledger.status()).recentAttempts.slice(1)).toEqual(before.recentAttempts);
     expect(await ledger.testingReceipts()).toEqual([result.receipt]);
     if(kind==="success"){
@@ -198,7 +198,7 @@ describe("isolated single assessment POC operator (offline transport only)", () 
     expect(preview.currentEffectivePocBudgetMicros).toBe(0); expect(preview.remainingEffectivePocBudgetMicros).toBe(0);
     expect(preview.gates.allLiveGatesSatisfied).toBe(false); expect(preview.gates.evidenceValidated).toBe(true);
     expect(preview.request).toMatchObject({ model: "muse-spark-1.3", reasoning: { effort: "low" }, max_output_tokens: 1500, tools: [], tool_choice: "auto", stream: false, background: false, store: false, truncation: "disabled" });
-    expect(preview.ledger.development).toMatchObject({ calls: 0, chargedMicros: 0, budgetMicros: 2000000 });
+    expect(preview.ledger.development).toMatchObject({ calls: 0, chargedMicros: 0, budgetMicros: 25000000 });
     expect(await readFile(path)).toEqual(before); expect(hash(bundle)).toBe(beforeInput); expect(send).not.toHaveBeenCalled();
     expect((await readAiUsageSnapshot(config)).recentAttempts).toEqual([]);
   });
@@ -240,15 +240,17 @@ describe("isolated single assessment POC operator (offline transport only)", () 
     await expect(operator.execute(targetBusiness, targetAssessment, credential, approved.intentId, { ...confirmed, poc: kind !== "no-poc" })).rejects.toBeDefined();
     expect(send).not.toHaveBeenCalled();
   });
-  it("cannot raise an already ratcheted zero policy or change the model configuration", async () => {
+  it("ignores retired per-request budget reductions while retaining model restrictions", async () => {
     const { confirmed, approved } = await approve();
     const intent = await ledger.readIntent(approved.intentId);
-    await expect(ledger.reserve(approved.intentId, { actor: intent.actor, requestHash: intent.requestHash, mode: "poc" }, { budgetMicros: 0, dailyMicros: 0, maxCalls: 0 })).rejects.toBeDefined();
+    const reserved = await ledger.reserve(approved.intentId, { actor: intent.actor, requestHash: intent.requestHash, mode: "poc" }, { budgetMicros: 0, dailyMicros: 0, maxCalls: 0 });
+    expect(reserved.intentId).toBe(intent.id);
     await expect(operator.execute(targetBusiness, targetAssessment, admin, approved.intentId, { ...confirmed, poc: true })).rejects.toBeDefined();
-    expect(send).not.toHaveBeenCalled(); expect((await ledger.status()).development.budgetMicros).toBe(0);
+    expect(send).not.toHaveBeenCalled(); expect((await ledger.status()).development.budgetMicros).toBe(25000000);
     const changed = new ConfigService({ AI_MODEL: "muse-spark-1.2" });
     await expect(new AssessmentPocOperator(changed, service, store, ledger, { post: send } as unknown as MetaMuseTransport).preview(targetBusiness, targetAssessment)).rejects.toBeDefined();
   });
+
   it("rejects another authenticated administrator and an approval for another scope", async () => {
     const { approved, confirmed } = await approve(), intent = await ledger.readIntent(approved.intentId);
     const otherAdmin = "another-offline-administrator-".repeat(3);

@@ -40,7 +40,7 @@ export const testingReceiptSchema = z.object({ assessmentId: z.string().uuid(), 
 export type TestingReceipt = z.infer<typeof testingReceiptSchema>;
 export const testingFail = (code = "AI_TESTING_UNAVAILABLE") => { throw new AiUsageError(code, "Controlled testing authorization or accounting did not validate; no additional request is permitted."); };
 export const testingExists = (db: DatabaseSync) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='muse_testing_allocation'").get();
-const historical = (db: DatabaseSync, ids: string[]) => ({ policy: db.prepare("SELECT budget,daily,calls FROM policy WHERE id=1").get(),
+const historical = (db: DatabaseSync, ids: string[]) => ({ policy: db.prepare(db.prepare("SELECT name FROM sqlite_master WHERE name='ai_policy_before_shared'").get() ? "SELECT budget,daily,calls FROM ai_policy_before_shared" : "SELECT budget,daily,calls FROM policy WHERE id=1").get(),
   attempts: ids.map(id => db.prepare("SELECT * FROM attempts WHERE id=?").get(id)), intents: ids.map(id => db.prepare("SELECT * FROM intents WHERE id=(SELECT intent_id FROM attempts WHERE id=?)").get(id)),
   amendments: ["hello_diagnostic_amendment", "corrected_hello_amendment", "minimal_hello_amendment"].map(name => db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name) ? db.prepare(`SELECT * FROM ${name} ORDER BY id`).all() : null) });
 export function testingAllocation(db: DatabaseSync) {

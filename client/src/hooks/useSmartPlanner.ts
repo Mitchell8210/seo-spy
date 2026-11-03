@@ -19,6 +19,11 @@ export function useSmartPlanner() {
   function complete(task: PlannerTask) {
     return updateTask(task.id, { status: 'Done', completionConfirmed: true }, 'Task marked Done and saved to the backend. No external change or verification was performed.')
   }
+  function undoDone(task: PlannerTask) {
+    const id = session.serverId(task.id)
+    if (!id || task.status !== 'Done') return Promise.resolve(false)
+    return session.mutate('POST', `/tasks/${encodeURIComponent(id)}/undo-completion`, {}, 'Completion undone and saved.')
+  }
   function schedule(id: string, value: TaskSchedule | null, estimatedDurationMinutes?: number) {
     return updateTask(id, { schedule: value, ...(estimatedDurationMinutes !== undefined ? { estimatedDurationMinutes } : {}) }, value ? 'Task schedule saved to the backend.' : estimatedDurationMinutes !== undefined ? 'Task estimate saved to the backend; it remains unscheduled.' : 'Task removed from the calendar and saved; it remains in your task list.')
   }
@@ -31,8 +36,16 @@ export function useSmartPlanner() {
   function autoPlan(monday: Date) {
     return session.mutate('POST', '/auto-plan', { weekStart: dateKey(monday) }, 'Automatic schedule saved using the existing priority and workload rules. Existing schedules were kept. No AI service was called.')
   }
+  function unscheduleAll() {
+    return session.mutate('POST', '/unschedule-all', {}, 'All tasks unscheduled and saved. Completed tasks remain Done.')
+  }
+  function deleteCustom(task: PlannerTask) {
+    const id = session.serverId(task.id)
+    if (task.mode !== 'custom' || !id) return Promise.resolve(false)
+    return session.mutate('DELETE', `/tasks/${encodeURIComponent(id)}`, { confirmed: true }, 'Custom task deleted and saved.')
+  }
   function savePreferences(preferences: Omit<PlannerPreferences, 'useWeekends'>) {
     return session.mutate('PATCH', '/preferences', preferences, 'Planning settings saved. Existing schedules were kept.')
   }
-  return { ...view, businessId, loading: view.loading || view.saving, complete, schedule, addCustom, toggleWeekends, autoPlan, savePreferences, rescan: () => session.refresh(), reload: () => session.reload(), serverId: (key: string) => session.serverId(key) }
+  return { ...view, businessId, loading: view.loading || view.saving, complete, undoDone, schedule, addCustom, deleteCustom, toggleWeekends, autoPlan, unscheduleAll, savePreferences, rescan: () => session.refresh(), reload: () => session.reload(), serverId: (key: string) => session.serverId(key) }
 }

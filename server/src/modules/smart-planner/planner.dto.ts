@@ -9,6 +9,10 @@ export class PlannerMutationDto {
   @ApiProperty({ format: "uuid", description: "Unique submission ID; retain it for an identical retry" })
   @IsUUID() mutationId!: string;
 }
+export class DeletePlannerTaskDto extends PlannerMutationDto {
+  @ApiProperty({ enum: [true], description: "Confirm deletion of this user-created custom task" })
+  @Equals(true) confirmed!: boolean;
+}
 export class PlannerScheduleDto {
   @ApiProperty({ example: "2026-11-02", description: "Local calendar date, YYYY-MM-DD" })
   @IsString() @MinLength(10) @MaxLength(10) day!: string;

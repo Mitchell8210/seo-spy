@@ -6,6 +6,8 @@ import { defaultAiSettings, makeAiSnapshot, offlineAiProposal, plannerMuseInput,
 import { PlannerAiGateway, PlannerAiGenerationError, type PlannerAiAuthorization, type PlannerMuseExecutor } from "../src/modules/smart-planner/planner-ai.gateway.js";
 import { plannerMuseConfig, PlannerMuseError, preparePlannerMuse, type PlannerMuseRequest } from "../src/modules/smart-planner/planner-muse.request.js";
 import type { PlannerResponseDto } from "../src/modules/smart-planner/planner.dto.js";
+import { compactPlannerFixture } from "./fixtures/planner-compact-response.js";
+import { compactPlannerMuseInput, expandCompactPlan } from "../src/modules/smart-planner/planner-muse.compact.js";
 
 const businessId = "business-a", taskId = "11111111-1111-4111-8111-111111111111", generationId = "22222222-2222-4222-8222-222222222222";
 const fixedTime = Date.parse("2026-11-02T08:00:00.000Z");
@@ -58,14 +60,14 @@ describe("feature-local planner Muse gateway with trusted executor fixtures only
   });
 
   it("uses authenticated frontend scope and the common strict provider instead of dedicated developer approvals", async () => {
-    const source = snapshot(), output = offlineAiProposal(source);
+    const source = snapshot(), compact = compactPlannerFixture(source), output = expandCompactPlan(source, compact);
     const prepare = jest.fn(() => ({ model: "muse-spark-1.3", requestHash: "d".repeat(64) }));
-    const generateFrontend = jest.fn(async () => ({ model: "muse-spark-1.3", output, attemptId: "central-fixture-attempt" }));
+    const generateFrontend = jest.fn(async () => ({ model: "muse-spark-1.3", output: compact, attemptId: "central-fixture-attempt" }));
     const provider = { prepare, generateFrontend } as unknown as MetaMuseProvider;
     const context = { actor: "a".repeat(64), businessId, siteUrl: "https://example.com/" };
     const gateway = new PlannerAiGateway(new ConfigService({ MOCK_AI: true, AI_ENABLED: false }), undefined, undefined, provider);
     expect(await gateway.generate(source, "live", generationId, context)).toEqual({ output, model: "muse-spark-1.3", requestIdentity: "d".repeat(64), accountingAttemptId: "central-fixture-attempt" });
-    expect(generateFrontend).toHaveBeenCalledWith({ ...plannerMuseInput(source), reasoningEffort: "minimal" }, { ...context, task: "planner", resourceKey: generationId });
+    expect(generateFrontend).toHaveBeenCalledWith(compactPlannerMuseInput(source), { ...context, task: "planner", resourceKey: generationId });
     await expect(gateway.generate(source, "live", generationId, { ...context, businessId: "other" })).rejects.toMatchObject({ code: "AI_PLANNING_APPROVAL_REQUIRED" });
     expect(generateFrontend).toHaveBeenCalledTimes(1);
     await gateway.generate(source, "mock", generationId, context);
@@ -76,7 +78,20 @@ describe("feature-local planner Muse gateway with trusted executor fixtures only
     const generateFrontend = jest.fn(async () => { throw Object.assign(new Error("private ledger detail"), { code: "AI_FRONTEND_COST_LIMIT" }); });
     const provider = { prepare: () => ({ model: "muse-spark-1.3", requestHash: "d".repeat(64) }), generateFrontend } as unknown as MetaMuseProvider;
     await expect(new PlannerAiGateway(config, undefined, undefined, provider).generate(snapshot(), "live", generationId, { actor: "a".repeat(64), businessId, siteUrl: "https://example.com/" }))
-      .rejects.toMatchObject({ code: "AI_FRONTEND_COST_LIMIT", message: "This planning request exceeds the current AI allowance. Increase the allowance before generating; no calendar changes were made." });
+      .rejects.toMatchObject({ code: "AI_FRONTEND_COST_LIMIT", message: "This plan exceeds the current per-request size or cost limit. The shared $25 budget does not raise provider limits. No calendar changes were made." });
+    expect(generateFrontend).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["AI_DEVELOPMENT_BUDGET", "remaining shared $25"],
+    ["AI_RATE_LIMIT", "rate-limited"],
+    ["AI_INPUT_TOO_LARGE", "does not raise provider limits"],
+    ["AI_TRUNCATED", "response limit"],
+  ])("reports shared-policy %s accurately without suggesting new feature funding", async (code, message) => {
+    const generateFrontend = jest.fn(async () => { throw Object.assign(new Error("private financial detail"), { code }); });
+    const provider = { prepare: () => ({ model: "muse-spark-1.3", requestHash: "d".repeat(64) }), generateFrontend } as unknown as MetaMuseProvider;
+    await expect(new PlannerAiGateway(config, undefined, undefined, provider).generate(snapshot(), "live", generationId, { actor: "a".repeat(64), businessId, siteUrl: "https://example.com/" }))
+      .rejects.toMatchObject({ code, message: expect.stringContaining(message) });
     expect(generateFrontend).toHaveBeenCalledTimes(1);
   });
 

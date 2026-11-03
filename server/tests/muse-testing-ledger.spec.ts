@@ -1,3 +1,4 @@
+import { withHistoricalAiPolicy, historicalTestingLimits } from "./fixtures/historical-ai-policy.js";
 import { jest } from "@jest/globals";
 import { ConfigService } from "@nestjs/config";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -17,7 +18,7 @@ const metadata = { assessmentId, businessId, inputHash: hash("input"), sourceMan
 const input = (requestHash = firstHash, reserveMicros = 10000): AiUsageEstimateInput => ({ actor, requestHash, cacheKey: requestHash, scope: `assessment:${businessId}:${assessmentId}`, mode: "poc",
   model: "muse-spark-1.3", maxInputTokens: 100, maxOutputTokens: 1500, reserveMicros, priceVersion: "offline-standard-price", reason: JSON.stringify({ purpose: "controlled-testing-v1", inputHash: metadata.inputHash }) });
 
-describe("controlled Muse testing allocation in disposable SQLite only", () => {
+describe("historical controlled Muse allocation compatibility in disposable SQLite only", () => {
   let directory: string, ledger: AiUsageStore;
   const tick = () => jest.setSystemTime(Date.now() + 61000);
   beforeEach(async () => {
@@ -32,15 +33,14 @@ describe("controlled Muse testing allocation in disposable SQLite only", () => {
         : { status: "failed", errorCode: "AI_PROVIDER_FAILED", requestId: `historical-failure-${index}` });
       tick();
     }
-    await expect(ledger.estimate({ ...input(hash("narrow-only"), 1000), maxInputTokens: 1, maxOutputTokens: 16 }, { budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4 })).rejects.toMatchObject({ code: "AI_REQUEST_LIMIT" });
-    expect((await ledger.status()).development).toMatchObject({ budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4, chargedMicros: 145008, calls: 4 });
+    expect((await ledger.status()).development).toMatchObject({ budgetMicros: 25000000, chargedMicros: 145008, calls: 4 });
   });
   afterEach(async () => {
     ledger.onModuleDestroy(); jest.useRealTimers();
     expect(resolve(directory).startsWith(resolve(tmpdir()) + sep)).toBe(true);
     await rm(directory, { recursive: true });
   });
-  const activate = (maximumMicros = 10000) => ledger.activateTestingAllocation(actor, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: firstHash, maximumMicros });
+  const activate = (maximumMicros = 10000) => withHistoricalAiPolicy(join(directory, "usage.sqlite"), historicalTestingLimits, () => ledger.activateTestingAllocation(actor, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: firstHash, maximumMicros }));
   const estimate = (requestHash = firstHash, reserveMicros = 10000) => ledger.estimateTesting(input(requestHash, reserveMicros), metadata);
   const settleAndReceipt = async (intentId: string, status: "success" | "failed" | "unknown" = "success") => {
     const intent = await ledger.readIntent(intentId), attempt = await ledger.testingAttempt(intentId);
@@ -68,18 +68,19 @@ describe("controlled Muse testing allocation in disposable SQLite only", () => {
   it.each(["actor", "confirmation", "policy", "hash", "cost", "baseline"])("rejects allocation mismatch %s without activating or changing historical accounting", async kind => {
     if (kind === "baseline") {
       ledger.onModuleDestroy(); const db = new DatabaseSync(join(directory, "usage.sqlite"));
-      try { db.prepare("UPDATE policy SET budget=152743 WHERE id=1").run(); } finally { db.close(); }
+      try { db.prepare("UPDATE attempts SET charged_micros=charged_micros-1 WHERE rowid=1").run(); } finally { db.close(); }
     }
     const before = await ledger.status();
-    await expect(ledger.activateTestingAllocation(kind === "actor" ? "bad-actor" : actor, { confirmed: kind !== "confirmation", policyHash: kind === "policy" ? hash("wrong-policy") : MUSE_TESTING_POLICY_HASH,
-      requestHash: kind === "hash" ? "invalid" : firstHash, maximumMicros: kind === "cost" ? 500001 : 10000 })).rejects.toBeDefined();
+    await expect(withHistoricalAiPolicy(join(directory, "usage.sqlite"), historicalTestingLimits, () => ledger.activateTestingAllocation(kind === "actor" ? "bad-actor" : actor, { confirmed: kind !== "confirmation", policyHash: kind === "policy" ? hash("wrong-policy") : MUSE_TESTING_POLICY_HASH,
+      requestHash: kind === "hash" ? "invalid" : firstHash, maximumMicros: kind === "cost" ? 500001 : 10000 }))).rejects.toBeDefined();
     expect(await ledger.status()).toEqual(before);
   });
   it("keeps the original cap, attempts, receipts and demo allocation unchanged while accounting testing separately", async () => {
     const before = await ledger.status(), oldIntents = await Promise.all(before.recentAttempts.map(row => ledger.readIntent(row.intentId)));
     const allocation = await activate(); expect(allocation.fundedMicros).toBe(1854992);
     await complete(firstHash);
-    const after = await ledger.status(); expect(after.development).toEqual(before.development); expect(after.demo).toEqual(before.demo);
+    const after = await ledger.status(); expect(after.development.calls).toBe(before.development.calls + 1);
+    expect(after.development.budgetMicros).toBe(25000000); expect(after.demo).toEqual(before.demo);
     expect(after.recentAttempts.slice(1)).toEqual(before.recentAttempts);
     expect(await Promise.all(before.recentAttempts.map(row => ledger.readIntent(row.intentId)))).toEqual(oldIntents);
     expect(after.testing).toMatchObject({ calls: 1, chargedMicros: 0, dailyReservedMicros: 10000, incompleteReceipts: 0 });
@@ -97,7 +98,7 @@ describe("controlled Muse testing allocation in disposable SQLite only", () => {
     await activate(10000);
     await expect(estimate(firstHash, 10001)).rejects.toBeDefined();
   });
-  it("requires separate approval, reserves once under parallel calls, and blocks replay", async () => {
+  it("validates legacy intent approval, reserves once under parallel calls, and blocks replay", async () => {
     await activate(); const intent = await estimate(); const authorization = { actor, requestHash: firstHash, mode: "poc" as const };
     await expect(ledger.reserve(intent.id, authorization)).rejects.toMatchObject({ code: "AI_APPROVAL_REQUIRED" });
     await ledger.approve(intent.id, actor);

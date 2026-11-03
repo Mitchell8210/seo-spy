@@ -1,3 +1,4 @@
+import { withHistoricalAiPolicy, historicalTestingLimits } from "./fixtures/historical-ai-policy.js";
 import { jest } from "@jest/globals";
 import { ConfigService } from "@nestjs/config";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
@@ -26,7 +27,7 @@ const fundingRequest = (): WordPressAltFundingRequest => ({ actor: operator, bus
 const altInput = (): AiUsageEstimateInput => ({ actor: operator, scope: `wordpress-alt:${businessId}:${contextId}`, requestHash: altHash, cacheKey: altHash,
   mode: "poc", model: "muse-spark-1.3", maxInputTokens: 100, maxOutputTokens: 1500, reserveMicros: 33615, priceVersion: "offline-price", reason: "One explicit exact WordPress alt fixture" });
 
-describe("one exact WordPress alt funding reallocation in disposable central ledgers", () => {
+describe("historical WordPress funding compatibility and current shared spending", () => {
   let directory: string, path: string, ledger: AiUsageStore;
   const tick = () => jest.setSystemTime(Date.now() + 61000);
   beforeEach(async () => {
@@ -39,8 +40,7 @@ describe("one exact WordPress alt funding reallocation in disposable central led
       const reserved = await ledger.reserve(intent.id, { actor: admin, requestHash: input.requestHash, mode: "poc" });
       await ledger.settle(reserved.id, index === 3 ? { status: "success", inputTokens: 10, outputTokens: 105, actualMicros: 460 } : { status: "failed", errorCode: "AI_FIXTURE_FAILURE" }); tick();
     }
-    await expect(ledger.estimate({ ...assessmentInput(hash("narrow"), 1000), maxInputTokens: 1, maxOutputTokens: 16 }, { budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4 })).rejects.toBeDefined();
-    await ledger.activateTestingAllocation(admin, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: firstHash, maximumMicros: 10000 });
+    await withHistoricalAiPolicy(path, historicalTestingLimits, () => ledger.activateTestingAllocation(admin, { confirmed: true, policyHash: MUSE_TESTING_POLICY_HASH, requestHash: firstHash, maximumMicros: 10000 }));
     await assessment(firstHash);
   });
   afterEach(async () => {
@@ -119,13 +119,15 @@ describe("one exact WordPress alt funding reallocation in disposable central led
     expect(after.wordPressAlt).toMatchObject({ calls: 0, chargedMicros: 0, funding: { request: target } });
     await expect(activate()).rejects.toMatchObject({ code: "AI_WORDPRESS_ALT_ALREADY_FUNDED" });
   });
-  it("funding alone cannot create ordinary POC capacity or a request approval", async () => {
-    await activate(); await expect(ledger.estimate(altInput())).rejects.toBeDefined();
-    const intent = await ledger.estimateWordPressAlt(altInput());
-    expect(intent.approvedAt).toBeNull(); expect(intent.consumedAt).toBeNull();
-    await expect(ledger.reserve(intent.id, { actor: operator, requestHash: altHash, mode: "poc" })).rejects.toMatchObject({ code: "AI_APPROVAL_REQUIRED" });
-    await expect(ledger.approve(intent.id, operator)).rejects.toMatchObject({ code: "AI_APPROVAL_MISMATCH" });
+  it("automatically authorizes shared spending independently of historical funding grants", async () => {
+    await activate();
+    const before = await ledger.status(), intent = await ledger.estimate(altInput());
+    expect(intent.approvedBy).toBe(operator); expect(intent.consumedAt).toBeNull();
+    await expect(ledger.reserve(intent.id, { actor: admin, requestHash: altHash, mode: "poc" })).rejects.toMatchObject({ code: "AI_APPROVAL_MISMATCH" });
+    const attempt = await ledger.reserve(intent.id, { actor: operator, requestHash: altHash, mode: "poc" });
+    expect((await ledger.status()).development.chargedMicros).toBe(before.development.chargedMicros + attempt.reserveMicros);
   });
+
   it("reports only an existing exact approved browser generation intent without granting or consuming it", async () => {
     await activate(); const intent = await ledger.estimateWordPressAlt(altInput());
     expect(await ledger.wordPressAltApproval(operator, altInput().scope, altHash)).toEqual({ status: "pending_approval" });
@@ -168,9 +170,9 @@ describe("one exact WordPress alt funding reallocation in disposable central led
     await expect(ledger.estimateWordPressAlt(input)).rejects.toMatchObject({ code: "AI_APPROVAL_MISMATCH" });
     expect((await ledger.status()).wordPressAlt!.calls).toBe(0);
   });
-  it("consumes one exact separately approved attempt and excludes it from historical development totals", async () => {
+  it("counts a historical linked attempt in the shared cumulative total", async () => {
     await activate(); const before = await ledger.status(), { intent, attempt } = await reserveAlt();
-    const state = await ledger.status(); expect(state.development).toEqual(before.development);
+    const state = await ledger.status(); expect(state.development).toMatchObject({ calls: before.development.calls + 1, chargedMicros: before.development.chargedMicros + 33615 });
     expect(state.wordPressAlt).toMatchObject({ calls: 1, chargedMicros: 33615, dailyReservedMicros: 33615, incompleteReceipts: 1 });
     expect(state.testing).toMatchObject({ calls: 1, dailyReservedMicros: 43615, incompleteReceipts: 1 });
     await expect(ledger.reserve(intent.id, { actor: operator, requestHash: altHash, mode: "poc" })).rejects.toBeDefined();
@@ -216,7 +218,7 @@ describe("one exact WordPress alt funding reallocation in disposable central led
     await expect(ledger.estimateWordPressAlt(altInput())).rejects.toBeDefined();
   });
 
-  it.each(["completed", "network-unknown"])("uses the actual v2 provider estimate/approval/reserve/settle pipeline with %s mock transport", async outcome => {
+  it.each(["completed", "network-unknown"])("automatically accounts the v2 provider through the shared allowance with %s mock transport", async outcome => {
     const text = "Gráfico de Guzman Tax Accounting sobre ayuda con cartas del IRS.";
     const evidence: AltEvidence = { id: contextId, kind: "evidence", businessId, actor: operator, siteUrl: "https://example.com", capability: "wordpress.media.alt_text.update",
       createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900000).toISOString(), source: { reportId: randomUUID(), findingId: "review", evidenceId: randomUUID(), reportHash: hash("source") },
@@ -235,13 +237,8 @@ describe("one exact WordPress alt funding reallocation in disposable central led
       MODEL_API_KEY: "offline-model-fixture-key", AI_MODEL: "muse-spark-1.3", AI_MAX_OUTPUT_TOKENS: 1500, AI_CONTROLLED_TESTING: true }), { post: transport }, ledger);
     const prepared = provider.prepare(input);
     expect(prepared.reserveMicros).toBeLessThanOrEqual(33615);
-    const target: WordPressAltFundingRequest = { actor: operator, businessId, evidenceContextId: contextId, requestHash: prepared.requestHash, model: "muse-spark-1.3", processingMode: "standard", reasoningEffort: "minimal",
-      maxInputTokens: prepared.maxInputTokens, maxOutputTokens: prepared.maxOutputTokens, reserveMicros: prepared.reserveMicros, priceVersion: prepared.priceVersion,
-      inputPriceMicrosPerMillion: prepared.inputPriceMicrosPerMillion, outputPriceMicrosPerMillion: prepared.outputPriceMicrosPerMillion };
-    const preview = await ledger.prepareWordPressAltFunding(admin, target);
-    await ledger.activateWordPressAltFunding(admin, target, { confirmed: true, policyHash: preview.policyHash, fundingHash: preview.fundingHash });
     const scope = `wordpress-alt:${businessId}:${contextId}`, intent = await provider.estimate(input, { actor: operator, scope, reason: "Explicit one-request offline provider pipeline fixture" });
-    await ledger.approve(intent.id, admin);
+    expect(intent.approvedBy).toBe(operator);
     const authorization = { actor: operator, scope, intentId: intent.id };
     if (outcome === "completed") {
       const result = await provider.generate(input, undefined, authorization);
@@ -253,21 +250,16 @@ describe("one exact WordPress alt funding reallocation in disposable central led
     }
     expect(transport).toHaveBeenCalledTimes(1);
     expect(transport.mock.calls[0][0]).toBe(prepared.payload);
-    const attempt = (await ledger.wordPressAltAttempt(intent.id))!;
+    const state = await ledger.status(), attempt = state.recentAttempts.find(row => row.intentId === intent.id)!;
     expect(attempt.status).toBe(outcome === "completed" ? "success" : "unknown");
-    const receipt: WordPressAltReceipt = { requestHash: prepared.requestHash, evidenceContextId: contextId, attemptId: String(attempt.id), reservedMicros: prepared.reserveMicros,
-      ledgerChargeMicros: Number(attempt.charged_micros), inputTokens: attempt.input_tokens === null ? null : Number(attempt.input_tokens), outputTokens: attempt.output_tokens === null ? null : Number(attempt.output_tokens),
-      requestId: attempt.request_id === null ? null : String(attempt.request_id), httpStatus: outcome === "completed" ? 200 : null, completionStatus: outcome === "completed" ? "completed" : null,
-      schemaValid: outcome === "completed", persisted: false, generationId: null, failureCategory: outcome === "completed" ? "AI_FIXTURE_PROVIDER_ONLY" : "AI_NETWORK_ERROR" };
-    await ledger.completeWordPressAltReceipt(admin, intent.id, receipt);
-    expect(await ledger.wordPressAltReceipts()).toEqual([receipt]);
-    const state = await ledger.status();
-    expect(state.development).toMatchObject({ budgetMicros: 152744, dailyMicros: 152744, maxCalls: 4, chargedMicros: 145008, calls: 4 });
-    expect(state.testing).toMatchObject({ calls: 1, effectiveFundedMicros: 1854992 - prepared.reserveMicros, effectiveMaxCalls: 9 });
-    expect(state.wordPressAlt!.chargedMicros).toBe(outcome === "completed" ? 295 : prepared.reserveMicros);
+    expect(attempt.chargedMicros).toBe(outcome === "completed" ? 295 : prepared.reserveMicros);
+    expect(state.development).toMatchObject({ budgetMicros: 25000000, chargedMicros: 145008 + attempt.chargedMicros, calls: 6 });
+    expect(state.testing).toMatchObject({ calls: 1, chargedMicros: 0 });
+    expect(state.wordPressAlt).toBeUndefined(); // No feature-specific funding amendment was needed.
     expect(state.halted).toBe(outcome !== "completed");
     await expect(provider.generate(input, undefined, authorization)).rejects.toBeDefined();
-    await expect(provider.estimate(input, { actor: operator, scope, reason: "No repeated request is authorized" })).rejects.toBeDefined();
+    await expect(provider.estimate(input, { actor: operator, scope, reason: "Another explicit request needs no hash reauthorization" })).resolves.toMatchObject({ approvedBy: operator });
     expect(transport).toHaveBeenCalledTimes(1);
+
   });
 });
