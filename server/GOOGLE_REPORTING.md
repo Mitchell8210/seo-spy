@@ -1,5 +1,38 @@
 # Google Analytics 4 and Search Console reporting
 
+## Analysis & Revenue page
+
+The Analysis page reads `GET /api/businesses/:businessId/analytics`, a separately scoped local-application endpoint. Its `GoogleAnalysisReadGuard` requires a loopback peer, the exact configured frontend/backend Host, an allowed Origin when supplied, no cross-site Fetch Metadata and no forwarding headers. A configured local operator connection and the existing business/property/site binding are required. It never sends operator keys or Google credentials to the browser. Existing `/google/*` routes retain `GoogleOperatorGuard` and require Bearer authorization. This local boundary is not customer authentication or public deployment authorization.
+
+A cache miss makes one GA4 `batchRunReports` call containing five traffic reports. When a lead policy is configured, a second batch contains the independent period/daily lead reports. All traffic is filtered to the registered website hostname/www alias and `30daysAgo` through `yesterday` in the property timezone. Lead queries use the same resolved dates plus the exact configured event and lead-page allowlist:
+
+| Existing page field | GA4 source |
+| --- | --- |
+| Users / calculator Monthly Visitors | Dimensionless whole-period `totalUsers` |
+| Sessions | Dimensionless whole-period `sessions` |
+| Conversions | `eventCount` filtered to the configured inquiry submission event and lead pages |
+| Conversion Rate | Distinct `totalUsers` meeting that filter / whole-period website `totalUsers` × 100 |
+| Traffic Over Time | `date` with `totalUsers`, `sessions`, and separately joined filtered submission counts |
+| Traffic by Channel | `sessionDefaultChannelGroup` with `sessions`; original channel names retained |
+| Users by Device | `deviceCategory` with `totalUsers` |
+| Top Pages | Five `pagePath` rows ordered by `totalUsers` descending |
+
+Users can occur on multiple days, devices and pages; those rows cannot be added to produce period unique users. Missing dates are not filled with invented zeroes. Source timestamps, actual dates, property timezone and Google sampling/thresholding/restriction caveats are retained. The user approved updating existing demo/source captions; layout, fields, controls and styling are preserved.
+
+The v2 report replaces the original all-key-event conversion mapping. `GA4_LEAD_EVENT_NAME` selects one reviewed submission event. `GA4_LEAD_PAGE_PATHS` is a comma-separated exact path allowlist and is required for generic `form_submit`. A single event avoids double-counting a form_submit and a generated lead for the same action. Page views, session starts, scrolls, form starts and contact-link clicks cannot be selected as lead events. No GA4/site tracking configuration is modified. Missing configuration, restricted data and failed queries leave conversion values null while preserving all real traffic. A successful empty inquiry query returns **0 recorded conversions and 0%**, as requested; it is not labeled unavailable. The API retains tracking-coverage caveats; the user-approved source caption is limited to Google Analytics, the website hostname and Past 30 days. GA4's headerless dimensionless no-data responses are accepted only when there are no rows and request-column identities are known.
+
+The calculator uses measured period users. Its existing editable 2% customer conversion rate and $150 customer value remain assumptions for estimated revenue and hypothetical +10/+20% traffic scenarios. No measured revenue or customer value is invented, and lead submissions do not establish paying customers.
+
+The separate checksummed SQLite cache key includes business, property, website, credential identity and the conversion policy. v2 never reuses the earlier inflated key-event totals. Successes/empty reports use the success TTL; failures, including partial lead-query failures, use the error TTL. Concurrent reads share pending work. Failed refreshes retain history internally as stale, while the page uses existing unavailable treatments for failures. Corrupt storage fails closed. There is no polling, automatic retry, startup collection, AI call or website write.
+
+Offline checks: `tests/google-analysis.spec.ts` covers contracts, filters, independent totals/rates, malformed data, local restrictions, caching and failures; frontend `scripts/analysis-mapping.test.mjs` covers mapping. `node scripts/backend-lab-smoke.mjs --analysis` uses offline fixtures for calculator behavior, zero write requests and four responsive widths.
+
+`node scripts/verify-analysis.mjs --confirmed --lead-submissions` validates the API/cache with at most two Google batches, AI disabled and the protected ledger hashed before/after. It reserves ignored receipts and never silently repeats. The original November 2 validation returned 96 users, 122 sessions, 503 key events and a 100% key-event rate. The follow-up investigation found page_view/session_start/scroll were counted as key events and all four 30-day form_submit events belonged to /login/. Those were excluded from the corrected metric. The successful inquiry-only report has no recorded submissions and uses zero, not unavailable.
+
+The user separately requested a full-year check. `node scripts/inspect-analysis-conversions.mjs --confirmed --year` made one read-only batch for November 2, 2025–November 1, 2026 and returned all 403 rows without truncation: 73 form_submit events on /login/, five on /password-reset/, and no inquiry-page form_submit events. Two gracias_view events on /schedule-a-free-consultation/gracias/ are potential confirmation signals, but their trigger must be verified before treating them as submissions. This historical investigation does not change the page's 30-day reporting period. Scripts read no form contents and never submit a test form. Raw provider responses, credentials and receipts remain ignored.
+
+Metric definitions: [Google Data API schema](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema); [five-report batch contract](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunReports).
+
 ## Facebook-attributed website visits on Social Media
 
 The user approved replacing the existing Website Clicks row label with **Website Visits**. Its value is GA4 `sessions`, filtered by `sessionSource` with the declared case-insensitive full-match pattern `^(facebook|fb|([a-z0-9-]+\.)*facebook\.com)$` and the registered business website's exact hostName/www alias. It includes matching paid/organic traffic, cannot prove a click from the selected Facebook Page, is not unique people and cannot include visits that Analytics did not record. `firstUserSource`, all-social totals and substring matches are not substitutes.

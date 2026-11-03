@@ -13,6 +13,7 @@ import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { mockAnalysis } from '../src/data/mockAnalysis.ts';
 
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const serverDir = path.resolve(clientDir, '..', 'server');
@@ -39,6 +40,9 @@ let latestId = seedId;
 let activeId = null;
 let creationCount = 0;
 let available = true;
+let analysisUnavailable = false;
+let analysisLeadUnavailable = false;
+let analysisLeadZero = false;
 let apiRequests = 0;
 let statusRequests = 0;
 let loseNextCreateResponse = false;
@@ -290,6 +294,16 @@ async function servePlannerFixture(req,res,route) {
 }
 
 async function serveFixture(req, res) {
+  if (req.method === 'GET' && req.url === `/api/businesses/${businessId}/analytics`) {
+    await delay(200);
+    return reply(res, 200, { schemaVersion: 'seo-spy.google-analysis.v2', businessId, provider: 'ga4', availability: analysisUnavailable ? 'unavailable' : 'available', errorCode: analysisUnavailable ? 'GOOGLE_PERMISSION_DENIED' : null, cache: { hit: false, stale: false },
+      data: analysisUnavailable ? null : { schemaVersion: 'seo-spy.google-analysis-data.v2', hostname: 'guzmantaxaccounting.com', collectedAt: '2026-11-01T12:00:00.000Z',
+        dateRange: { startDate: '2026-10-02', endDate: '2026-10-31', timeZone: 'America/Los_Angeles' },
+        totals: { users: 1254, sessions: 1794, conversions: analysisLeadUnavailable ? null : analysisLeadZero ? 0 : 18, rate: analysisLeadUnavailable ? null : analysisLeadZero ? 0 : 15/1254*100 }, daily: mockAnalysis.daily.map((day, index) => ({ date: `2026-10-${String(index + 2).padStart(2, '0')}`, users: day.users, sessions: day.sessions, conversions: analysisLeadUnavailable ? null : analysisLeadZero ? 0 : day.conversions })),
+        conversion: { status: analysisLeadUnavailable ? 'unavailable' : 'available', eventName: 'form_submit', pagePaths: ['/contacto/'], users: analysisLeadUnavailable ? null : analysisLeadZero ? 0 : 15, reason: analysisLeadUnavailable ? 'query_failed' : analysisLeadZero ? 'no_recorded_submissions' : null },
+        channels: mockAnalysis.channels, devices: mockAnalysis.devices, pages: mockAnalysis.pages,
+        metadata: Array.from({ length: 5 }, () => ({ subjectToThresholding: false, dataLossFromOtherRow: false, sampling: [] })) } });
+  }
   apiRequests++;
   if(plannerMode&&req.method==='GET'&&req.url==='/api/wordpress/browser-session')return reply(res,200,{connected:true,businessId,csrf:'x'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()});
   if(plannerMode&&req.url.startsWith(`/api/wordpress/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
@@ -628,7 +642,9 @@ async function analysisScenario(base) {
   assert.equal(await evaluate(`document.querySelectorAll('#primary-navigation a[href="/analysis"]').length`),1);
   assert.equal(await evaluate(`document.querySelector('#primary-navigation a[href="/analysis"]').getAttribute('aria-current')`),'page');
   assert.equal(await evaluate(`document.querySelector('#primary-navigation a[href="/analysis"]').textContent`),'Analysis & Revenue');
-  assert.match(await pageText(),/Demo analytics/);
+  await waitFor(()=>evaluate(`document.querySelector('[data-analysis-kpi="Users"]').textContent==='1,254'`),'Google Analytics report');
+  assert.match(await pageText(),/Google Analytics/);
+  assert.doesNotMatch(await pageText(),/Demo analytics|Illustrative 30-day sample/);
   for(const title of ['Traffic Over Time','Traffic by Channel','Users by Device','Top Pages','Revenue Calculator']) assert.ok((await pageText()).includes(title));
   assert.equal(await evaluate(`document.querySelectorAll('[data-analysis-kpi]').length`),4);
   assert.equal(await evaluate(`document.getElementById('customer-value').value`),'150');
@@ -636,6 +652,28 @@ async function analysisScenario(base) {
   assert.equal(await evaluate(`document.getElementById('monthly-visitors').readOnly`),true);
   const visitors=Number((await evaluate(`document.getElementById('monthly-visitors').value`)).replaceAll(',',''));
   assert.equal(visitors,1254);
+  const chartPoints='section[aria-labelledby="traffic-title"] svg circle';
+  async function hoverTrafficPoint(index) {
+    const position=await evaluate(`(() => { const points=document.querySelectorAll(${JSON.stringify(chartPoints)});const point=points[${index}];point.scrollIntoView({block:'center'});const box=point.getBoundingClientRect();return {x:box.left+box.width/2,y:box.top+box.height/2}; })()`);
+    await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',...position});
+    await waitFor(()=>evaluate(`Boolean(document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]'))`),'Traffic header readout');
+  }
+  await hoverTrafficPoint(0);
+  assert.match(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]').textContent`),/2026-10-02.*24.*users/i);
+  assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(chartPoints)})[0].getAttribute('r')`),'5','The hovered point is larger');
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(chartPoints)})).filter(point=>point.getAttribute('r')==='5').length`),1,'Only the selected point is enlarged');
+  assert.equal(await evaluate(`document.querySelectorAll('section[aria-labelledby="traffic-title"] [role="tooltip"]').length`),0,'No floating tooltip remains');
+  assert.equal(await evaluate(`(() => {const title=document.getElementById('traffic-title').getBoundingClientRect();const readout=document.querySelector('[data-traffic-readout]').getBoundingClientRect();return readout.left>=title.right&&Math.abs(title.top-readout.top)<12;})()`),true,'Desktop readout is beside the title');
+  await screenshot('analysis-traffic-header-1440.png');
+  await evaluate(`document.querySelectorAll(${JSON.stringify(chartPoints)})[7].focus()`);
+  assert.match(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]').textContent`),/2026-10-09.*33.*users/i);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(chartPoints)})).slice(0,8).map(point=>point.getAttribute('r'))`),['3','3','3','3','3','3','3','5'],'Keyboard focus moves the point emphasis');
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  assert.equal(await evaluate(`Boolean(document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]'))`),false,'Escape clears the header readout');
+  await hoverTrafficPoint(29);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:5});
+  assert.equal(await evaluate(`Boolean(document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]'))`),false,'Leaving the chart clears the header readout');
   const usd=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);
   async function setInput(id,value) {
     await evaluate(`(() => {const node=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -670,9 +708,14 @@ async function analysisScenario(base) {
   await setInput('customer-value','150');
   await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='sessions').click()`);
   assert.match(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] svg').getAttribute('aria-label')`),/sessions/);
+  assert.equal(await evaluate(`Boolean(document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]'))`),false,'Changing metrics clears the prior header readout');
+  await hoverTrafficPoint(29);
+  assert.match(await evaluate(`document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]').textContent`),/2026-10-31.*85.*sessions/i);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:5});
   await delay(200);
   assert.equal(browserRequests.length,beforeEdits,'Calculator changes and chart controls make no network requests');
-  assert.equal(browserRequests.slice(requestStart).filter(item=>item.url.includes('/api/')).length,0,'No analytics/operator APIs or database writes');
+  const analyticsRequests=browserRequests.slice(requestStart).filter(item=>item.url.includes('/api/'));
+  assert.ok(analyticsRequests.length>=1 && analyticsRequests.every(item=>item.method==='GET' && item.url.endsWith(`/api/businesses/${businessId}/analytics`)),'Only the scoped read-only analytics endpoint is requested');
   async function contrastAudit() {
     return evaluate(`(${function () {
       const ctx = document.createElement('canvas').getContext('2d', {willReadFrequently:true});
@@ -716,7 +759,7 @@ async function analysisScenario(base) {
       const outline=getComputedStyle(input);
       check('Keyboard focus on card','#customer-value',3,'outlineColor',true);
       check('Keyboard focus on input','#customer-value',3,'outlineColor');
-      return {rows,focus:{visible:input.matches(':focus-visible'),style:outline.outlineStyle,width:outline.outlineWidth},nativeTooltip:'SVG title: browser/OS controlled, no author-specified text/background colors'};
+      return {rows,focus:{visible:input.matches(':focus-visible'),style:outline.outlineStyle,width:outline.outlineWidth},tooltip:'Header readout displayed on chart hover or point focus; Escape and pointer exit clear it'};
     }.toString()})()`);
   }
   const contrastReport=await contrastAudit();
@@ -745,13 +788,47 @@ async function analysisScenario(base) {
       if(width<768) assert.ok(channel.bottom<=device.top && device.bottom<=pages.top,'Mobile breakdown cards stack');
       else assert.ok(Math.abs(channel.top-device.top)<2 && pages.top>=Math.max(channel.bottom,device.bottom),'Tablet breakdown uses readable two-column rows');
     }
+    for(const index of [0,29]) {
+      await hoverTrafficPoint(index);
+      assert.equal(await evaluate(`(() => {const tip=document.querySelector('section[aria-labelledby="traffic-title"] [data-traffic-readout][aria-hidden="false"]').getBoundingClientRect();const chart=document.querySelector('section[aria-labelledby="traffic-title"]').getBoundingClientRect();return tip.left>=chart.left&&tip.right<=chart.right&&tip.top>=chart.top&&tip.bottom<=chart.bottom;})()`),true,`Header readout stays inside the chart at ${width}px`);
+    }
+    await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='conversions').click()`);
+    const chartGeometry=()=>evaluate(`(() => {const chart=document.querySelector('section[aria-labelledby="traffic-title"]');const header=chart.querySelector('header').getBoundingClientRect();const graph=chart.querySelector('svg').getBoundingClientRect();return {headerHeight:header.height,graphTop:graph.top+scrollY,chartHeight:chart.getBoundingClientRect().height};})()`);
+    const beforeHover=await chartGeometry();
+    for(const index of Array.from({length:30},(_,index)=>index)) {
+      await hoverTrafficPoint(index);
+      assert.deepEqual(await chartGeometry(),beforeHover,`Conversion hover ${index} cannot shift the chart at ${width}px`);
+      assert.equal(await evaluate(`(() => {const readout=document.querySelector('[data-traffic-readout]');return readout.getBoundingClientRect().height===20&&readout.scrollHeight<=readout.clientHeight&&readout.scrollWidth<=readout.clientWidth;})()`),true,`Conversion readout fits one line at ${width}px`);
+    }
+    await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='sessions').click()`);
+    await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:5});
     await screenshot(`analysis-revenue-${width}.png`);
   }
   await evaluate(`document.querySelector('button[aria-controls="primary-navigation"]').click()`);
   assert.equal(await evaluate(`getComputedStyle(document.getElementById('primary-navigation')).visibility`),'visible');
   assert.equal(await evaluate(`document.querySelectorAll('a[href="/analysis"]').length`),1);
   assert.deepEqual(browserErrors,[]);
-  pass('Analysis route/active/mobile navigation, demo graphics, calculator defaults/math/scenarios/input validation/keyboard, zero network writes, and four responsive widths');
+  analysisLeadUnavailable=true;
+  await cdp.send('Page.reload');
+  await waitFor(()=>evaluate(`document.querySelector('[data-analysis-kpi="Users"]')?.textContent==='1,254'&&document.querySelector('[data-analysis-kpi="Conversions"]')?.textContent==='—'`),'Unavailable lead conversions');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-analysis-kpi]')).map(node=>node.textContent)`),['1,254','1,794','—','—']);
+  await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='conversions').click()`);
+  assert.ok((await pageText()).includes('Traffic history is not available.'));
+  await evaluate(`Array.from(document.querySelectorAll('[aria-label="Traffic metric"] button')).find(node=>node.textContent==='users').click()`);
+  assert.ok(await evaluate(`Boolean(document.querySelector('section[aria-labelledby="traffic-title"] polyline'))`),'Traffic history survives unavailable lead tracking');
+  analysisLeadUnavailable=false;analysisLeadZero=true;
+  await cdp.send('Page.reload');
+  await waitFor(()=>evaluate(`document.querySelector('[data-analysis-kpi="Conversions"]')?.textContent==='0'`),'Zero recorded inquiry submissions');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-analysis-kpi]')).map(node=>node.textContent)`),['1,254','1,794','0','0.0%']);
+  assert.doesNotMatch(await pageText(),/Lead conversion tracking is unavailable/);
+  analysisUnavailable=true;
+  await cdp.send('Page.reload');
+  await waitFor(async()=>/Google Analytics access is unavailable/.test(await pageText()),'Google Analytics permission failure');
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('[data-analysis-kpi]')).map(node=>node.textContent)`),['—','—','—','—']);
+  assert.equal(await evaluate(`document.getElementById('monthly-visitors').value`),'—');
+  assert.ok((await pageText()).includes('Traffic history is not available.'));
+  assert.equal(await evaluate(`document.querySelectorAll('section[aria-labelledby]').length`),5,'All existing sections remain on errors');
+  pass('Analysis route/active/mobile navigation, GA4 report mapping, calculator defaults/math/scenarios/input validation/keyboard, unavailable permissions, zero network writes, and four responsive widths');
   console.log(JSON.stringify({passed:results,artifactDirectory:artifactDir},null,2));
 }
 

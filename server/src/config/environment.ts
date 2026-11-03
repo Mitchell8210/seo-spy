@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { leadPagePaths } from "../integrations/google/google-lead-policy.js";
 
 const environmentSchema = z.object({
   NODE_ENV: z
@@ -22,6 +23,8 @@ const environmentSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).max(4096).default("reports/seo-spy.sqlite"),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().trim().max(4096).default(""),
   GA4_PROPERTY_ID: z.string().regex(/^(?:[1-9]\d{0,19})?$/).default(""),
+  GA4_LEAD_EVENT_NAME: z.string().regex(/^(?:[a-zA-Z][a-zA-Z0-9_]{0,39})?$/).default(""),
+  GA4_LEAD_PAGE_PATHS: z.string().max(5200).refine(value => leadPagePaths(value) !== null).default(""),
   GSC_SITE_URL: z.string().max(2048).refine(value => {
     if (!value) return true;
     if (/^sc-domain:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(value)) return true;

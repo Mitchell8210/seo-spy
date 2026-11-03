@@ -153,6 +153,7 @@ describe("demo API", () => {
         "/api/wordpress/businesses/{businessId}/fixes/proposals/{id}/verifications/{verificationId}",
         "/api/wordpress/businesses/{businessId}/fixes/proposals/{id}/restorations",
         "/api/businesses/{businessId}/google/ga4",
+        "/api/businesses/{businessId}/analytics",
         "/api/businesses/{businessId}/google/facebook-visits",
         "/api/businesses/{businessId}/google/search-console",
         "/api/ai/admin/status",

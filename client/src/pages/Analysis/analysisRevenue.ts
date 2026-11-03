@@ -1,15 +1,17 @@
 export type TrafficMetric = 'users' | 'sessions' | 'conversions'
 export interface AnalyticsData {
-  source: 'demo' | 'unavailable'
+  source: 'demo' | 'ga4' | 'unavailable'
   period: string
-  daily: { day: number; users: number; sessions: number; conversions: number }[]
+  daily: { day: number; date?: string; users: number; sessions: number; conversions: number | null }[]
+  totals?: { users: number; sessions: number; conversions: number | null; rate: number | null }
   channels: { label: string; value: number }[]
   devices: { label: string; value: number }[]
   pages: { path: string; users: number }[]
 }
 export function analyticsTotals(data: AnalyticsData) {
+  if (data.source === 'ga4') return data.totals ?? { users: null, sessions: null, conversions: null, rate: null }
   if (data.source === 'unavailable' || data.daily.length === 0) return { users: null, sessions: null, conversions: null, rate: null }
-  const totals = data.daily.reduce((sum, day) => ({ users: sum.users + day.users, sessions: sum.sessions + day.sessions, conversions: sum.conversions + day.conversions }), { users: 0, sessions: 0, conversions: 0 })
+  const totals = data.daily.reduce((sum, day) => ({ users: sum.users + day.users, sessions: sum.sessions + day.sessions, conversions: sum.conversions + (day.conversions ?? 0) }), { users: 0, sessions: 0, conversions: 0 })
   return { ...totals, rate: totals.users ? totals.conversions / totals.users * 100 : null }
 }
 export function estimateRevenue(visitors: number | null, customerValue: string, rate: string) {

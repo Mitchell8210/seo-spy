@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { GOOGLE_TOKEN_PROVIDER, type GoogleTokenProvider } from "./google-auth.js";
 import { GoogleApiError, GoogleTransport } from "./google-transport.js";
+import { collectGoogleAnalysis } from "./google-analysis.js";
+import type { Ga4LeadPolicy } from "./google-lead-policy.js";
 import { FACEBOOK_SESSION_SOURCE_PATTERN, ga4FacebookVisitsReportDataSchema, ga4ReportDataSchema, searchConsoleReportDataSchema, type Ga4FacebookVisitsReportData, type Ga4ReportData, type SearchConsoleMetrics, type SearchConsoleReportData } from "./google-reporting.types.js";
 
 export { FACEBOOK_SESSION_SOURCE_PATTERN } from "./google-reporting.types.js";
@@ -95,6 +97,8 @@ function searchMetrics(value: unknown): SearchConsoleMetrics {
 @Injectable()
 export class GoogleReportingClient {
   constructor(@Inject(GOOGLE_TOKEN_PROVIDER) private readonly auth: GoogleTokenProvider, private readonly transport: GoogleTransport) {}
+
+  analysis(propertyId: string, hostname: string, policy: Ga4LeadPolicy | null = null) { return collectGoogleAnalysis(this.auth, this.transport, propertyId, hostname, policy); }
 
   async ga4FacebookVisits(propertyId: string, startDate: string, endDate: string, hostname: string): Promise<Ga4FacebookVisitsReportData> {
     if (typeof propertyId !== "string" || !/^[1-9]\d{0,19}$/.test(propertyId) ||
