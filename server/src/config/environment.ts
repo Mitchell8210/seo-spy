@@ -75,6 +75,7 @@ const environmentSchema = z.object({
     try { const url = new URL(value); return url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname) && url.origin === value; } catch { return false; }
   }).default("http://localhost:5173"),
   FACEBOOK_APP_ID: z.string().trim().regex(/^\d*$/).default(""),
+  FACEBOOK_POSTS_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
   FACEBOOK_APP_SECRET: z.string().trim().default(""),
   FACEBOOK_ACCESS_TOKEN: z.string().trim().default(""),
   FACEBOOK_CONFIG_ID: z.string().trim().regex(/^\d*$/).default(""),

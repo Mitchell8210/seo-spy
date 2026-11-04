@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const candidatesOnly = process.argv.includes('--dashboard-candidates');
 let candidatesState = 'loading', releaseCandidates;
+let facebookHistory = [], facebookHistoryFailed = false;
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const receiptPath = path.join(clientDir, '../server/reports/wordpress-alt-first-application-result.json');
 const originalReceipt = candidatesOnly ? Buffer.from(JSON.stringify({ publicVerification: { receipt: { requestedUrl: 'https://example.com/page/' } }, stored: { actualAlt: 'Reviewed image description' } })) : await readFile(receiptPath), saved = JSON.parse(originalReceipt);
@@ -80,7 +81,11 @@ try {
         if (candidatesState === 'loading') releaseCandidates = reply; else reply();
         return;
       }
-      if (url.pathname === '/api/wordpress/browser-session') result = { csrf: 'c'.repeat(43), businessId: business.id, connected: true };
+      if (url.pathname === '/api/facebook/posts/history') {
+        if (facebookHistoryFailed) { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'Fixture Facebook actions unavailable' } })); return; }
+        result = { businessId: business.id, items: facebookHistory };
+      }
+      else if (url.pathname === '/api/wordpress/browser-session') result = { csrf: 'c'.repeat(43), businessId: business.id, connected: true };
       else if (candidatesOnly && url.pathname === `/api/wordpress/local/businesses/${business.id}/fixes`) result = { items: [{ reportId, findingId, evidenceId, workflow: {
         ...workflow(), status: 'public_verified', proposal: { ...fullProposal(), executionStarted: true, outcome: { status: 'applied', verification: 'verified_stored_fields', completedAt: now } },
         verification: { status: 'public_verified', receipt: { id: 'fixture-verification', storedFieldMatches: true, status: 'verified', limitations: [] } },
@@ -135,6 +140,9 @@ try {
     assert.equal(await evaluate(`document.querySelector('section[aria-label="Recommended Fixes"]') === null`), true);
     const socialCategory = 'section[aria-label="Social Media Performance"]';
     await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(socialCategory)})?.innerText.includes('Fixture social issue 3')`), 'saved social issues');
+    for (const selector of [category, socialCategory]) {
+      assert.equal(await evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).querySelectorAll('li')).every(row => { const button = row.querySelector('button'); return button?.textContent.trim() === 'Fix With AI' && !!button.querySelector('svg'); })`), true, 'Every top issue has a visible labeled AI button and icon');
+    }
     assert.doesNotMatch(await healthText(), /Saved website report|Homepage coverage|SEO Spy policy/);
     assert.doesNotMatch(await evaluate(`document.querySelector(${JSON.stringify(socialCategory)}).innerText`), /Saved Facebook report|Partial coverage|SEO Spy policy/);
     assert.doesNotMatch(await text(), /Saved comparison ·|SEO Spy policy/);
@@ -159,13 +167,30 @@ try {
     await waitFor(async () => (await healthText()).includes('Fixture recommendations unavailable'), 'candidate error');
     candidatesState = 'empty'; await click('Retry saved recommendations');
     await waitFor(async () => (await healthText()).includes('No outstanding, exactly bound image-alt opportunities'), 'candidate empty');
-    const recent = 'section[aria-label="Recently Fixed"]';
+    const recent = 'section[aria-label="Recent Actions"]';
     await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText.includes('1 fully verified')`), 'saved fix count');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(recent)}).querySelector('details').open`), false, 'Recently Fixed starts collapsed');
     assert.equal(await evaluate(`Boolean(document.querySelector('#next-steps-title').closest('section').compareDocumentPosition(document.querySelector(${JSON.stringify(recent)})) & Node.DOCUMENT_POSITION_FOLLOWING)`), true, 'Recently Fixed follows Your Next Steps');
     const readsBeforeExpand = requests.length;
     await evaluate(`document.querySelector(${JSON.stringify(recent)}).querySelector('summary').click()`);
     assert.match(await text(), /Image description updated/);
+    assert.equal(requests.slice(readsBeforeExpand).filter(item => item.path.includes('/wordpress/')).length, 0, 'Expanding saved actions triggers no WordPress requests');
+    const facebookPost = { id: 'fixture-facebook-action', businessId: business.id, reportId: socialId, recommendationId: 'posting', pageId: '123', pageName: 'Fixture Facebook Page', status: 'published', text: 'Reviewed welcome post from the accounting team.', verified: true, postId: '123_456', permalink: 'https://www.facebook.com/123/posts/456', completedAt: new Date(Date.parse(now) + 1000).toISOString() };
+    facebookHistory = [facebookPost, { ...facebookPost, id: 'fixture-unknown-action', status: 'outcome_unknown', verified: false, postId: null, permalink: null, completedAt: null, executedAt: new Date(Date.parse(now) + 2000).toISOString() }];
+    await evaluate('window.dispatchEvent(new Event("facebook-post-updated"))');
+    await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText.includes('Facebook post published')`), 'Facebook actions refresh');
+    const recentText = await evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText`);
+    assert.match(recentText, /2 fully verified/); assert.match(recentText, /Publication was not confirmed/); assert.match(recentText, /Reviewed welcome post/);
+    assert.deepEqual(await evaluate(`Array.from(document.querySelector(${JSON.stringify(recent)}).querySelectorAll('li h3')).map(el => el.textContent)`), ['Facebook publishing needs review', 'Facebook post published', 'Image description updated']);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(recent)}).querySelector('a').href`), facebookPost.permalink);
+    facebookHistoryFailed = true;
+    await evaluate('window.dispatchEvent(new Event("facebook-post-updated"))');
+    await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText.includes('Fixture Facebook actions unavailable')`), 'partial history failure');
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText`), /Image description updated/);
+    facebookHistoryFailed = false;
+    await click('Retry saved actions');
+    await waitFor(() => evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText.includes('2 fully verified')`), 'history retry');
+    const readsBeforeLayout = requests.length;
     for (const width of [1440, 390, 320]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width < 768 });
       assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), true, 'Expanded saved fixes overflow at ' + width);
@@ -178,7 +203,7 @@ try {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(recent)}).querySelector('details').open`), 'keyboard collapses saved fixes');
     assert.doesNotMatch(await evaluate(`document.querySelector(${JSON.stringify(recent)}).innerText`), /Image description updated/);
-    assert.equal(requests.slice(readsBeforeExpand).filter(item => item.path.includes('/wordpress/')).length, 0, 'Expanding saved fixes triggers no WordPress requests; unrelated Dashboard polling may continue');
+    assert.equal(requests.slice(readsBeforeLayout).filter(item => item.path.includes('/wordpress/')).length, 0, 'Toggling saved actions triggers no WordPress requests; unrelated Dashboard polling may continue');
     await screenshot('recent-fixes-collapsed-mobile.png');
     assert.equal(requests.filter(item => item.method !== 'GET').length, 0, 'Inline recommendations and review trigger no paid generation or writes');
     assert.deepEqual(errors, []);

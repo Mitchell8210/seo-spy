@@ -3,14 +3,14 @@ export const ALT_CAPABILITY = "wordpress.media.alt_text.update";
 export const fixHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const fixTargetSchema = z.object({ mediaId: z.number().int().positive(), pageResource: z.enum(["pages", "posts"]), pageId: z.number().int().positive(),
   sourceUrl: z.string().url().max(2048), pageUrl: z.string().url().max(2048), currentAlt: z.string().max(2000), modified: z.string().min(1).max(100) }).strict();
-const requiredTermsSchema = z.array(z.string().trim().min(2).max(40)).min(1).max(5);
-export const altProposalContextSchema = z.object({ version: z.literal("wordpress-alt-context-v2"), language: z.literal("es"), requiredTerms: requiredTermsSchema,
+const requiredTermsSchema = z.array(z.string().trim().min(2).max(40)).max(5);
+export const altProposalContextSchema = z.object({ version: z.literal("wordpress-alt-context-v2"), language: z.enum(["es", "en"]), requiredTerms: requiredTermsSchema,
   business: z.object({ id: z.string(), name: z.string().max(300), website: z.string().url() }).strict(),
   page: z.object({ id: z.number().int().positive(), resource: z.enum(["pages", "posts"]), url: z.string().url(), title: z.string().max(300).nullable(), textExcerpt: z.string().max(1200), collectedAt: z.string().datetime() }).strict() }).strict();
 export const enrollAltSchema = z.object({ reportId: z.string().uuid(), findingId: z.string().min(1).max(160), evidenceId: z.string().uuid(),
   mediaId: z.number().int().positive(), pageResource: z.enum(["pages", "posts"]), pageId: z.number().int().positive(),
   purpose: z.enum(["informative", "functional", "decorative", "unknown"]), verifiedDescription: z.string().trim().max(500),
-  proposalLanguage: z.literal("es").optional(), requiredTerms: requiredTermsSchema.optional(),
+  proposalLanguage: z.enum(["es", "en"]).optional(), requiredTerms: requiredTermsSchema.optional(),
   durablePurpose: z.object({ originalImageHash: fixHash, hashProvenance: z.string().min(10).max(500) }).strict().optional(),
   confirmed: z.literal(true) }).strict().refine(value => (value.proposalLanguage !== undefined) === (value.requiredTerms !== undefined), "Language and essential terms must be reviewed together.");
 export const generateAltSchema = z.object({ evidenceId: z.string().uuid(), instructions: z.string().max(2000).default(""), intentId: z.string().uuid().optional() }).strict();
@@ -64,17 +64,22 @@ export function contextualAltBasis(evidence: Pick<AltEvidence, "verifiedDescript
 }
 const altWords = (text: string): string[] => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("es").match(/[\p{L}\p{N}]+/gu) ?? [];
 const connectors = new Set("a al algo ante bajo cada como con contra cual cuando de del desde donde durante e el ella ellas ellos en entre es esta este estos hacia hasta la las lo los o para por que se sin sobre su sus un una unos unas y ofrece ofrecen servicios the an and at by for from in of on or to with".split(" "));
+/** Page context can establish a drafting basis without customer-supplied keywords. */
+export function hasAltDraftingBasis(evidence: Pick<AltEvidence, "verifiedDescription" | "proposalContext">): boolean {
+  const basis = contextualAltBasis(evidence);
+  return !!evidence.verifiedDescription.trim() || !!evidence.proposalContext && [basis.pageTitle, basis.primaryPageContext].some(value => altWords(value).some(word => !connectors.has(word)));
+}
 export function validateContextualAltText(text: string | null, evidence: Pick<AltEvidence, "purpose" | "verifiedDescription" | "proposalContext">, reason = "CONTEXT_DRAFT"): void {
   const basis = contextualAltBasis(evidence), words = altWords(text ?? "");
   const allowed = new Set([...Object.values(basis).flatMap(altWords), ...connectors]);
   const translated: Record<string, string> = { taxes: "impuestos", tax: "impuestos", bookkeeping: "contabilidad" };
-  const anchors = altWords(evidence.verifiedDescription).filter(word => !connectors.has(word));
+  const anchors = Object.values(basis).flatMap(altWords).filter(word => !connectors.has(word));
   for (const anchor of anchors) if (translated[anchor]) allowed.add(translated[anchor]);
-  if (evidence.purpose !== "informative" || !evidence.proposalContext || reason !== "CONTEXT_DRAFT" || !text?.trim() || text !== text.replace(/\s+/g, " ").trim()
+  if (evidence.purpose !== "informative" || !evidence.proposalContext || !hasAltDraftingBasis(evidence) || reason !== "CONTEXT_DRAFT" || !text?.trim() || text !== text.replace(/\s+/g, " ").trim()
     || text.length > 300 || words.length > 40 || /[<>]|https?:|www\.|\b(seo|best|cheap|rankings?)\b/i.test(text)
     || [...text].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
     || words.some(word => !allowed.has(word) || words.filter(item => item === word).length > 3)
-    || !anchors.some(anchor => words.includes(translated[anchor] ?? anchor))) throw new Error("Unsupported contextual alt text");
+    || !anchors.some(anchor => words.includes(anchor) || words.includes(translated[anchor] ?? anchor))) throw new Error("Unsupported contextual alt text");
 }
 export function hasAltTerm(text: string, term: string): boolean {
   const words = (value: string) => " " + value.toLocaleLowerCase("es").replace(/[^\p{L}\p{N}]+/gu, " ").trim() + " ";

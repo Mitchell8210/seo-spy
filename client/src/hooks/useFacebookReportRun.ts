@@ -59,7 +59,7 @@ export function useFacebookReportRun(businessId: string, pageId: string, refresh
         if (!result.auditId || result.reportId !== result.auditId || !['completed', 'partial', 'failed'].includes(result.status)) {
           throw new BackendApiError('The backend returned an unexpected report response.', 'INVALID_RESPONSE', 0)
         }
-        if (result.status === 'failed') error = result.failure?.message ?? 'The Facebook report could not be completed. Please try again.'
+        if (result.status === 'failed' || result.failure?.code === 'AI_INTERPRETATION_FAILED') error = result.failure?.message ?? 'The Facebook report could not be completed. Please try again.'
       } catch (failure) {
         error = failure instanceof Error ? failure.message : 'The Facebook report could not be started. Please try again.'
       } finally {

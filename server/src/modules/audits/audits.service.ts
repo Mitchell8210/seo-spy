@@ -8,6 +8,7 @@ import {
 import { randomUUID } from "node:crypto";
 import type { Audit } from "../../contracts/domain.js";
 import { DEMO_NOTICE } from "../../fixtures/demo.js";
+import type { InterpretationContext } from "../../reporting/investigation-interpretation.js";
 import {
   AUDIT_REPOSITORY,
   BUSINESS_REPOSITORY,
@@ -50,6 +51,7 @@ export class AuditsService {
     businessId: string,
     scope: Audit["scope"] = "demo",
     strategy?: LighthouseStrategy,
+    context?: InterpretationContext,
   ) {
     if (scope === "facebook")
       throw new BadRequestException({
@@ -101,7 +103,8 @@ export class AuditsService {
         message:
           "An investigation is already queued or running for this business.",
       });
-    this.runner.enqueue(audit.id);
+    if (context) this.runner.enqueue(audit.id, context);
+    else this.runner.enqueue(audit.id);
     return { ...auditSummary(audit), statusUrl: `/api/audits/${audit.id}` };
   }
 

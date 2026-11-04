@@ -52,21 +52,23 @@ export class FacebookGraph {
     params: Record<string, string> = {},
     secretProof = true,
     signal?: AbortSignal,
+    method: "GET" | "POST" = "GET",
   ): Promise<Record<string, unknown>> {
     const url = new URL(
       `https://graph.facebook.com/${this.config.getOrThrow<string>("FACEBOOK_GRAPH_VERSION")}/${path}`,
     );
-    for (const [key, value] of Object.entries(params))
-      url.searchParams.set(key, value);
+    const fields = new URLSearchParams(params);
     const secret = this.config.get<string>("FACEBOOK_APP_SECRET");
     if (secret && secretProof)
-      url.searchParams.set(
+      fields.set(
         "appsecret_proof",
         createHmac("sha256", secret).update(token).digest("hex"),
       );
+    if (method === "GET") url.search = fields.toString();
     try {
       const response = await fetch(url, {
-        method: "GET",
+        method,
+        ...(method === "POST" ? { body: fields } : {}),
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         redirect: "error",
         signal: signal

@@ -1,7 +1,7 @@
 import type { FixReviewRequest } from '../types/fixReview'
 export interface AltEvidence {
   id: string; expiresAt: string; purpose: 'informative' | 'functional' | 'decorative' | 'unknown'; verifiedDescription: string; descriptionProvenance: string
-  proposalContext?: { language: 'es'; requiredTerms: string[] }
+  proposalContext?: { language: 'es' | 'en'; requiredTerms: string[] }
   target: { mediaId: number; pageResource: 'pages' | 'posts'; pageId: number; sourceUrl: string; pageUrl: string; currentAlt: string; modified: string }
 }
 export interface FixWorkflow { status: 'draft' | 'pending_approval' | 'expired' | 'applying' | 'applied' | 'public_verified' | 'stored_mismatch' | 'public_mismatch' | 'stored_verified_public_inconclusive' | 'outcome_unknown' | 'failed' | 'restored'; proposal: AltProposal | null; generation: AltGeneration | null; verification: AltVerification | null; pageUrl: string; approvalRequired: boolean; generationApproval?: { status: 'not_required' | 'pending_approval' | 'approved' | 'expired' | 'used'; intentId?: string } }
@@ -146,7 +146,7 @@ export const wordpressFix = {
     await connectWordPressBrowser(businessId)
     return request<AltEvidence>(base(businessId) + 'purpose', { confirmed: true, reportId: candidate.reportId, findingId: candidate.findingId, evidenceId: candidate.evidenceId,
       mediaId: candidate.target.mediaId, pageResource: candidate.target.pageResource, pageId: candidate.target.pageId, purpose, verifiedDescription,
-      ...(purpose === 'informative' && language === 'es' ? { proposalLanguage: 'es', requiredTerms } : {}),
+      ...(purpose === 'informative' ? { proposalLanguage: language, requiredTerms } : {}),
       ...(candidate.imageHash && candidate.imageHashProvenance ? { durablePurpose: { originalImageHash: candidate.imageHash, hashProvenance: candidate.imageHashProvenance } } : {}) })
   },
   generate: async (businessId: string, evidenceId: string, instructions: string, intentId?: string, requireLive = false) => {

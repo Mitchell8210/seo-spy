@@ -12,6 +12,7 @@ import { useInvestigation } from '../../hooks/useInvestigation'
 import { mapWebsiteReport, measurementLabel, pageReportContext } from '../../services/websiteMapping'
 import type { ConnectedWebsite } from '../../types/website'
 import { scoreCaption } from '../../services/savedScore'
+import { useReportInterpretation } from '../../hooks/useReportInterpretation'
 
 export function Website() {
   const [search, setSearch] = useSearchParams()
@@ -26,7 +27,8 @@ export function Website() {
     refresh()
   }
   const record = state.report
-  const audit = record ? mapWebsiteReport(record, state.error ? null : state.dashboard?.assessment) : null
+  const interpretation = useReportInterpretation(businessId, record ? [record.auditId] : [], investigation.audit?.status)
+  const audit = record ? mapWebsiteReport(record, state.error ? null : state.dashboard?.assessment, interpretation) : null
   const business = record?.business ?? state.dashboard?.business
   const connection = state.dashboard?.connections.find(item => item.platform === 'website' && item.mode === 'live')
   const website: ConnectedWebsite | null = business ? {
@@ -41,11 +43,11 @@ export function Website() {
     ? `Saved homepage HTML audit plus ${measurementLabel(record.results.lighthouse)}. Lab results do not establish field Core Web Vitals or accessibility compliance.`
     : record ? 'Saved homepage HTML audit only. Lighthouse measurements and passed-check totals are not available.'
       : 'No saved website analysis is available for this website.')
-  const notice = [coverage, record?.audit.status === 'partial' ? 'Partial coverage.' : '',
+  const notice = [coverage,
     ...(pageContext ? [] : record?.audit.warnings ?? []), record?.audit.failure?.message ?? '',
     running ? `Investigation ${running.status}: ${running.stage.replaceAll('_', ' ')}. Previous results remain visible.` : '',
     state.latestAttempt?.status === 'failed' ? 'The latest website investigation failed. Previous saved results remain visible when available.' : '',
-    investigation.error?.message ?? '', state.error ?? ''].filter(Boolean).join(' ')
+    investigation.error?.message ?? '', state.error ?? '', interpretation?.status === 'failed' ? 'AI interpretation did not complete. Saved report results remain available; no automatic model retry was started.' : ''].filter(Boolean).join(' ')
   const evidenceLabel = pageContext?.sourceLabel ?? (record?.results?.lighthouse ? measurementLabel(record.results.lighthouse) : 'Saved live homepage HTML evidence · Collection source and time shown above')
 
   return (

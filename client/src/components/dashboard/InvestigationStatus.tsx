@@ -31,7 +31,7 @@ export function InvestigationStatus({ audit, loading, submitting, error, onRetry
     : loading ? 'Checking investigation status…'
       : !running && socialRunning ? 'Facebook report running. Website report status is shown below.'
       : audit?.status === 'completed' ? 'Investigation complete. Report generated.'
-        : audit?.status === 'partial' ? 'Investigation partially completed. A partial report is available.'
+        : audit?.status === 'partial' ? 'Investigation finished. Report available.'
           : audit?.status === 'failed' ? 'Investigation failed. A complete report could not be generated.'
             : audit ? stageLabels[audit.stage] : null
   const finishedAt = audit ? completionTime(audit.completedAt) : null

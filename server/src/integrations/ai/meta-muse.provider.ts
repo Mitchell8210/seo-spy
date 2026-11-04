@@ -292,7 +292,13 @@ export class MetaMuseProvider {
   }
   async generateFrontend(input: MetaMuseInput, context: FrontendAllowanceScope, signal?: AbortSignal): Promise<MetaMuseGeneration> {
     const source = object(input.input), snapshot = object(source?.snapshot), prepared = this.prepare(input), request = object(JSON.parse(prepared.payload));
-    const validTask = context.task === "planner"
+    const validTask = context.task === "facebook-post"
+      ? source?.schemaVersion === "facebook-post-input-v1" && source.businessId === context.businessId && source.siteUrl === context.siteUrl && source.requestId === context.resourceKey
+        && /^\d{1,40}$/.test(String(source.pageId)) && typeof source.recommendation === "string" && typeof source.businessName === "string"
+      : context.task === "investigation"
+      ? source?.schemaVersion === "investigation-input-v1" && source.businessId === context.businessId && source.siteUrl === context.siteUrl && source.requestId === context.resourceKey
+        && Array.isArray(source.sources) && source.sources.length >= 1 && source.sources.length <= 2 && Array.isArray(source.evidence) && source.evidence.length > 0
+      : context.task === "planner"
       ? snapshot?.version === "planner-snapshot-v1" && snapshot.businessId === context.businessId && Array.isArray(snapshot.tasks) && /^[a-f0-9]{64}$/.test(String(source?.snapshotHash))
       : context.task === "wordpress-alt" && ["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source?.schemaVersion))
         && source?.capability === "wordpress.media.alt_text.update" && allowancePageBelongsToSite(object(source.target)?.pageUrl, context.siteUrl);

@@ -133,7 +133,7 @@ export function FixReviewDialog({ review, capability: initialCapability, candida
         <p className="text-xs text-muted">Describe only content you can reliably verify.</p>
         <label className="block font-semibold">Page and description language<select aria-label="Page and description language" value={language} onChange={event => setLanguage(event.target.value as 'es' | 'en' | '')} className="mt-2 block min-h-11 w-full rounded-lg border border-line bg-elevated p-3 text-ink"><option value="">Review and choose language</option><option value="es">Spanish</option><option value="en">English</option></select></label>
         {purpose === 'informative' && language === 'es' && <label className="block font-semibold">Essential Spanish words<textarea aria-label="Essential Spanish words" disabled={!!busy} maxLength={200} rows={2} value={essentialTerms} onChange={event => setEssentialTerms(event.target.value)} placeholder="Comma-separated words from the reviewed description" className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 text-ink" /></label>}
-        <button type="button" className={primary} disabled={!!busy || purpose === 'unknown' || !language || purpose === 'informative' && (!description.trim() || language === 'es' && !essentialTerms.trim())} onClick={confirmPurpose}>Confirm image purpose</button>
+        <button type="button" className={primary} disabled={!!busy || purpose === 'unknown' || !language} onClick={confirmPurpose}>Confirm image purpose</button>
       </section>}
       {supported && step === 'review' && <section className="space-y-3">
         {!(generation ? applyReady : ready) && <p role="status" className="text-secondary">{customerFixSetupMessage}</p>}

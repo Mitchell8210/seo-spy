@@ -12,7 +12,7 @@ import { pageMediaBindingSchema, pageSnapshot } from "./wordpress-page-evidence.
 import { WordPressService } from "./wordpress.service.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
 import { WordPressFixStore, fixDigest } from "./wordpress-fix.store.js";
-import { ALT_CAPABILITY, altEvidenceSchema, altOutputSchema, enrollAltSchema, fixTargetSchema, generateAltSchema, hasAltTerm, validateAltOutput, validateHumanAltText, validateContextualAltText, type AltEvidence } from "./wordpress-fix.types.js";
+import { ALT_CAPABILITY, hasAltDraftingBasis, altEvidenceSchema, altOutputSchema, enrollAltSchema, fixTargetSchema, generateAltSchema, hasAltTerm, validateAltOutput, validateHumanAltText, validateContextualAltText, type AltEvidence } from "./wordpress-fix.types.js";
 import { buildAltModelInput, buildCustomerAltModelInput } from "./wordpress-alt-request.js";
 import { WordPressAltReceiptService, type AltReceiptOutcome } from "./wordpress-alt-receipt.service.js";
 import { WordPressPurposeService, executionFactsHash } from "./wordpress-purpose.service.js";
@@ -69,7 +69,7 @@ export class WordPressFixService {
     const matched = matchMediaImages(observeImages(html), page.finalUrl, [{ mediaId: record.target.mediaId, sourceUrls: fresh.sourceUrls }], record.target.mediaId);
     if (matched.status !== "matched" || matched.matches.some(image => image.alt !== record.target.currentAlt)) throw unavailable("Public image identity/current alternative changed.");
     const expired = Date.parse(record.expiresAt) <= Date.now();
-    const purposeEligible = record.purpose === "informative" && record.verifiedDescription.trim().length > 0 || record.purpose === "decorative" && record.target.currentAlt !== "";
+    const purposeEligible = record.purpose === "informative" && hasAltDraftingBasis(record) || record.purpose === "decorative" && record.target.currentAlt !== "";
     return { evidenceId: id, revalidatedAt: new Date().toISOString(), target: fresh.target, source: record.source, sourceUrls: fresh.sourceUrls,
       pageContext: this.pageContext(fresh), publicCollectedAt: page.collectedAt, renderedUrls: matched.renderedUrls,
       purpose: record.purpose, reviewExpired: expired, reviewExpiresAt: record.expiresAt, requiresNewOperatorConfirmation: expired,
@@ -230,7 +230,7 @@ export class WordPressFixService {
     }
     // A recommendation with more than one reviewed image needs a separately scoped finding.
     const record = matches.length === 1 ? matches[0] : undefined;
-    const fixable = !!record && (record.purpose === "informative" && record.verifiedDescription.trim().length > 0 || record.purpose === "decorative" && record.target.currentAlt !== "");
+    const fixable = !!record && (record.purpose === "informative" && hasAltDraftingBasis(record) || record.purpose === "decorative" && record.target.currentAlt !== "");
     const saved = record ? this.store.list(businessId, actor).find(row => row.kind === "generation" && row.evidenceId === record.id) : null;
     const savedGeneration = saved ? generationSchema.parse(saved) : null;
     if (savedGeneration && record) validateAltOutput(savedGeneration.output, record);
@@ -238,6 +238,9 @@ export class WordPressFixService {
     const customerFixes = owner && typeof this.provider.wordPressAllowanceStatus === "function"
       ? await this.provider.wordPressAllowanceStatus(actor, businessId, new URL(owner.siteUrl).href, owner.target.mediaId)
       : { status: "pending_approval" as const, allowWordPressAltApply: false };
+    if (owner && customerFixes.status !== "blocked" && this.wordpress.customerAltWriteAuthorized(businessId, owner.target)) {
+      Object.assign(customerFixes, { writeAuthorized: true, allowWordPressAltApply: true });
+    }
     return { capability: ALT_CAPABILITY, fixable, purposeReusable, executionRefreshRequired: refreshRequired, workflow: savedWorkflow?.workflow ?? null, customerFixes,
       ...(owner?.purpose === "informative" && owner.proposalContext ? { customerGenerationPolicy: "page-context-v1" as const } : {}),
       reason: refreshRequired ? "Owner purpose is retained. Refresh read-only execution state; no new owner purpose confirmation is needed." : fixable ? "Exact operator-reviewed media context; fresh remote checks are required before proposal and Apply." : "No unique, current, writable media target with reliable image purpose/content has been reviewed. This recommendation remains manual.",
@@ -292,7 +295,7 @@ export class WordPressFixService {
     const inputHash = fixDigest({ evidenceId: evidence.id, requestHash: prepared.requestHash, mock });
     const cached = this.store.list(businessId, actor).find(row => row.kind === "generation" && row.inputHash === inputHash);
     if (cached) return publicRecord(generationSchema.parse(cached));
-    const sufficient = evidence.purpose === "decorative" || evidence.purpose === "informative" && evidence.verifiedDescription.trim().length > 0;
+    const sufficient = evidence.purpose === "decorative" || evidence.purpose === "informative" && (customer ? hasAltDraftingBasis(evidence) : evidence.verifiedDescription.trim().length > 0);
     const mockDescription = evidence.proposalContext ? evidence.verifiedDescription.split(/(?<=[.!?])\s+/).find(sentence => evidence.proposalContext!.requiredTerms.every(term => hasAltTerm(sentence, term))) ?? evidence.verifiedDescription : evidence.verifiedDescription;
     const local = !sufficient ? { schemaVersion: "wordpress-alt-output-v1", status: "insufficient_evidence", altText: null, reason: "INSUFFICIENT_CONTEXT" }
       : { schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText: evidence.purpose === "decorative" ? "" : mockDescription.replace(/\s+/g, " ").trim().slice(0, 300), reason: evidence.purpose === "decorative" ? "DECORATIVE" : "DESCRIPTION_EXCERPT" };
@@ -402,7 +405,8 @@ export class WordPressFixService {
     if (customer) {
       const generation = generationSchema.parse(this.store.read(businessId, actor, revision.generationId));
       if (generation.isMock || !generation.attemptId) throw unavailable("Generate an authorized suggestion before applying this fix.");
-      return this.wordpress.applyCustomerAlt(businessId, actor, id, hash, generation.attemptId, revision.evidenceId, generation.id);
+      return this.wordpress.applyCustomerAlt(businessId, actor, id, hash, generation.attemptId, revision.evidenceId, generation.id,
+        { pageResource: revision.target.pageResource, pageId: revision.target.pageId, requestHash: generation.requestHash });
     }
     return this.wordpress.apply(businessId, actor, id, hash);
   }

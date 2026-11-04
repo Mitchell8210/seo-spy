@@ -1,3 +1,17 @@
+# Facebook post workflow
+
+The authenticated customer alt-text flow supports any exactly bound image on the configured WordPress business/site when `WORDPRESS_WRITES_ENABLED=true`. It no longer restricts Apply to the historical media-5658 test grant. Apply still requires the exact reviewed proposal hash, a successful generation bound to the initiating actor/business/evidence/request, fresh WordPress state, and the existing execution lock/journal. Generation alone never writes; the explicit Approve & Apply action authorizes the exact change. The local recording environment has writes enabled at the user's request; the default remains off.
+
+Customer image-alt drafts accept an empty reviewed description and no essential words after image purpose/language confirmation. The exact bound page title and primary page context provide the text-only drafting basis in Spanish or English. Customer description words are optional evidence, not mandatory output tokens; historical excerpt-only operator generation remains unchanged. Unsupported visual claims and drafts without a meaningful basis remain blocked. No image pixels are sent, and generation never applies a WordPress edit.
+
+The saved posting recommendation now opens an editable Meta Muse draft and explicit **Approve & Publish** flow, with durable publication results and exact-message verification. See [setup, permissions, APIs and validation](FACEBOOK_POSTS.md). Live publication requires the connected browser's `pages_manage_posts` permission and the local publishing gate. No live post was made during implementation.
+
+The same unresolved posting recommendation supports successive **Generate another post** actions, one independently reviewed post at a time. Saved Page content informs generation and duplicate/near-duplicate text is blocked at approval and dispatch. Closing an unpublished review discards its draft; reopening allows an explicit fresh generation. Individual publications remain in Recent Actions; they do not complete the ongoing recommendation.
+
+# Current report AI integration
+
+Dashboard, Website and Social Media now run an authenticated post-report Muse interpretation and display evidence-linked recommendations in their existing slots. Scores stay deterministic. Saved reads are cost-free, failures retain reports, and all paid calls use the existing shared $25 allowance. See [workflow, routes and verification](INVESTIGATION_AI.md). This scoped path supersedes historical mock-only descriptions below for these explicit report buttons.
+
 # SEO Spy server
 
 Latest WordPress-alt result: [one separately authorized live generation completed, validated and saved for review](WORDPRESS_ALT_FIRST_LIVE.md). No WordPress update occurred; the exact attempt is consumed and normal defaults remain mock-first.

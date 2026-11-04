@@ -24,6 +24,8 @@ import { FileReportStore } from "../../reports/file-report.store.js";
 import { AssessmentService } from "../assessments/assessment.service.js";
 import type { ReportFileReference } from "../../reports/report.types.js";
 import { GoogleFacebookVisitsService } from "../google/facebook-visits.service.js";
+import { InvestigationAiService } from "../investigation-ai/investigation-ai.service.js";
+import type { InterpretationContext } from "../../reporting/investigation-interpretation.js";
 import {
   FacebookError,
   FacebookGraph,
@@ -59,6 +61,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     @Optional() @Inject(AUDIT_REPOSITORY) private readonly audits?: AuditRepository,
     @Optional() private readonly assessments?: AssessmentService,
     @Optional() private readonly websiteVisits?: GoogleFacebookVisitsService,
+    @Optional() private readonly interpretation?: InvestigationAiService,
   ) {}
 
   async status(sessionId: string | undefined, businessId: string): Promise<FacebookReportProgress> {
@@ -90,6 +93,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     sessionId: string | undefined,
     businessId: string,
     pageId: string,
+    context?: InterpretationContext,
   ): Promise<FacebookBrowserReport> {
     if (this.closing)
       throw new ServiceUnavailableException(
@@ -114,7 +118,7 @@ export class FacebookReportsService implements OnModuleDestroy {
       });
     // Schedule after reserving the business so concurrent requests cannot both enter.
     const job = Promise.resolve().then(() =>
-      this.run(sessionId, businessId, pageId),
+      this.run(sessionId, businessId, pageId, context),
     );
     this.jobs.set(businessId, job);
     this.owners.set(businessId, { sessionId, pageId });
@@ -141,6 +145,7 @@ export class FacebookReportsService implements OnModuleDestroy {
     sessionId: string | undefined,
     businessId: string,
     pageId: string,
+    context?: InterpretationContext,
   ): Promise<FacebookBrowserReport> {
     const credential = await this.facebook.credential(sessionId);
     const business = await this.businesses.findById(businessId);
@@ -229,6 +234,15 @@ export class FacebookReportsService implements OnModuleDestroy {
       if (["completed", "partial"].includes(audit.status)) {
         try { await this.assessments?.create(businessId, { facebookReportId: audit.id }); }
         catch { this.logger.warn("The Facebook report is saved, but its separate score snapshot could not be published. No provider retry was started."); }
+      }
+      if (context && ["completed", "partial"].includes(audit.status)) {
+        try { const ai = await this.interpretation?.interpret(context, [audit.id]); if (ai?.status !== "completed") throw new Error(); }
+        catch {
+          audit.status = "partial";
+          audit.failure ??= { code: "AI_INTERPRETATION_FAILED", message: "The Facebook report was saved, but AI interpretation did not complete. No automatic model retry was started." };
+          audit.warnings.push(audit.failure.message);
+          await this.audits?.save(audit);
+        }
       }
       return { ...reference, status: audit.status, failure: audit.failure };
     } catch {

@@ -305,7 +305,7 @@ async function serveFixture(req, res) {
         metadata: Array.from({ length: 5 }, () => ({ subjectToThresholding: false, dataLossFromOtherRow: false, sampling: [] })) } });
   }
   apiRequests++;
-  if(plannerMode&&req.method==='GET'&&req.url==='/api/wordpress/browser-session')return reply(res,200,{connected:true,businessId,csrf:'x'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()});
+  if(req.method==='GET'&&req.url==='/api/wordpress/browser-session')return reply(res,200,{connected:true,businessId,csrf:'x'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()});
   if(plannerMode&&req.url.startsWith(`/api/wordpress/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
   if(plannerMode&&req.url.startsWith(`/api/businesses/${businessId}/smart-planner`))return servePlannerFixture(req,res,new URL(req.url,'http://fixture').pathname);
   if(plannerMode&&req.method==='GET'&&req.url==='/api/businesses/planner-other-business/smart-planner')return reply(res,200,{
@@ -313,6 +313,7 @@ async function serveFixture(req, res) {
     tasks:[{id:'00000000-0000-4000-8000-000000000300',taskKey:'custom:other-business',title:'Second business task only',explanation:'Isolated fixture',guidance:'Review only this business.',priority:'Low',category:'Review',source:'Custom task',mode:'custom',status:'Needs Action',schedule:null,destination:null,notes:''}],
     sources:['website','social','consistency'].map(channel=>({channel,availability:'empty',reportIds:[]})),
   });
+  if(req.method==='GET'&&req.url.startsWith(`/api/wordpress/local/businesses/${businessId}/investigation-interpretation?`))return reply(res,200,{businessId,interpretation:null});
   // Saved reports remain readable when the investigation service is unavailable.
   if (req.method === 'GET' && req.url === `/api/businesses/${businessId}/facebook-report`) {
     if (plannerFacebookDelayMs) await delay(plannerFacebookDelayMs);
@@ -346,12 +347,12 @@ async function serveFixture(req, res) {
   }
   if (route === '/api/health') return reply(res, 200, { status: 'ok', service: 'fixture', mode: 'demo' });
   if (route.endsWith('/dashboard')) return reply(res, 200, dashboard());
-  if (req.method === 'POST' && (route.endsWith('/audits') || route === '/api/facebook/investigations')) {
+  if (req.method === 'POST' && (route.endsWith('/audits') || route === `/api/wordpress/businesses/${businessId}/investigations/overall`)) {
     if (activeId) return reply(res, 409, { error: { code: 'AUDIT_ALREADY_ACTIVE', message: 'A fixture audit is already running.', requestId: 'fixture-request' } });
     let body = '';
     for await (const chunk of req) body += chunk;
-    const input = route === '/api/facebook/investigations' ? { scope: 'lighthouse', strategy: 'mobile' } : JSON.parse(body || '{}');
-    if (route === '/api/facebook/investigations') assert.deepEqual(JSON.parse(body), { businessId });
+    const input = route === `/api/wordpress/businesses/${businessId}/investigations/overall` ? { scope: 'lighthouse', strategy: 'mobile' } : JSON.parse(body || '{}');
+    if (route === `/api/wordpress/businesses/${businessId}/investigations/overall`) assert.deepEqual(JSON.parse(body), { confirmed: true });
     creationCount++;
     const id = `00000000-0000-4000-8000-${String(creationCount + 1).padStart(12, '0')}`;
     const audit = summary(id, { scope: input.scope, status: 'running', stage: input.scope === 'lighthouse' ? 'running_lighthouse' : 'collecting_evidence' });
@@ -367,7 +368,7 @@ async function serveFixture(req, res) {
       res.destroy();
       return;
     }
-    return reply(res, 202, route === '/api/facebook/investigations' ? overall(id) : { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
+    return reply(res, 202, route === `/api/wordpress/businesses/${businessId}/investigations/overall` ? overall(id) : { ...audit, status: 'queued', stage: 'queued', statusUrl: `/api/audits/${id}` });
   }
   const match = /^\/api\/audits\/([^/]+)(?:\/(findings|recommendations|lighthouse))?$/.exec(route);
   if (match) {
@@ -498,8 +499,8 @@ async function assertUnifiedAssessment() {
 function assertDashboardRequests(requests) {
   assert.equal(requests.filter(request => /\/api\/audits\/[^/]+\/(findings|recommendations|lighthouse)(?:\?|$)/.test(request.url)).length, 0, 'Dashboard must not fetch website report details; saved Facebook reports are allowed.');
   for (const request of requests.filter(request => request.method === 'POST')) {
-    assert.equal(new URL(request.url).pathname, '/api/facebook/investigations');
-    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { businessId });
+    assert.equal(new URL(request.url).pathname, `/api/wordpress/businesses/${businessId}/investigations/overall`);
+    assert.deepEqual(JSON.parse(request.postData ?? '{}'), { confirmed: true });
   }
 }
 
@@ -538,7 +539,7 @@ async function dashboardScenario(base, backendBase) {
     assert.equal(statusRequests, polls, 'Terminal status must stop polling.');
   };
   await submit('completed');
-  await terminal(liveMode ? /Investigation complete|partially completed|failed|could not complete/i : /Investigation complete\. Report generated\./);
+  await terminal(liveMode ? /Investigation complete|Investigation finished|failed|could not complete/i : /Investigation complete\. Report generated\./);
   assert.match(await dashboardStatus(), /[a-f0-9-]{36}/i, 'Status must identify the backend audit.');
   pass('One mobile Lighthouse POST, duplicate prevention, stage progress, and unchanged mock results');
   if (liveMode) {
@@ -552,7 +553,7 @@ async function dashboardScenario(base, backendBase) {
     await writeFile(path.join(artifactDir, 'dashboard-live-summary.json'), `${JSON.stringify({ auditId, status: audit.status, auditPosts: 1, reportReads: 0 }, null, 2)}\n`);
   } else {
     await stopped();
-    await submit('partial'); await terminal(/Investigation partially completed\. A partial report is available\./); await stopped();
+    await submit('partial'); await terminal(/Investigation finished\. Report available\./); await stopped();
     pass('Partial provider failure preserves mock cards and stops polling');
     await submit('failed'); await terminal(/failed|could not complete/i); await stopped();
     pass('Full failure is shown without replacing illustrative cards');
@@ -1324,7 +1325,7 @@ async function liveScenario(base, backendBase) {
   await waitFor(async () => {
     const status = await elementText('lab-status-panel');
     const enabled = await evaluate(`document.querySelector(${JSON.stringify(selector('lab-run-audit'))})?.disabled === false`);
-    return enabled && /Completed|Partial results|Failed/.test(status);
+    return enabled && /Completed|Results available|Failed/.test(status);
   }, `live ${liveScope} terminal state`, 170000);
   const statusText = await elementText('lab-status-panel');
   const auditId = /Audit\s+([a-f0-9-]{36})/i.exec(statusText)?.[1];

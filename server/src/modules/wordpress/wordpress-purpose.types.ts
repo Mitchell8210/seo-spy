@@ -22,7 +22,7 @@ export const purposeDependenciesSchema = z.object({ policyVersion: z.literal(PUR
   business: businessSchema, siteUrl: z.string().url().max(2048),
   media: z.object({ id: z.number().int().positive(), sourceUrl: z.string().url().max(2048), sourceUrls: z.array(z.string().url().max(2048)).min(1).max(100), parentId: z.number().int().positive() }).strict(),
   page: pageContextSchema.omit({ collectedAt: true }), image: imageSchema, renderedImages: z.array(imageSchema).min(1).max(9).optional(),
-  review: z.object({ purpose: z.enum(["informative", "functional", "decorative", "unknown"]), verifiedDescription: z.string().max(500), language: z.literal("es").nullable(), requiredTerms: z.array(z.string().min(2).max(40)).max(5) }).strict(),
+  review: z.object({ purpose: z.enum(["informative", "functional", "decorative", "unknown"]), verifiedDescription: z.string().max(500), language: z.enum(["es", "en"]).nullable(), requiredTerms: z.array(z.string().min(2).max(40)).max(5) }).strict(),
   placements: z.array(placementSchema).min(1).max(20), publicPlacements: z.array(placementSchema).min(1).max(20).optional(), publicContextHash: fixHash.optional() }).strict()
   .refine(value => (value.publicPlacements !== undefined) === (value.publicContextHash !== undefined), "Public placement and context fingerprints must be recorded together.");
 export type PurposeDependencies = z.infer<typeof purposeDependenciesSchema>;

@@ -8,7 +8,7 @@ import { matchMediaImages, observeImages } from "../../integrations/wordpress/im
 import { FileReportStore } from "../../reports/file-report.store.js";
 import { WordPressService } from "./wordpress.service.js";
 import { WordPressFixStore, fixDigest } from "./wordpress-fix.store.js";
-import { altEvidenceSchema, type AltEvidence } from "./wordpress-fix.types.js";
+import { hasAltDraftingBasis, altEvidenceSchema, type AltEvidence } from "./wordpress-fix.types.js";
 import { pageMediaBindingSchema, pageSnapshot } from "./wordpress-page-evidence.service.js";
 import { PURPOSE_POLICY_VERSION, deterministicPurposeBindingId, executionStateSchema, purposeBindingSchema, purposeDependencies,
   purposeDependencyHash, validatePurposeBinding, type ExecutionState } from "./wordpress-purpose.types.js";
@@ -189,7 +189,7 @@ export class WordPressPurposeService {
       historicalReviewExpiresAt: owner.expiresAt, reviewExpired: false, reviewExpiresAt: null,
       executionStateExpiresAt: state?.expiresAt ?? null, executionRefreshRequired: !state || Date.parse(state.expiresAt) <= Date.now(),
       requiresNewOperatorConfirmation: false, eligibleForGeneration: !!state && Date.parse(state.expiresAt) > Date.now()
-        && (owner.purpose === "informative" && !!owner.verifiedDescription.trim() || owner.purpose === "decorative" && checked.fresh.target.currentAlt !== ""),
+        && (owner.purpose === "informative" && hasAltDraftingBasis(owner) || owner.purpose === "decorative" && checked.fresh.target.currentAlt !== ""),
       confirmationRenewed: false, applicationRecordsCreated: 0, modelRequests: 0, wordPressWrites: 0 };
   }
   async checkRestoration(owner: AltEvidence, expected: AltEvidence["target"]) {

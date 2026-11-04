@@ -111,6 +111,36 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect(result.status).toBe(201); expect(result.body.verifiedDescription).toBe("Taxes");
     expect(transport).toHaveBeenCalledTimes(4); expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
   });
+  it.each(["es", "en"])("generates using page context in %s without customer words", async language => {
+    const original = transport.getMockImplementation()!;
+    transport.mockImplementation(async (...args) => {
+      const value = await original(...args);
+      if (args[2].startsWith(`/wp-json/wp/v2/pages/${pageId}`)) {
+        const page = value as { title?: { rendered: string }; content: { rendered: string } };
+        page.title = { rendered: "Accounting services" };
+        page.content.rendered = "<p>Accounting services for small businesses.</p>" + page.content.rendered;
+      }
+      return value;
+    });
+    const result = await post("/fixes/purpose", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId, mediaId, pageResource: "pages", pageId,
+      purpose: "informative", verifiedDescription: "", proposalLanguage: language, requiredTerms: [] });
+    expect(result.status).toBe(201);
+    const capability = await request(app.getHttpServer()).get(prefix + "/fixes/capability").set("Host", "localhost:5173").set("Origin", origin).set("Cookie", cookie).query({ reportId, findingId: "exact-image-review" });
+    expect(capability.body.fixable).toBe(true);
+    const text = "Accounting services for small businesses.";
+    const generate = jest.spyOn(app.get(MetaMuseProvider), "generateFrontend").mockResolvedValue({
+      output: { schemaVersion: "wordpress-alt-output-v2", status: "proposed", altText: text, reason: "CONTEXT_DRAFT" },
+      model: "muse-spark-1.3", usage: { inputTokens: 100, outputTokens: 50 }, requestId: "offline-context",
+    });
+    const response = await post("/fixes/customer-generations", { evidenceId: result.body.id });
+    expect(response.status).toBe(201); expect(response.body.output.altText).toBe(text);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls[0]![0].input).toMatchObject({ language });
+    const proposal = await post("/fixes/proposals", { generationId: response.body.id, altText: text });
+    expect(proposal.status).toBe(201);
+    expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
+  });
+
   it("confirms image purpose with one authenticated target snapshot and rechecks for later generation", async () => {
     transport.mockClear();
     const response = await post("/fixes/purpose", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId,
@@ -129,8 +159,8 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     expect(transport.mock.calls).toHaveLength(8);
     expect(muse).not.toHaveBeenCalled(); expect(writes).toBe(0);
   });
-  it("generates under the shared allowance while applying still requires independent write authorization", async () => {
-    mediaId = 5658; pageId = 5652;
+  it.each([5658, 4568, 7890])("applies a shared generation for media %s with exact approval and independent write authorization", async targetId => {
+    mediaId = targetId; pageId = 5652;
     const text = "Ayuda para entender y responder cartas del IRS.";
     const evidence = await operatorPost(prefix + "/fix-operator/evidence", { confirmed: true, reportId, findingId: "exact-image-review", evidenceId, mediaId, pageResource: "pages", pageId,
       purpose: "informative", verifiedDescription: text, proposalLanguage: "es", requiredTerms: ["ayuda", "cartas", "IRS"] });
@@ -153,9 +183,16 @@ describe("protected WordPress Fix with AI end-to-end, isolated transports and SQ
     const deniedApply = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
     expect(deniedApply.status).toBe(403); expect(writes).toBe(0);
     config.set("WORDPRESS_WRITES_ENABLED", true);
-    const applied = await post(`/fixes/proposals/${proposed.body.id}/apply`, { confirmed: true, proposalHash: proposed.body.hash });
-    expect(applied.status).toBe(201); expect(applied.body).toMatchObject({ status: "applied", verification: "verified_stored_fields" }); expect(writes).toBe(1);
-    const replay = await post(`/fixes/proposals/${proposed.body.id}/apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    const capability = await get(`/fixes/capability?reportId=${reportId}&findingId=exact-image-review`);
+    expect(capability.body.customerFixes.writeAuthorized).toBe(true);
+    const usage = app.get(AiUsageStore), actor = operatorIdentity(operator);
+    expect(await usage.frontendWordPressAltGenerationAuthorized(actor, businessId, evidence.body.id, generated.body.attemptId, generated.body.requestHash)).toBe(true);
+    expect(await usage.frontendWordPressAltGenerationAuthorized("another-actor", businessId, evidence.body.id, generated.body.attemptId, generated.body.requestHash)).toBe(false);
+    expect(await usage.frontendWordPressAltGenerationAuthorized(actor, businessId, randomUUID(), generated.body.attemptId, generated.body.requestHash)).toBe(false);
+    expect(await usage.frontendWordPressAltGenerationAuthorized(actor, businessId, evidence.body.id, generated.body.attemptId, "0".repeat(64))).toBe(false);
+    const applied = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
+    expect(applied.status).toBe(201); expect(applied.body.outcome).toMatchObject({ status: "applied", verification: "verified_stored_fields" }); expect(writes).toBe(1);
+    const replay = await post(`/fixes/proposals/${proposed.body.id}/customer-apply`, { confirmed: true, proposalHash: proposed.body.hash });
     expect(replay.body).toEqual(applied.body); expect(writes).toBe(1); expect(muse).toHaveBeenCalledTimes(1);
     config.set("WORDPRESS_WRITES_ENABLED", false);
     const beforeVerificationReads = transport.mock.calls.length;

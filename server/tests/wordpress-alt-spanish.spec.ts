@@ -24,6 +24,31 @@ const spanish = (): AltEvidence => ({ ...structuredClone(legacy), verifiedDescri
 const proposed = (altText: string) => ({ schemaVersion: "wordpress-alt-output-v1", status: "proposed", altText, reason: "DESCRIPTION_EXCERPT" });
 
 describe("Spanish WordPress alt request preparation with historical input compatibility", () => {
+  it.each(["", "Business"])("accepts page-grounded drafts without description keywords (%s)", description => {
+    const evidence = spanish();
+    evidence.verifiedDescription = description;
+    evidence.proposalContext!.requiredTerms = description ? [description] : [];
+    evidence.proposalContext!.page.title = "Servicio de contabilidad en Las Vegas";
+    evidence.proposalContext!.page.textExcerpt = "Servicios de contabilidad para negocios en Las Vegas. Unrelated later material.";
+    const output = { schemaVersion: "wordpress-alt-output-v2", status: "proposed", altText: "Servicios de contabilidad para negocios en Las Vegas.", reason: "CONTEXT_DRAFT" };
+    expect(validateAltOutput(output, evidence)).toEqual(output);
+    for (const altText of ["Una mujer con una computadora.", "Servicios garantizados con mejores resultados.", "Unrelated later material."])
+      expect(() => validateAltOutput({ ...output, altText }, evidence)).toThrow();
+  });
+
+  it("supports English page context without customer words and requires a meaningful basis", () => {
+    const evidence = spanish(); evidence.verifiedDescription = "";
+    evidence.proposalContext!.requiredTerms = []; evidence.proposalContext!.language = "en";
+    evidence.proposalContext!.page.title = "Accounting services";
+    evidence.proposalContext!.page.textExcerpt = "Accounting services for small businesses. Later material.";
+    const output = { schemaVersion: "wordpress-alt-output-v2", status: "proposed", altText: "Accounting services for small businesses.", reason: "CONTEXT_DRAFT" };
+    expect(validateAltOutput(output, evidence)).toEqual(output);
+    expect(buildCustomerAltModelInput(evidence, "").input).toMatchObject({ language: "en" });
+    evidence.proposalContext!.page.title = null; evidence.proposalContext!.page.textExcerpt = "";
+    expect(() => validateAltOutput({ ...output, altText: "Guzman Tax Accounting" }, evidence)).toThrow();
+    expect(validateAltOutput({ ...output, status: "insufficient_evidence", altText: null, reason: "INSUFFICIENT_CONTEXT" }, evidence).status).toBe("insufficient_evidence");
+  });
+
   it("drafts from a short reviewed topic and primary page context without copying a finished customer description", () => {
     const evidence = spanish(); evidence.verifiedDescription = "Taxes";
     evidence.proposalContext!.requiredTerms = ["Taxes"];

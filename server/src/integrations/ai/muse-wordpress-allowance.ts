@@ -16,7 +16,7 @@ export const allowanceInputSchema = z.object({ actor: hash, businessId: z.litera
   const u = new URL(v); return u.protocol === "https:" && !u.username && !u.password && !u.search && !u.hash && u.pathname === "/";
 }).transform(v => new URL(v).href), mediaIds: z.tuple([z.literal(5658)]) }).strict();
 export type WordPressAllowanceScope = { actor: string; businessId: string; siteUrl: string; mediaId: number; evidenceId: string };
-export type FrontendAllowanceScope = { actor: string; businessId: string; siteUrl: string; task: "wordpress-alt" | "planner"; resourceKey: string };
+export type FrontendAllowanceScope = { actor: string; businessId: string; siteUrl: string; task: "wordpress-alt" | "planner" | "investigation" | "facebook-post"; resourceKey: string };
 export const FRONTEND_ALLOWANCE_POLICY = { version: "frontend-muse-scope-v1", tasks: ["wordpress-alt", "planner"], explicitAuthenticatedRequestsOnly: true,
   newFundingMicros: 0, newAttempts: 0, renewExpiry: false, expandWordPressWrites: false } as const;
 export const FRONTEND_ALLOWANCE_POLICY_HASH = digest(FRONTEND_ALLOWANCE_POLICY);

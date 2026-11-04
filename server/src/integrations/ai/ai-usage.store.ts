@@ -526,7 +526,7 @@ export class AiUsageStore implements OnModuleDestroy {
     return saveFrontendReceipt(database, intentId);
   }); }
   async estimateFrontend(input: AiUsageEstimateInput, scope: FrontendAllowanceScope) {
-    if (!scope.actor || scope.actor !== input.actor || !scope.businessId || !scope.resourceKey || !["planner", "wordpress-alt"].includes(scope.task)) throw fail("AI_APPROVAL_MISMATCH");
+    if (!scope.actor || scope.actor !== input.actor || !scope.businessId || !scope.resourceKey || !["planner", "wordpress-alt", "investigation", "facebook-post"].includes(scope.task)) throw fail("AI_APPROVAL_MISMATCH");
     if (input.maxOutputTokens > 1500 && (scope.task !== "planner" || input.scope !== `frontend:planner:${scope.businessId}:${scope.resourceKey}`)) throw fail("AI_APPROVAL_MISMATCH");
     return this.estimate(input);
   }
@@ -539,6 +539,14 @@ export class AiUsageStore implements OnModuleDestroy {
       return { ...historical, status: blocked ? "blocked" as const : remainingMicros > 0 ? "active" as const : "exhausted" as const,
         generationAuthorized: !blocked && remainingMicros > 0, remainingMicros, remainingAttempts: !blocked && remainingMicros > 0 ? Number.MAX_SAFE_INTEGER : 0,
         expiresAt: null }; // Existing independent write authorization is never expanded.
+    });
+  }
+  async frontendWordPressAltGenerationAuthorized(actor: string, businessId: string, evidenceId: string, attemptId: string, requestHash: string) {
+    return this.transaction(database => {
+      const row = database.prepare("SELECT intent_id,status FROM attempts WHERE id=?").get(attemptId);
+      if (!row || row.status !== "success") return false;
+      const intent = this.intent(database, String(row.intent_id));
+      return intent.actor === actor && intent.scope === `frontend:wordpress-alt:${businessId}:${evidenceId}` && intent.requestHash === requestHash;
     });
   }
   async wordPressAllowanceGenerationAuthorized(actor: string, businessId: string, siteUrl: string, mediaId: number, attemptId: string, evidenceId: string, generationId: string) {

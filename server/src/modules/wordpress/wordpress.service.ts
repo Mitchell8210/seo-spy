@@ -189,13 +189,25 @@ export class WordPressService {
   async apply(businessId: string, actor: string, id: string, hash: string) {
     return this.execute(businessId, actor, id, hash, false);
   }
-  async applyCustomerAlt(businessId: string, actor: string, id: string, hash: string, generationAttemptId: string, evidenceId: string, generationId: string) {
+  customerAltWriteAuthorized(businessId: string, target: { pageResource: string; pageId: number; mediaId: number }) {
+    return businessId === this.config.get("WORDPRESS_BUSINESS_ID")
+      && [true, "true"].includes(this.config.get("WORDPRESS_WRITES_ENABLED") ?? false)
+      && ["pages", "posts"].includes(target.pageResource) && Number.isSafeInteger(target.pageId) && target.pageId > 0
+      && Number.isSafeInteger(target.mediaId) && target.mediaId > 0;
+  }
+  async applyCustomerAlt(businessId: string, actor: string, id: string, hash: string, generationAttemptId: string, evidenceId: string, generationId: string,
+    binding?: { pageResource: string; pageId: number; requestHash: string }) {
     const proposal = await this.proposal(businessId, actor, id);
     if (proposal.hash !== hash || proposal.resource !== "media" || Object.keys(proposal.changes).length !== 1 || typeof proposal.changes.altText !== "string")
       throw new ConflictException({ code: "WORDPRESS_APPROVAL_MISMATCH", message: "Review and approve the current image alternative text." });
     const siteUrl = new URL(proposal.siteUrl).href;
     const grant = await this.usage?.wordPressAllowanceStatus(actor, businessId, siteUrl, proposal.resourceId);
-    if (!grant?.writeAuthorized || !await this.usage?.wordPressAllowanceGenerationAuthorized(actor, businessId, siteUrl, proposal.resourceId, generationAttemptId, evidenceId, generationId))
+    const scoped = !!binding && this.customerAltWriteAuthorized(businessId, { ...binding, mediaId: proposal.resourceId });
+    const sharedGeneration = scoped && binding
+      && await this.usage?.frontendWordPressAltGenerationAuthorized(actor, businessId, evidenceId, generationAttemptId, binding.requestHash);
+    const validGeneration = sharedGeneration || grant?.writeAuthorized
+      && await this.usage?.wordPressAllowanceGenerationAuthorized(actor, businessId, siteUrl, proposal.resourceId, generationAttemptId, evidenceId, generationId);
+    if (grant?.status === "blocked" || !(scoped || grant?.writeAuthorized) || !validGeneration)
       throw new ForbiddenException({ code: "WORDPRESS_SETUP_REQUIRED", message: "Complete the one-time Fix with AI setup before applying this change." });
     return this.execute(businessId, actor, id, hash, true);
   }

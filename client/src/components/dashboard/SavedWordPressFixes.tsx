@@ -3,11 +3,37 @@ import { Link } from 'react-router'
 import { ArrowUpRight, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3 } from 'lucide-react'
 import { StatusBadge } from '../common/StatusBadge'
 import { wordpressFix, type FixWorkflow } from '../../services/wordpressFix'
+import { facebookPosts, type FacebookPost } from '../../services/facebookPosts'
 
 interface SavedFix { reportId: string; findingId: string; evidenceId: string; workflow: FixWorkflow & {
   target?: { sourceUrl: string; mediaId: number; pageId: number }; thumbnailUrl?: string | null; pageTitle?: string | null; completedAt?: string | null
 } }
 const applied = (item: SavedFix) => item.workflow.proposal?.outcome?.status === 'applied' && !item.workflow.proposal.restorationOf
+type RecentAction = { kind: 'wordpress'; fix: SavedFix } | { kind: 'facebook'; post: FacebookPost }
+const facebookTime = (post: FacebookPost) => {
+  const value = post.completedAt ?? post.executedAt
+  return value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0
+}
+const actionTime = (item: RecentAction) => item.kind === 'wordpress' ? completedTime(item.fix.workflow) : facebookTime(item.post)
+const actionVerified = (item: RecentAction) => item.kind === 'wordpress' ? item.fix.workflow.status === 'public_verified' : item.post.status === 'published' && item.post.verified
+
+function FacebookAction({ post }: { post: FacebookPost }) {
+  const published = post.status === 'published', verified = published && post.verified
+  const time = facebookTime(post)
+  return <li className="rounded-xl border border-line bg-elevated/40 p-4 sm:p-5">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 flex-1"><h3 className="font-semibold text-ink">{published ? 'Facebook post published' : 'Facebook publishing needs review'}</h3>
+        <p className="mt-1 break-words text-xs text-muted">{post.pageName} · Facebook Page {post.pageId}</p>
+        {!!time && <p className="mt-1 flex items-center gap-1 text-xs text-muted"><Clock3 size={12} aria-hidden="true" />{new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</p>}
+      </div>
+      <StatusBadge label={verified ? 'Verified' : published ? 'Published · verification pending' : 'Needs attention'} tone={verified ? 'success' : published ? 'medium' : 'critical'} />
+    </div>
+    <p className="mt-4 whitespace-pre-wrap break-words rounded-lg border border-line bg-surface p-3 text-sm leading-6 text-secondary">{post.text}</p>
+    <p className={`mt-3 text-xs leading-5 ${verified ? 'text-emerald-300' : 'text-amber-300'}`}>{verified ? 'Facebook readback confirmed the exact approved text.' : published ? 'Facebook confirmed publication. Exact-text verification is pending.' : 'Publication was not confirmed. Check the Page before posting again; this action will not be retried.'}</p>
+    {post.permalink && /^https:\/\/(www\.)?facebook\.com\//.test(post.permalink) && <div className="mt-4 flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border-t border-line pt-3 text-xs font-medium"><a href={post.permalink} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 text-blue-300 hover:text-blue-200 hover:underline">View published post<ArrowUpRight size={14} aria-hidden="true" /></a></div>}
+    <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer py-1 hover:text-secondary">Saved execution details</summary><p className="break-all pt-2 leading-5">Execution: {post.id}</p>{post.postId && <p className="break-all pt-2 leading-5">Facebook post: {post.postId}</p>}</details>
+  </li>
+}
 function completedTime(workflow: SavedFix['workflow']) {
   const value = workflow.completedAt ?? workflow.proposal?.outcome?.completedAt
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0
@@ -17,37 +43,46 @@ function recordedDate(workflow: SavedFix['workflow']) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null
 }
 export function SavedWordPressFixes({ businessId }: { businessId: string }) {
-  const [state, setState] = useState<{ businessId: string; items: SavedFix[]; error: string } | null>(null)
+  const [state, setState] = useState<{ businessId: string; items: RecentAction[]; error: string } | null>(null)
   useEffect(() => {
     let active = true
-    const refresh = () => { void wordpressFix.workflows(businessId).then(value => {
-      if (active) setState({ businessId, items: value.items.filter(applied).sort((a, b) => completedTime(b.workflow) - completedTime(a.workflow)), error: '' })
-    }).catch(error => {
-      if (active) setState({ businessId, items: [], error: error instanceof Error ? error.message : 'Saved fix receipts could not be loaded.' })
-    }) }
-    refresh(); window.addEventListener('wordpress-fix-updated', refresh)
-    return () => { active = false; window.removeEventListener('wordpress-fix-updated', refresh) }
+    let revision = 0
+    const refresh = () => {
+      const requestRevision = ++revision
+      void Promise.allSettled([wordpressFix.workflows(businessId), facebookPosts.history(businessId)]).then(([wordpress, facebook]) => {
+        const items: RecentAction[] = [
+          ...(wordpress.status === 'fulfilled' ? wordpress.value.items.filter(applied).map(fix => ({ kind: 'wordpress' as const, fix })) : []),
+          ...(facebook.status === 'fulfilled' ? facebook.value.items.map(post => ({ kind: 'facebook' as const, post })) : []),
+        ]
+        const errors = [wordpress, facebook].flatMap((result, index) => result.status === 'rejected' ? [`${index === 0 ? 'Website' : 'Facebook'} actions: ${result.reason instanceof Error ? result.reason.message : 'Saved actions could not be loaded.'}`] : [])
+        if (active && requestRevision === revision) setState({ businessId, items: items.sort((a, b) => actionTime(b) - actionTime(a)), error: errors.join(' ') })
+      })
+    }
+    refresh(); window.addEventListener('wordpress-fix-updated', refresh); window.addEventListener('facebook-post-updated', refresh)
+    return () => { active = false; window.removeEventListener('wordpress-fix-updated', refresh); window.removeEventListener('facebook-post-updated', refresh) }
   }, [businessId])
   const current = state?.businessId === businessId ? state : null
-  return <section aria-label="Recently Fixed" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+  return <section aria-label="Recent Actions" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
     <details className="group/recent-fixes">
     <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-blue-300 sm:px-6 [&::-webkit-details-marker]:hidden">
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"><CheckCircle2 size={18} aria-hidden="true" /></span>
-        <h2 className="text-base font-semibold text-ink">Recently Fixed</h2>
+        <h2 className="text-base font-semibold text-ink">Recent Actions</h2>
         {current && !current.error && <span className="text-xs text-muted">({current.items.length})</span>}
       </div>
-      {current && !current.error && <StatusBadge label={`${current.items.filter(item => item.workflow.status === 'public_verified').length} fully verified`} tone="success" />}
+      {current && !current.error && <StatusBadge label={`${current.items.filter(actionVerified).length} fully verified`} tone="success" />}
       <ChevronDown size={16} className="shrink-0 text-muted transition-transform group-open/recent-fixes:rotate-180" aria-hidden="true" />
     </summary>
     <div className="border-t border-line p-4 sm:p-6">
     {current?.error ? <div className="mt-3 space-y-3 text-sm text-secondary">
       <p role="status">{current.error}</p>
-      <button type="button" onClick={() => window.dispatchEvent(new Event('wordpress-fix-updated'))} className="min-h-11 rounded-lg border border-blue-400/40 px-3 py-2 text-blue-200 hover:bg-blue-500/10">Retry saved receipts</button>
-    </div>
-      : !current ? <p role="status" className="mt-3 text-sm text-secondary">Loading saved fix receipts…</p>
-      : !current.items.length ? <p className="py-3 text-sm text-secondary">No applied fixes yet. Confirmed updates will appear here with their verification status.</p>
-      : <ul className="space-y-4">{current.items.map(({ reportId, findingId, workflow }) => {
+      <button type="button" onClick={() => window.dispatchEvent(new Event('wordpress-fix-updated'))} className="min-h-11 rounded-lg border border-blue-400/40 px-3 py-2 text-blue-200 hover:bg-blue-500/10">Retry saved actions</button>
+    </div> : null}
+      {!current ? <p role="status" className="mt-3 text-sm text-secondary">Loading saved actions…</p>
+      : !current.items.length ? !current.error && <p className="py-3 text-sm text-secondary">No recent actions yet. Applied fixes and Facebook publishing actions will appear here with their verification status.</p>
+      : <ul className="space-y-4">{current.items.map(item => {
+        if (item.kind === 'facebook') return <FacebookAction key={`facebook:${item.post.id}`} post={item.post} />
+        const { reportId, findingId, workflow } = item.fix
         const proposal = workflow.proposal!
         const verified = workflow.status === 'public_verified'
         const receipt = workflow.verification?.receipt

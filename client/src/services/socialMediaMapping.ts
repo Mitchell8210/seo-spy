@@ -1,5 +1,7 @@
 import type { FacebookFinding, FacebookReportResponse } from '../types/facebook'
 import type { SocialCategory, SocialFinding, SocialHealthMetric } from '../types/socialMedia'
+import type { InvestigationInterpretation } from '../types/investigationInterpretation'
+import { validatedReportRecommendations } from './reportInterpretation.ts'
 
 const formatNumber = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('en-US').format(value) : 'Not available'
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
@@ -12,12 +14,13 @@ function category(finding: FacebookFinding): SocialCategory {
   return 'Profile'
 }
 
-export function mapSocialMediaReport(data: FacebookReportResponse) {
+export function mapSocialMediaReport(data: FacebookReportResponse, interpretation?: InvestigationInterpretation | null) {
   const { report, analysis } = data
   if (!report) return null
   const facebook = report.results.facebook
   const sources = analysis?.findings ?? report.results.findings
   const recommendations = analysis?.recommendations ?? report.results.recommendations
+  const ai = validatedReportRecommendations(interpretation, data.businessId, [report])
   const hasUrgentFindings = sources.some(finding => finding.severity === 'critical')
   const partial = report.audit.status === 'partial'
   const scoreSummary = hasUrgentFindings
@@ -77,7 +80,9 @@ export function mapSocialMediaReport(data: FacebookReportResponse) {
     { id: 'interactions', title: 'Interactions', value: interactionTotal, supporting: [supporting('likes', 'Likes', value('page_post_likes')), supporting('comments', 'Comments', commentValue), supporting('messages', 'Conversations', value('page_messages_new_conversations_unique')), supporting('shares', 'Lifetime Shares', shareValue)] },
   ]
   const findings: SocialFinding[] = sources.map(finding => {
-    const recommendation = recommendations.find(item => item.findingId === finding.id)
+    const original = recommendations.find(item => item.findingId === finding.id)
+    const generated = ai.find(item => item.findingId === finding.id)
+    const recommendation = generated ? { ...original, id: generated.id, purpose: generated.rationale, recommendedChange: `AI recommendation: ${generated.recommendation}` } : original
     return { id: finding.id, title: finding.title, category: category(finding), severity: severity[finding.severity], status: 'Needs review', explanation: finding.explanation,
       evidence: analysis?.evidenceSummaries?.findings.find(item => item.id === finding.id)?.text ?? 'Supporting evidence was not included in this saved report.', impact: recommendation?.purpose ?? 'Review the collected evidence before deciding whether a change is appropriate.', affectedArea: facebook.pageName,
       recommendation: { id: recommendation?.id ?? `${finding.id}-review`, action: recommendation?.recommendedChange ?? 'Review this finding and the saved evidence before making changes.' } }

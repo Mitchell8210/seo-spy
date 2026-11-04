@@ -6,11 +6,13 @@ import { opportunityDestination, selectDashboardOpportunities, type DashboardIss
 import { knownAssessment } from './savedScore.ts'
 import { socialScoreDetails } from './socialScoreDetails.ts'
 import { mapSavedMuseAssessment } from './dashboardMuse.ts'
+import type { InvestigationInterpretation } from '../types/investigationInterpretation'
+import { interpretationIssues } from './reportInterpretation.ts'
 
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 
 /** Saved evidence only. Scores/comparisons are supplied by the backend, never inferred here. */
-export function mapDashboardAssessment(businessId: string, dashboard: Dashboard | null, website: WebsiteReport | null, social: FacebookReportResponse | null) {
+export function mapDashboardAssessment(businessId: string, dashboard: Dashboard | null, website: WebsiteReport | null, social: FacebookReportResponse | null, reportInterpretation?: InvestigationInterpretation | null) {
   const view = mapDashboardReports(dashboard, website, social)
   const assessment = dashboard?.assessment
   const knownPolicy = knownAssessment(assessment, businessId)
@@ -62,6 +64,7 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
   }
   const opportunities = selectDashboardOpportunities(issues)
   const interpretation = mapSavedMuseAssessment(knownPolicy ? assessment : null, website, social)
+  const aiIssues = interpretationIssues(reportInterpretation, businessId, [website, social?.report])
   // Use the validated selection for the existing category cards, including
   // scoring observations that have no original audit finding. Keep model order
   // and leave omitted categories empty instead of inventing an AI priority.
@@ -70,8 +73,11 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
       explanation: `${item.source}: ${item.recommendation!.explanation}`,
     })),
   ])) as Record<DashboardIssue['category'], DashboardIssue[]> : opportunities.top
+  const aiTop = aiIssues.length ? Object.fromEntries((['website', 'social', 'consistency'] as const).map(category => [category,
+    aiIssues.some(item => item.category === category) ? aiIssues.filter(item => item.category === category).slice(0, 3) : top[category],
+  ])) as typeof top : top
   return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment, interpretation,
     websiteResults: { ...view.websiteResults, overall: websiteScore }, consistency: { ...view.consistency, score: consistencyScore, checks },
     main: { ...view.main, overall: overallScore, components: [websiteScore, socialScore, consistencyScore] },
-    ...opportunities, top, path: interpretation ? interpretation.path : opportunities.path }
+    ...opportunities, top: aiTop, path: aiIssues.length ? aiIssues : interpretation ? interpretation.path : opportunities.path }
 }

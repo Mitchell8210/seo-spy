@@ -28,7 +28,7 @@ export function LighthouseResults({ report, simulated }: { report: LighthouseRep
           )
         })}
       </div>
-      {!report && <p className="text-sm leading-6 text-secondary">{simulated ? 'The backend currently has simulated demo results. Run a Lighthouse investigation to collect real measurements.' : 'An HTML-only or incomplete investigation can have findings without Lighthouse scores. Run Lighthouse or review the audit status above.'}</p>}
+      {!report && <p className="text-sm leading-6 text-secondary">{simulated ? 'The backend currently has simulated demo results. Run a Lighthouse investigation to collect real measurements.' : 'A report can include findings without Lighthouse scores. Run Lighthouse or review the audit status above.'}</p>}
       {report && (
         <div className="rounded-xl border border-line bg-surface p-5 sm:p-6">
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">

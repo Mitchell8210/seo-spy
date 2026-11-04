@@ -129,6 +129,15 @@ export class FacebookController {
       maxAge: persistent ? 30 * 86400000 : 3600000,
     });
   }
+  private async investigationCookie(id: string | undefined, res: Response) {
+    if (!id) return;
+    const connection = await this.facebook.credential(id);
+    // The original OAuth cookie cannot reach the protected AI start routes.
+    // Mirror only a validated existing session to their separate API path.
+    // Its underlying credential keeps the original expiry/revocation checks.
+    const expires = Math.min(Date.parse(connection.createdAt) + 30 * 86400000, connection.expiresAt ?? Infinity, connection.dataAccessExpiresAt ?? Infinity);
+    res.cookie(COOKIE, id, { httpOnly: true, sameSite: "lax", path: "/api/wordpress", maxAge: Math.max(0, expires - Date.now()) });
+  }
   @Get()
   @ApiOkResponse({
     description: "Local HTML test page",
@@ -239,6 +248,7 @@ export class FacebookController {
       error !== undefined,
     );
     this.cookie(res, id, true);
+    await this.investigationCookie(id, res);
     res.redirect(303, "/api/facebook");
   }
   @Get("connection")
@@ -308,6 +318,7 @@ export class FacebookController {
       httpOnly: true,
       sameSite: "lax",
     });
+    res.clearCookie(COOKIE, { path: "/api/wordpress", httpOnly: true, sameSite: "lax" });
     res.redirect(303, "/api/facebook");
   }
   @Get("reports/status")
@@ -315,7 +326,9 @@ export class FacebookController {
   @ApiOkResponse({ type: () => FacebookReportProgressDto })
   async reportStatus(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: FacebookReportProgressQueryDto): Promise<FacebookReportProgress> {
     this.guard(req, res, false, true);
-    return this.reports.status(this.session(req), query.businessId);
+    const status = await this.reports.status(this.session(req), query.businessId);
+    await this.investigationCookie(this.session(req), res);
+    return status;
   }
 
   @Post("investigations")
@@ -334,7 +347,9 @@ export class FacebookController {
   @ApiOkResponse({ type: () => OverallInvestigationStatusDto })
   async investigationStatus(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Query() query: FacebookReportProgressQueryDto): Promise<OverallInvestigationStatusDto> {
     this.guard(req, res, false, true);
-    return this.investigations.status(this.session(req), query.businessId);
+    const status = await this.investigations.status(this.session(req), query.businessId);
+    await this.investigationCookie(this.session(req), res);
+    return status;
   }
 
   @Post("reports")

@@ -1,3 +1,11 @@
+# November 3, 2026 — Approved Facebook post review workflow
+
+Implemented the user-approved Facebook extension of existing recommendation review: saved recommendation and Page binding, explicit live Meta Muse text generation through the shared $25 ledger, editable review, exact expiring hash approval, single-dispatch publishing journal and saved acknowledgement/readback/permalink. Existing surrounding frontend presentation is preserved. Local development publishing is enabled, while new installations default off. Live browser permission and publication remain to be demonstrated; no live draft or Page write was performed. See [Facebook posting workflow](FACEBOOK_POSTS.md).
+
+# November 3, 2026 — Post-investigation AI recommendations
+
+Connected the three primary report buttons to the authenticated, CSRF-protected post-report Muse interpretation. Saved evidence and deterministic scores precede one model call per exact report set. Grounded free-form actions populate existing recommendation slots without redesign or execution authority. Shared $25 ledger, no retries, durable failed/pending receipts and saved-only reads are preserved. See [implementation and validation](INVESTIGATION_AI.md), including the live validation issue corrected with offline replay of a retained response.
+
 # SEO Spy backend plan
 
 ## November 2, 2026 - Human-reviewed WordPress-alt proposal, Apply not authorized
@@ -789,6 +797,10 @@ Done when an explicitly approved change can be applied once and verified with be
 Resolve these at their relevant milestone rather than blocking the first API on all future integrations.
 
 ## Immediate next task
+
+November 4, 2026: user authorized Apply for any image in the existing customer alt-text flow. Removed the legacy media-5658 write-authorization dependency for successful shared frontend generations, retaining configured business/site binding, operator browser/CSRF authorization, explicit proposal approval, current-state checks and execution idempotency. Enabled the local WordPress write gate for the requested recording. Existing live media-4568/post-4563 suggestion retained; no live Apply was dispatched by the agent. Offline regressions cover three independent image IDs, wrong actor/evidence/hash, default-off writes, explicit approval, successful customer Apply/replay and public verification.
+
+November 4, 2026: completed customer alt drafting without customer-supplied keywords. Purpose/language confirmation accepts blank description/essential words, capability and dependency revalidation recognize bound page context, and contextual output need not repeat a description token. English and Spanish customer requests use the contextual contract; legacy operator excerpts remain unchanged. Existing frontend fields/layout remain intact; only the confirmation requirement changed. Offline regressions cover blank inputs through generation/proposal, translated Business wording, unsupported details, and missing context. No paid calls or external writes were made for this fix.
 
 Coordinate the first main-page integration with the frontend engineer using `../client/WEBSITE_API_MAPPING.md`. Agree on nullable and overall score presentation, passed-check semantics, and homepage-only coverage before adapting the Website page. Reuse the proven backend-lab service/polling behavior in a separately scoped change. Keep the existing main pages unchanged until that integration is authorized; retain in-memory execution for the hackathon demo.
 
