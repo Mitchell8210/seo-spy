@@ -28,8 +28,8 @@ const weekly = [{...task('one'),status:'Done',schedule:{day:'2026-11-02',hour:9}
 assert.deepEqual(weeklyCompletion(weekly,monday), {done:1,total:2,percent:50});
 assert.deepEqual(weeklyCompletion([],monday), {done:0,total:0,percent:0});
 const state = {edits:{hours:{status:'Done'},social:{status:'Done'}},completed:{hours:{...tasks[0],status:'Done'}},custom:[],useWeekends:false};
-assert.equal(reconcileRescan(state,tasks,true).edits.hours.status,'Needs Action');
-assert.equal(reconcileRescan(state,tasks,true).edits.social.status,'Needs Action');
+assert.equal(reconcileRescan(state,tasks,true).edits.hours.status,'Done');
+assert.equal(reconcileRescan(state,tasks,true).edits.social.status,'Done');
 const saved = {...task('social'),mode:'saved'};
 assert.equal(reconcileRescan(state,[saved],false).edits.social.status,'Done','A failed saved-report refresh cannot reopen its tasks.');
 assert.equal(visibleTasks([],state)[0].status,'Done','Resolved source tasks remain completed.');

@@ -11,6 +11,8 @@ import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+let aiEnabled = false;
+let savedPost = null;
 const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const children = [];
 const errors = [];
@@ -97,10 +99,21 @@ try {
   const cache = path.join(clientDir, 'node_modules/.cache/social-media-smoke'); await mkdir(cache, { recursive: true }); artifacts = await mkdtemp(path.join(cache, 'run-'));
   server = http.createServer(async (req, res) => {
     const entry = { method: req.method, path: req.url }; requests.push(entry);
+    if (req.url.startsWith('/api/facebook/posts')) {
+      let body = ''; for await (const chunk of req) body += chunk;
+      entry.body = body ? JSON.parse(body) : null;
+      if (req.url === '/api/facebook/posts/draft') savedPost = { id: entry.body.previousPostId === 'next-post-fixture' ? 'replacement-post-fixture' : entry.body.previousPostId ? 'next-post-fixture' : 'post-fixture', previousPostId: entry.body.previousPostId, businessId: 'demo-guzman', reportId: auditId, recommendationId: recommendation.id, pageId: '123', pageName: facebook.pageName, status: 'draft', text: entry.body.previousPostId === 'next-post-fixture' ? 'Take a moment to organize your business records this week and stay connected with our team.' : entry.body.previousPostId ? 'Tell our team which general topics you would like to see covered in future updates.' : 'A welcome from our team. Visit https://example.com/.', attemptId: 'accounted-fixture', model: 'muse-spark-1.3', approvalHash: null, verified: false };
+      if (req.url === '/api/facebook/posts/proposal') savedPost = { ...savedPost, text: entry.body.text, approvalHash: 'a'.repeat(64) };
+      if (req.url === '/api/facebook/posts/discard') savedPost = { ...savedPost, status: 'discarded', approvalHash: null, expiresAt: null };
+      if (req.url === '/api/facebook/posts/publish') savedPost = { ...savedPost, status: 'published', verified: true, postId: '123_456', permalink: 'https://www.facebook.com/123/posts/456' };
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(savedPost)); return;
+    }
+    if (req.url === '/api/wordpress/browser-session') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ connected: true, businessId: 'demo-guzman', csrf: 'x'.repeat(43), expiresAt: new Date(Date.now()+3600000).toISOString() })); return; }
+    if (req.url.startsWith('/api/wordpress/local/businesses/demo-guzman/investigation-interpretation?')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: 'demo-guzman', interpretation: aiEnabled ? { schemaVersion: 'investigation-interpretation-v1', id: 'fixture-interpretation', businessId: 'demo-guzman', status: 'completed', attemptId: 'accounted-fixture', sources: [{ reportId: auditId, provider: 'facebook', hash: 'a'.repeat(64) }], recommendations: [{ id: 'ai-action', category: 'social', reportId: auditId, findingId: finding.id, title: 'Confirm the public contact details', recommendation: 'Compare the recorded contact details with the owner before updating the Page.', rationale: 'The saved report calls for a contact review.', verification: 'Run a fresh report after the owner confirms the details.', evidenceRefs: [{ reportId: auditId, evidenceId: evidence.id }] }] } : null })); return; }
     if (req.url === '/api/businesses/demo-guzman/assessments/latest') {
       res.writeHead(mode === 'score-error' ? 503 : 200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: 'demo-guzman', assessment: savedAssessment })); return;
     }
-    if (req.method === 'POST' && req.url === '/api/facebook/reports') {
+    if (req.method === 'POST' && req.url === '/api/wordpress/businesses/demo-guzman/investigations/social') {
       let body = ''; for await (const chunk of req) body += chunk;
       entry.body = JSON.parse(body);
       const status = runMode;
@@ -132,7 +145,7 @@ try {
   await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'saved Facebook report');
   assert.equal(await evaluate('document.querySelector("#social-account").disabled'), false, 'The saved account dropdown must be interactive.');
   assert.equal(await evaluate('document.querySelector("#social-account").value'), '123');
-  assert.match(await text(), /Partial coverage/); assert.match(await text(), /Interactions\s+Not available/); assert.match(await text(), /View Activity\s+Not available/);
+  assert.match(await text(), /Saved report/); assert.doesNotMatch(await text(), /Partial coverage|partially completed|partial report/i); assert.match(await text(), /Interactions\s+Not available/); assert.match(await text(), /View Activity\s+Not available/);
   assert.match(await text(), /Review the phone number/);
   assert.match(await text(), /Social Media Health Summary/); assert.match(await text(), /SEO Spy Social Media Report/);
   assert.doesNotMatch(await text(), /returned daily measurements|Newest collected post|Report coverage and business details/);
@@ -209,7 +222,7 @@ try {
   assert.equal(await evaluate('document.querySelector("[data-testid=social-run-report]").disabled'), true);
   await waitFor(async () => /Followers\s+16/.test(await text()), 'fresh report replaces saved values');
   assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Rapid clicks generate one report.');
-  assert.deepEqual(requests.find(item => item.method === 'POST').body, { businessId: 'demo-guzman', pageId: '123' });
+  assert.deepEqual(requests.find(item => item.method === 'POST').body, { confirmed: true, pageId: '123' });
   for (const failure of ['reconnect', 'failed']) {
     runMode = failure;
     await waitFor(async () => await evaluate('!document.querySelector("[data-testid=social-run-report]").disabled'), 'button ready');
@@ -224,7 +237,70 @@ try {
   await screenshot('run-report-desktop.png');
   await cdp.send('Page.navigate', { url: `${base}/settings` });
   await waitFor(async () => (await text()).includes('Business Profile'), 'remote Settings route');
-  assert.equal(requests.filter(request => request.method !== 'GET').every(request => request.method === 'POST' && request.path === '/api/facebook/reports'), true, 'Only the explicit Run Report action performs a POST.');
+  assert.equal(requests.filter(request => request.method !== 'GET').every(request => request.method === 'POST' && request.path === '/api/wordpress/businesses/demo-guzman/investigations/social'), true, 'Only the explicit Run Report action performs a POST.');
+  const previousPosts = requests.filter(request => request.method === 'POST').length;
+  aiEnabled = true; mode = 'loaded';
+  report.results.findings = [finding];
+  await cdp.send('Page.navigate', { url: base + '/social-media' });
+  await waitFor(async () => (await text()).includes('Fixture Facebook Page'), 'AI report loaded');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Fix Now").click()');
+  await waitFor(async () => (await text()).includes('Compare the recorded contact details with the owner'), 'saved AI recommendation in the existing report');
+  assert.equal(requests.filter(request => request.method === 'POST').length, previousPosts, 'Reading saved AI recommendations never dispatches work.');
+  aiEnabled = false;
+  finding.title = 'Restart regular Facebook posting'; finding.checkId = 'facebook:posting-inactivity';
+  recommendation.recommendedChange = 'Publish a useful update and continue regular posting.';
+  await navigateReport(base + '/social-media');
+  await waitFor(async () => (await text()).includes(finding.title), 'posting recommendation');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Fix Now").click()');
+  await waitFor(async () => (await text()).includes(recommendation.recommendedChange), 'posting disclosure');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Review Recommendation").click()');
+  await waitFor(async () => (await text()).includes('Generate AI post'), 'Facebook review dialog');
+  assert.equal(await evaluate(`document.querySelector('dialog').innerText.includes(${JSON.stringify(finding.explanation)})`), true, 'Posting review retains the saved explanation as well as the recommended action.');
+  assert.equal(await evaluate(`document.querySelector('dialog').innerText.includes(${JSON.stringify(recommendation.recommendedChange)})`), true);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft').length, 0, 'Opening review never generates or publishes.');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Generate AI post").click()');
+  await waitFor(async () => evaluate('!!document.querySelector("textarea")'), 'editable AI post');
+  assert.equal(await evaluate('document.querySelector("textarea").value'), savedPost.text);
+  const approvedText = 'Reviewed by the owner. Visit https://example.com/.';
+  await evaluate(`(() => { const element = document.querySelector('textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(element, ${JSON.stringify(approvedText)}); element.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await screenshot('facebook-post-review.png');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Approve & Publish").click()');
+  await waitFor(async () => (await text()).includes('Facebook readback confirmed the exact approved text'), 'verified publication result');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/publish').length, 1);
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Generate another post").click()');
+  await waitFor(async () => evaluate('!!document.querySelector("textarea")'), 'next unique post draft');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft').length, 2);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft')[1].body.previousPostId, 'post-fixture');
+  assert.notEqual(await evaluate('document.querySelector("textarea").value'), approvedText);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/publish').length, 1, 'Creating the next draft never publishes it.');
+  const nextText = savedPost.text;
+  await evaluate(`document.querySelector('button[aria-label="Close fix review"]').click()`);
+  await waitFor(async () => evaluate('!document.querySelector("dialog")'), 'draft discarded on close');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/discard').length, 1);
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Review Recommendation").click()');
+  await waitFor(async () => (await text()).includes('Generate AI post'), 'closed draft resets review');
+  assert.equal(await evaluate('!!document.querySelector("textarea")'), false);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft').length, 2, 'Reopening never automatically regenerates.');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Generate AI post").click()');
+  await waitFor(async () => evaluate('!!document.querySelector("textarea")'), 'explicit fresh AI generation');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft').length, 3);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft')[2].body.previousPostId, 'next-post-fixture');
+  const replacementText = await evaluate('document.querySelector("textarea").value');
+  assert.notEqual(replacementText, nextText);
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Approve & Publish").click()');
+  await waitFor(async () => (await text()).includes('Facebook readback confirmed the exact approved text'), 'second separately approved post');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/publish').length, 2);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/proposal')[1].body.text, replacementText);
+  assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).some(b => b.textContent === "Generate another post")'), true);
+  assert.equal(requests.find(r => r.path === '/api/facebook/posts/proposal').body.text, approvedText);
+  assert.equal(requests.find(r => r.path === '/api/facebook/posts/publish').body.confirmed, true);
+  assert.equal(await evaluate('document.querySelector("dialog a").href'), 'https://www.facebook.com/123/posts/456');
+  await screenshot('facebook-post-result.png');
+  await evaluate(`document.querySelector('button[aria-label="Close fix review"]').click()`);
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Review Recommendation").click()');
+  await waitFor(async () => (await text()).includes('Facebook readback confirmed the exact approved text'), 'saved publication reopened');
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/draft').length, 3);
+  assert.equal(requests.filter(r => r.path === '/api/facebook/posts/publish').length, 2);
   console.log(JSON.stringify({ passed: ['partial coverage', 'zero versus unavailable', 'native hero/health/report components', 'unsupported score and benchmark unavailable', 'derived findings', 'no added summary or coverage sections', 'inert provider text', 'API error state', 'business mismatch rejected', 'empty and loaded states', 'mobile layout', 'remote Settings route', 'read-only API'], artifactDirectory: artifacts }, null, 2));
 } catch (error) { console.error(error); process.exitCode = 1; }
 finally {

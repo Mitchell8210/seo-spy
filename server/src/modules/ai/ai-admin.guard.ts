@@ -5,6 +5,13 @@ import type { Request, Response } from "express";
 
 export const aiAdministratorIdentity = (key: string) => createHash("sha256").update(key).digest("hex");
 
+/** Shared HTTP/CLI administrator identity; never accept a caller-supplied actor. */
+export function authenticateAiAdministrator(configured: string, supplied: string): string {
+  if (configured.length < 32) throw new ServiceUnavailableException({ code: "AI_ADMIN_NOT_CONFIGURED", message: "AI administrator authorization is not configured." });
+  if (!supplied || !timingSafeEqual(Buffer.from(aiAdministratorIdentity(configured), "hex"), Buffer.from(aiAdministratorIdentity(supplied), "hex"))) throw new UnauthorizedException({ code: "AI_ADMIN_REQUIRED", message: "The separate AI administrator credential is required." });
+  return aiAdministratorIdentity(supplied);
+}
+
 @Injectable()
 export class AiAdminGuard implements CanActivate {
   constructor(private readonly config: ConfigService) {}
@@ -12,9 +19,8 @@ export class AiAdminGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     context.switchToHttp().getResponse<Response>().setHeader("Cache-Control", "no-store");
     const configured = this.config.get<string>("AI_ADMIN_KEY") ?? "";
-    if (configured.length < 32) throw new ServiceUnavailableException({ code: "AI_ADMIN_NOT_CONFIGURED", message: "AI administrator authorization is not configured." });
     const supplied = request.get("authorization")?.match(/^Bearer (.+)$/)?.[1] ?? "";
-    if (!supplied || !timingSafeEqual(Buffer.from(aiAdministratorIdentity(configured), "hex"), Buffer.from(aiAdministratorIdentity(supplied), "hex"))) throw new UnauthorizedException({ code: "AI_ADMIN_REQUIRED", message: "The separate AI administrator credential is required." });
+    authenticateAiAdministrator(configured, supplied);
     let host: string;
     try { host = new URL(`http://${request.get("host")}`).hostname; } catch { throw new ForbiddenException(); }
     if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new ForbiddenException({ code: "AI_ADMIN_LOCAL_ONLY", message: "AI administration is local-only." });

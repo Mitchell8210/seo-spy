@@ -182,3 +182,5 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+/artifacts/

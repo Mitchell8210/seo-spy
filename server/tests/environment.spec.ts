@@ -10,11 +10,18 @@ describe("environment configuration", () => {
     for (const name of ["GOOGLE_APPLICATION_CREDENTIALS", "GA4_PROPERTY_ID", "GSC_SITE_URL", "GOOGLE_OPERATOR_KEY"]) expect(example.split(/\r?\n/)).toContain(`${name}=`);
     expect(readFileSync(new URL("../../.gitignore", import.meta.url), "utf8").split(/\r?\n/)).toContain("/server/secrets/");
   });
+  it("keeps lead conversions explicitly scoped to valid configured event/page values", () => {
+    expect(validateEnvironment({})).toMatchObject({ GA4_LEAD_EVENT_NAME: "", GA4_LEAD_PAGE_PATHS: "" });
+    expect(validateEnvironment({ GA4_LEAD_EVENT_NAME: "form_submit", GA4_LEAD_PAGE_PATHS: "/contacto/,/consulta-gratuita/" }))
+      .toMatchObject({ GA4_LEAD_EVENT_NAME: "form_submit", GA4_LEAD_PAGE_PATHS: "/contacto/,/consulta-gratuita/" });
+    for (const input of [{ GA4_LEAD_EVENT_NAME: "invalid event" }, { GA4_LEAD_PAGE_PATHS: "https://external.example/form" }, { GA4_LEAD_PAGE_PATHS: "/contact/*" }, { GA4_LEAD_PAGE_PATHS: "/contact?query=x" }])
+      expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+  });
   it("defaults Muse to cost-free mocks and rejects settings beyond development safeguards", () => {
-    expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, MOCK_AI: true, AI_MODE: "mock", AI_MODEL: "muse-spark-1.3", AI_PROCESSING_MODE: "standard", AI_REASONING_EFFORT: "low", MODEL_API_KEY: "", AI_MAX_OUTPUT_TOKENS: 1500, AI_MAX_INPUT_BYTES: 32768, AI_MAX_CONCURRENCY: 1, AI_DEV_BUDGET_MICROS: 2000000, AI_DEV_DAILY_MICROS: 500000, AI_DEV_MAX_CALLS: 10 });
-    for (const input of [{ AI_ENABLED: "yes" }, { MOCK_AI: "yes" }, { AI_MODE: "automatic" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MODEL: "muse-wonder-1.0" }, { AI_PROCESSING_MODE: "contributor" }, { AI_REASONING_EFFORT: "high" }, { AI_MAX_OUTPUT_TOKENS: 1501 }, { AI_MAX_INPUT_BYTES: 32769 }, { AI_MAX_CONCURRENCY: 2 }, { AI_TIMEOUT_MS: 120001 }, { AI_DEV_BUDGET_MICROS: 2000001 }, { AI_DEV_DAILY_MICROS: 500001 }, { AI_DEV_MAX_CALLS: 11 }, { AI_INPUT_PRICE_MICROS_PER_MILLION: 1 }, { AI_ADMIN_KEY: "short" }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
+    expect(validateEnvironment({})).toMatchObject({ AI_ENABLED: false, MOCK_AI: true, AI_MODE: "mock", AI_MODEL: "muse-spark-1.3", AI_PROCESSING_MODE: "standard", AI_REASONING_EFFORT: "low", MODEL_API_KEY: "", AI_MAX_OUTPUT_TOKENS: 1500, AI_MAX_INPUT_BYTES: 32768, AI_MAX_CONCURRENCY: 1, AI_DEV_BUDGET_MICROS: 25000000, AI_DEV_DAILY_MICROS: 25000000, AI_DEV_MAX_CALLS: Number.MAX_SAFE_INTEGER });
+    for (const input of [{ AI_ENABLED: "yes" }, { MOCK_AI: "yes" }, { AI_MODE: "automatic" }, { AI_MODEL: "muse-spark-1.3-contributor" }, { AI_MODEL: "muse-wonder-1.0" }, { AI_PROCESSING_MODE: "contributor" }, { AI_REASONING_EFFORT: "high" }, { AI_MAX_OUTPUT_TOKENS: 1501 }, { AI_MAX_INPUT_BYTES: 32769 }, { AI_MAX_CONCURRENCY: 2 }, { AI_TIMEOUT_MS: 120001 }, { AI_DEV_BUDGET_MICROS: 25000001 }, { AI_DEV_DAILY_MICROS: 25000001 }, { AI_DEV_MAX_CALLS: Number.MAX_SAFE_INTEGER + 1 }, { AI_INPUT_PRICE_MICROS_PER_MILLION: 1 }, { AI_ADMIN_KEY: "short" }]) expect(() => validateEnvironment(input)).toThrow("Invalid configuration:");
     const example = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
-    for (const line of ["MODEL_API_KEY=", "AI_ADMIN_KEY=", "AI_MODEL=muse-spark-1.3", "AI_ENABLED=false", "MOCK_AI=true", "AI_MODE=mock", "AI_MAX_OUTPUT_TOKENS=1500", "AI_DEV_BUDGET_MICROS=2000000"]) expect(example.split(/\r?\n/)).toContain(line);
+    for (const line of ["MODEL_API_KEY=", "AI_ADMIN_KEY=", "AI_MODEL=muse-spark-1.3", "AI_ENABLED=false", "MOCK_AI=true", "AI_MODE=mock", "AI_MAX_OUTPUT_TOKENS=1500", "AI_DEV_BUDGET_MICROS=25000000"]) expect(example.split(/\r?\n/)).toContain(line);
   });
   it("keeps WordPress credentials blank and write triggers disabled until deliberately configured", () => {
     expect(validateEnvironment({})).toMatchObject({ WORDPRESS_WRITES_ENABLED: false, WORDPRESS_OPERATOR_KEY: "", WORDPRESS_BUSINESS_ID: "", WORDPRESS_SITE_URL: "" });
@@ -74,6 +81,11 @@ describe("environment configuration", () => {
     for (const FACEBOOK_FRONTEND_ORIGIN of ["invalid", "https://example.com", "http://localhost:5173/path", "http://localhost:5173/", "http://user@localhost:5173", "http://localhost:5173?x=1"]) {
       expect(() => validateEnvironment({ FACEBOOK_FRONTEND_ORIGIN })).toThrow("FACEBOOK_FRONTEND_ORIGIN");
     }
+  });
+  it("does not silently enable a public production Facebook/operator deployment", () => {
+    expect(validateEnvironment({ NODE_ENV: "production" }).HOST).toBe("127.0.0.1");
+    expect(() => validateEnvironment({ NODE_ENV: "production", FACEBOOK_FRONTEND_ORIGIN: "https://demo.example.com" })).toThrow("FACEBOOK_FRONTEND_ORIGIN");
+    expect(() => validateEnvironment({ NODE_ENV: "production", FACEBOOK_REDIRECT_URI: "https://demo.example.com/api/facebook/callback" })).toThrow("FACEBOOK_REDIRECT_URI");
   });
   it("defaults to localhost and parses numeric values", () => {
     expect(validateEnvironment({ PORT: "3100" })).toMatchObject({

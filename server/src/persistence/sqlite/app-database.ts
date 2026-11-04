@@ -81,7 +81,7 @@ export class AppDatabase implements OnApplicationShutdown {
       const database = new DatabaseSync(this.path, { enableForeignKeyConstraints: true, allowExtension: false });
       try {
         const version = database.prepare("PRAGMA user_version").get()?.user_version;
-        if (existing && version !== 1 && version !== 2 && version !== 3) throw fail();
+        if (existing && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw fail();
         database.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;");
         if (!existing) {
           database.exec(`BEGIN IMMEDIATE;
@@ -129,7 +129,67 @@ export class AppDatabase implements OnApplicationShutdown {
             PRAGMA user_version=3;
             COMMIT;`);
         }
-        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2,3)").get()?.count !== 3 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 3) throw fail();
+        if (!existing || version === 1 || version === 2 || version === 3) {
+          database.exec(`BEGIN IMMEDIATE;
+            CREATE TABLE smart_planners (
+              business_id TEXT PRIMARY KEY REFERENCES businesses(id), revision INTEGER NOT NULL CHECK(revision>=1),
+              use_weekends INTEGER NOT NULL DEFAULT 0 CHECK(use_weekends IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE smart_planner_tasks (
+              id TEXT PRIMARY KEY, business_id TEXT NOT NULL REFERENCES smart_planners(business_id), task_key TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('Needs Action','Done')), scheduled_day TEXT, scheduled_hour INTEGER,
+              position INTEGER NOT NULL, data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL,
+              UNIQUE(business_id,task_key),
+              CHECK((scheduled_day IS NULL AND scheduled_hour IS NULL) OR (scheduled_day IS NOT NULL AND scheduled_hour IS NOT NULL AND scheduled_hour BETWEEN 9 AND 16))
+            );
+            CREATE INDEX smart_planner_status ON smart_planner_tasks(business_id,status);
+            CREATE INDEX smart_planner_schedule ON smart_planner_tasks(business_id,scheduled_day,scheduled_hour);
+            CREATE TABLE smart_planner_mutations (
+              business_id TEXT NOT NULL REFERENCES smart_planners(business_id), mutation_id TEXT NOT NULL,
+              request_hash TEXT NOT NULL, revision INTEGER NOT NULL, created_at TEXT NOT NULL,
+              PRIMARY KEY(business_id,mutation_id)
+            );
+            INSERT INTO schema_migrations(version,applied_at) VALUES(4,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            PRAGMA user_version=4;
+            COMMIT;`);
+        }
+        if (!existing || version === 1 || version === 2 || version === 3 || version === 4) {
+          database.exec(`BEGIN IMMEDIATE;
+            ALTER TABLE smart_planners ADD COLUMN daily_capacity_minutes INTEGER NOT NULL DEFAULT 120 CHECK(daily_capacity_minutes BETWEEN 30 AND 480 AND daily_capacity_minutes%30=0);
+            ALTER TABLE smart_planners ADD COLUMN max_tasks_per_day INTEGER NOT NULL DEFAULT 3 CHECK(max_tasks_per_day BETWEEN 1 AND 16);
+            ALTER TABLE smart_planners ADD COLUMN horizon_weeks INTEGER NOT NULL DEFAULT 4 CHECK(horizon_weeks BETWEEN 1 AND 12);
+            ALTER TABLE smart_planners ADD COLUMN time_zone TEXT;
+            ALTER TABLE smart_planner_tasks ADD COLUMN scheduled_minute INTEGER CHECK(scheduled_minute IS NULL OR scheduled_minute IN (0,30));
+            UPDATE smart_planner_tasks SET scheduled_minute=0 WHERE scheduled_day IS NOT NULL;
+            ALTER TABLE smart_planner_mutations ADD COLUMN result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json));
+            ALTER TABLE smart_planner_mutations ADD COLUMN result_checksum TEXT;
+            INSERT INTO schema_migrations(version,applied_at) VALUES(5,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            PRAGMA user_version=5;
+            COMMIT;`);
+        }
+        if (version !== 6 && version !== 7) {
+          // Early development schema-5 databases were opened before planning
+          // receipt columns were added. Repair additively; never rewrite receipts.
+          database.exec("BEGIN IMMEDIATE");
+          const columns = new Set(database.prepare("PRAGMA table_info(smart_planner_mutations)").all().map(column => column.name));
+          if (!columns.has("result_json")) database.exec("ALTER TABLE smart_planner_mutations ADD COLUMN result_json TEXT CHECK(result_json IS NULL OR json_valid(result_json))");
+          if (!columns.has("result_checksum")) database.exec("ALTER TABLE smart_planner_mutations ADD COLUMN result_checksum TEXT");
+          database.exec("INSERT INTO schema_migrations(version,applied_at) VALUES(6,strftime('%Y-%m-%dT%H:%M:%fZ','now')); PRAGMA user_version=6; COMMIT;");
+        }
+        if (version !== 7) {
+          database.exec(`BEGIN IMMEDIATE;
+            CREATE TABLE smart_planner_ai_preferences (
+              business_id TEXT PRIMARY KEY REFERENCES businesses(id), data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL
+            );
+            CREATE TABLE smart_planner_ai_proposals (
+              id TEXT PRIMARY KEY, business_id TEXT NOT NULL REFERENCES businesses(id), mutation_id TEXT NOT NULL,
+              request_hash TEXT NOT NULL, created_at TEXT NOT NULL, data_json TEXT NOT NULL CHECK(json_valid(data_json)), checksum TEXT NOT NULL,
+              UNIQUE(business_id,mutation_id)
+            );
+            CREATE INDEX smart_planner_ai_business ON smart_planner_ai_proposals(business_id,created_at);
+            INSERT INTO schema_migrations(version,applied_at) VALUES(7,strftime('%Y-%m-%dT%H:%M:%fZ','now')); PRAGMA user_version=7; COMMIT;`);
+        }
+        if (database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok" || database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version IN (1,2,3,4,5,6,7)").get()?.count !== 7 || database.prepare("SELECT COUNT(*) count FROM schema_migrations").get()?.count !== 7) throw fail();
         this.database = database;
         if (!memory) {
           const info = lstatSync(this.path);

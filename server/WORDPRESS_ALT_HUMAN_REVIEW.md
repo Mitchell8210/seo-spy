@@ -1,0 +1,23 @@
+# Human-reviewed alt proposal, not applied
+
+November 2, 2026. The user explicitly supplied the exact edited sentence. No new model request, spending operation, WordPress write, write-gate enablement, scoring change, commit or push.
+
+Proposal `c27a8432-ef52-4a94-a9a5-646b180f3c49`; SHA-256 `b9ecbcdada61a1dc6f26d44e7cf5948e78a921f4f55e22df0de5327202cf2ae1`; expires `2026-11-02T20:39:15.274Z`.
+
+Before: empty string. After: `Guzman Tax Accounting ofrece ayuda para entender y responder cartas del IRS.` Only supported `wordpress.media.alt_text.update` / `alt_text` is proposed. Connected business `demo-guzman`, site `https://guzmantaxaccounting.com`, exact media5659, parent page5652. Current media modification precondition `2026-09-25T02:41:39`. Original image/content, responsive variants, authenticated/public association/context, edit access, stored/public empty alt and durable purpose binding were freshly verified through existing read-only transports. Original report/finding/evidence and owner actor/time remain unchanged.
+
+Existing generation `9bb52ffd-67a8-467c-8946-6966ab99344b` still contains Muse's exact `sobre ayuda para entender y responder cartas del IRS.` New revision separately records `textOrigin:human-edited`, original generation ID, actor/time, target, original empty alt, edited value, execution facts and proposal hash. Stored proposal and revision were independently read, with no execution-start/outcome. This is a human revision, not a second Muse output.
+
+The existing model validator requires verbatim excerpts; it remains unchanged. A separate bounded human-edit validator additionally permits the verified business name + Spanish `ofrece` + an exact reviewed `ayuda para ...` excerpt, retaining required terms and field/language limits. Other new claims, changed business names, unrelated text or decorative-image conversion reject. It does not authorize arbitrary prose or weaken model grounding. Further edits create a new exact proposal/hash/expiry through existing proposal endpoints. No frontend presentation was modified.
+
+Local artifact: `reports/wordpress-alt-human-reviewed-proposal.json`. Existing authenticated GET `/api/wordpress/businesses/demo-guzman/fixes/proposals/c27a8432-ef52-4a94-a9a5-646b180f3c49` returns the immutable proposal including human-edit provenance. Operator `scripts/prepare-wordpress-human-edit.mjs` has no model/spending/Apply capability and permits only GET/OPTIONS on exact WordPress targets. It uses existing action storage and application artifact validation on the initialized SQLite connection, avoiding unrelated schema migration. All prior fix/artifact rows were verified unchanged; spending/configuration files byte-identical.
+
+## Later exact authorization
+
+No Apply approval exists. Separate user authorization must identify this proposal ID/hash, media5659, empty before-value and exact human-edited after-value, for one alt_text update. Existing authenticated Apply endpoint accepts `{confirmed:true,proposalHash:EXACT_HASH}` only after separate authorization and the scoped operator write gate. Normal/general writes remain off. Expired proposal requires a new fresh proposal/hash and review; its approval must not transfer silently.
+
+Immediately before dispatch, existing workflow rechecks site/media/page ownership and association, image-purpose dependencies, permissions, expected alt/modification state, execution facts and proposal validity. Existing one-use execution/target locking and immutable attempt precede any write. Unknown outcomes require reconciliation with no unsafe retry.
+
+After a separately authorized update, independently GET the stored media alt and compare exact approved text. Existing public verification inspects the registered page/image variants and rendered alt; distinguish stored/public success, cache/builder mismatch, partial/uncertain results. Save receipt, make no score/ranking claim. Restoration to original empty alt requires a fresh separately reviewed proposal/precondition read/approval and separate immutable receipt; reject intervening changes. No automatic restoration.
+
+Focused Spanish/durable-purpose/fix workflow tests:88 passed. Full backend check:89 suites,1893 passed,one existing skip; typecheck,lint and production build passed. Final typecheck/lint repeated after the last edits. New tests cover human edit acceptance, unsupported wording, unchanged strict model validation, distinct hashes, saved provenance, immutable original generation, and no inference/writes. The initial operator attempt stopped during module loading while a concurrent build regenerated dist; after builds completed, the proposal-only run succeeded. No external request or persistence occurred in that first attempt.

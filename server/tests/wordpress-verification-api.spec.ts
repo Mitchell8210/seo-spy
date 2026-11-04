@@ -51,8 +51,8 @@ describe("public verification service with controlled collector fixtures", () =>
 
   it("collects only the adapter-bound public page and saves a receipt before returning verification", async () => {
     const result = await verify();
-    expect(wordpress.verificationTarget).toHaveBeenCalledWith(businessId, actor, proposalId, "pages", 12);
-    expect(collector.collect).toHaveBeenCalledWith(target.pageUrl, undefined, target.siteUrl);
+    expect(wordpress.verificationTarget).toHaveBeenCalledWith(businessId, actor, proposalId, "pages", 12, undefined);
+    expect(collector.collect).toHaveBeenCalledWith(target.pageUrl, expect.any(AbortSignal), target.siteUrl);
     expect(result).toMatchObject({ version: "wordpress-public-verification-v1", proposalId, businessId, siteUrl: target.siteUrl, requestedUrl: target.pageUrl, finalUrl: target.pageUrl, storedFieldMatches: true, status: "verified", matchedImages: 1, observedAlts: [target.expectedAlt] });
     expect(result).not.toHaveProperty("actor");
     expect(store.create).toHaveBeenCalledTimes(1);
@@ -91,6 +91,16 @@ describe("public verification service with controlled collector fixtures", () =>
     expect(JSON.stringify(result)).not.toContain("secret-password");
     expect(result.limitations.some(value => value.includes("No automatic retry"))).toBe(true);
     expect(records.size).toBe(1);
+  });
+  it("bounds public collection to two seconds and saves a truthful pending receipt on deadline", async () => {
+    const signal = AbortSignal.abort(), timeout = jest.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
+    try {
+      collector.collect.mockImplementationOnce(async (_url, deadline) => { deadline?.throwIfAborted(); return page(""); });
+      const result = await verify();
+      expect(timeout).toHaveBeenCalledWith(2000);
+      expect(result).toMatchObject({ status: "inconclusive", storedFieldMatches: true, matchedImages: 0 });
+      expect(collector.collect).toHaveBeenCalledTimes(1); expect(records.size).toBe(1);
+    } finally { timeout.mockRestore(); }
   });
 
   it("honors transport charset and keeps unsupported or invalid byte encodings inconclusive", async () => {

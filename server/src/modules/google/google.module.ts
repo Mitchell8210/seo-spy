@@ -8,6 +8,8 @@ import { GoogleReportingController } from "./google.controller.js";
 import { GoogleOperatorGuard } from "./google.guard.js";
 import { GoogleReportingService } from "./google.service.js";
 import { GoogleFacebookVisitsService } from "./facebook-visits.service.js";
+import { GoogleAnalysisService } from "./google-analysis.service.js";
+import { GoogleAnalysisController, GoogleAnalysisReadGuard } from "./google-analysis.controller.js";
 
-@Module({ imports: [PersistenceModule], controllers: [GoogleReportingController], providers: [GoogleTransport, ServiceAccountGoogleTokenProvider, { provide: GOOGLE_TOKEN_PROVIDER, useExisting: ServiceAccountGoogleTokenProvider }, GoogleReportingClient, GoogleCacheStore, GoogleOperatorGuard, GoogleReportingService, GoogleFacebookVisitsService], exports: [GoogleReportingService, GoogleFacebookVisitsService] })
+@Module({ imports: [PersistenceModule], controllers: [GoogleReportingController, GoogleAnalysisController], providers: [GoogleTransport, ServiceAccountGoogleTokenProvider, { provide: GOOGLE_TOKEN_PROVIDER, useExisting: ServiceAccountGoogleTokenProvider }, GoogleReportingClient, GoogleCacheStore, GoogleOperatorGuard, GoogleReportingService, GoogleFacebookVisitsService, GoogleAnalysisService, GoogleAnalysisReadGuard], exports: [GoogleReportingService, GoogleFacebookVisitsService] })
 export class GoogleReportingModule {}

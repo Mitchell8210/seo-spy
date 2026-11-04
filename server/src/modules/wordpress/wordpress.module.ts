@@ -12,6 +12,16 @@ import { AiModule } from "../ai/ai.module.js";
 import { WordPressMuseService } from "./wordpress-muse.service.js";
 import { WordPressMuseStore } from "./wordpress-muse.store.js";
 import { WordPressVerificationService } from "./wordpress-verification.service.js";
+import { ReportsModule } from "../../reports/reports.module.js";
+import { WordPressFixService } from "./wordpress-fix.service.js";
+import { WordPressFixStore } from "./wordpress-fix.store.js";
+import { WordPressFixController, WordPressFixOperatorController, WordPressLocalFixReadController } from "./wordpress-fix.controller.js";
+import { WordPressFixSessions, WordPressFixSessionController, WordPressFixSessionGuard, WordPressLocalFixReadGuard } from "./wordpress-fix-session.js";
+import { WordPressPageEvidenceService } from "./wordpress-page-evidence.service.js";
+import { WordPressAltReceiptService } from "./wordpress-alt-receipt.service.js";
+import { WordPressPurposeService } from "./wordpress-purpose.service.js";
+import { WordPressImageContent } from "../../integrations/wordpress/image-content.js";
+import { WordPressFixCandidatesService } from "./wordpress-fix-candidates.service.js";
 
-@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule], controllers: [WordPressController], providers: [WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService], exports: [WordPressService, WordPressReportsService, WordPressMuseService, WordPressOperatorGuard] })
+@Module({ imports: [PersistenceModule, WebsiteCollectionModule, AiModule, ReportsModule], controllers: [WordPressLocalFixReadController, WordPressController, WordPressFixController, WordPressFixOperatorController, WordPressFixSessionController], providers: [WordPressFixCandidatesService, WordPressLocalFixReadGuard, WordPressTransport, WordPressClient, WordPressActionsStore, WordPressOperatorGuard, WordPressService, WordPressReportsStore, WordPressReportsService, WordPressMuseService, WordPressMuseStore, WordPressVerificationService, WordPressFixService, WordPressFixStore, WordPressFixSessions, WordPressFixSessionGuard, WordPressPageEvidenceService, WordPressAltReceiptService, WordPressPurposeService, WordPressImageContent], exports: [WordPressService, WordPressReportsService, WordPressMuseService, WordPressOperatorGuard, WordPressFixSessions] })
 export class WordPressModule {}

@@ -5,11 +5,14 @@ import { mapDashboardReports } from './dashboardMapping.ts'
 import { opportunityDestination, selectDashboardOpportunities, type DashboardIssue } from './dashboardOpportunities.ts'
 import { knownAssessment } from './savedScore.ts'
 import { socialScoreDetails } from './socialScoreDetails.ts'
+import { mapSavedMuseAssessment } from './dashboardMuse.ts'
+import type { InvestigationInterpretation } from '../types/investigationInterpretation'
+import { interpretationIssues } from './reportInterpretation.ts'
 
 const severity = { critical: 'Critical', medium: 'Medium', low: 'Low' } as const
 
 /** Saved evidence only. Scores/comparisons are supplied by the backend, never inferred here. */
-export function mapDashboardAssessment(businessId: string, dashboard: Dashboard | null, website: WebsiteReport | null, social: FacebookReportResponse | null) {
+export function mapDashboardAssessment(businessId: string, dashboard: Dashboard | null, website: WebsiteReport | null, social: FacebookReportResponse | null, reportInterpretation?: InvestigationInterpretation | null) {
   const view = mapDashboardReports(dashboard, website, social)
   const assessment = dashboard?.assessment
   const knownPolicy = knownAssessment(assessment, businessId)
@@ -51,13 +54,30 @@ export function mapDashboardAssessment(businessId: string, dashboard: Dashboard 
       issues.push({ id: finding.id, title: finding.title, explanation: summary?.text ?? finding.explanation,
         severity: severity[finding.severity], status: finding.status, source: channel.source,
         category: channel.category, mode: 'saved', destination: opportunityDestination(channel.category, businessId),
+        fixReview: { id: finding.id, title: finding.title, category: channel.category, source: channel.source, explanation: summary?.text ?? finding.explanation,
+          businessId, reportId: channel.category === 'website' ? website?.auditId : social?.report?.auditId, findingId: finding.id,
+          recommendation: recommendation?.recommendedChange || recommendation?.explanation, evidence: [summary?.text ?? finding.explanation] },
         recommendation: muse ? { id: muse.id, title: muse.title, explanation: `${analysis?.isMock ? 'Mock AI recommendation' : 'Saved AI recommendation'}: ${muse.recommendation}`, status: 'needs_review' } : recommendation ? { id: recommendation.id, title: recommendation.title,
           explanation: recommendation.recommendedChange || recommendation.explanation, status: recommendation.status } : undefined,
       })
     }
   }
-  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment,
+  const opportunities = selectDashboardOpportunities(issues)
+  const interpretation = mapSavedMuseAssessment(knownPolicy ? assessment : null, website, social)
+  const aiIssues = interpretationIssues(reportInterpretation, businessId, [website, social?.report])
+  // Use the validated selection for the existing category cards, including
+  // scoring observations that have no original audit finding. Keep model order
+  // and leave omitted categories empty instead of inventing an AI priority.
+  const top = interpretation ? Object.fromEntries((['website', 'social', 'consistency'] as const).map(category => [category,
+    interpretation.path.filter(item => item.category === category).slice(0, 3).map(item => ({ ...item,
+      explanation: `${item.source}: ${item.recommendation!.explanation}`,
+    })),
+  ])) as Record<DashboardIssue['category'], DashboardIssue[]> : opportunities.top
+  const aiTop = aiIssues.length ? Object.fromEntries((['website', 'social', 'consistency'] as const).map(category => [category,
+    aiIssues.some(item => item.category === category) ? aiIssues.filter(item => item.category === category).slice(0, 3) : top[category],
+  ])) as typeof top : top
+  return { ...view, businessId, scoreAssessment: knownPolicy ? assessment : null, socialScore, socialAssessment, interpretation,
     websiteResults: { ...view.websiteResults, overall: websiteScore }, consistency: { ...view.consistency, score: consistencyScore, checks },
     main: { ...view.main, overall: overallScore, components: [websiteScore, socialScore, consistencyScore] },
-    ...selectDashboardOpportunities(issues) }
+    ...opportunities, top: aiTop, path: aiIssues.length ? aiIssues : interpretation ? interpretation.path : opportunities.path }
 }

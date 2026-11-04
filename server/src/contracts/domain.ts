@@ -93,11 +93,13 @@ export interface AuditResults {
   facebook?: FacebookReport;
 }
 
+export type { PlannerRecordTask, PlannerState, PlannerSchedule } from "../modules/smart-planner/planner.types.js";
+
 export interface Audit {
   report?: ReportFileReference;
   id: string;
   businessId: string;
-  scope: "demo" | "homepage" | "lighthouse" | "facebook";
+  scope: "demo" | "homepage" | "lighthouse" | "facebook" | "wordpress-page";
   strategy?: LighthouseStrategy;
   mode: "demo" | "live";
   status: AuditStatus;

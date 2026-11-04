@@ -25,6 +25,17 @@ export interface SavedAssessment {
   comparisons?: { id: string; outcome: 'pass' | 'fail' | 'unknown'; applicable: boolean; website: string | null; facebook: string | null }[]
   analysis: {
     id: string; assessmentId: string; businessId: string; isMock: boolean; generationMode: 'mock' | 'poc' | 'demo'
-    output: { recommendations: { id: string; reportId: string; findingId: string; title: string; recommendation: string; evidenceRefs: { reportId: string; evidenceId: string }[] }[] }
+    provider?: 'mock-fixture' | 'meta'; usageAttemptId?: string
+    sourceManifest?: { reportId: string; contentHash: string; provider: 'website' | 'facebook'; collectedAt: string; status: string }[]
+    output: {
+      schemaVersion?: string
+      summary?: string
+      scoringExplanation?: { text: string; categories: string[] }
+      recommendations: { id: string; reportId: string; findingId: string; title: string; recommendation: string;
+        rationale?: string; effort?: string; risk?: string; verificationSteps?: string[]; manualFallback?: string
+        evidenceRefs: { reportId: string; evidenceId: string }[]
+        origin?: { kind: 'finding' | 'scoring-observation'; category: 'website' | 'social' | 'consistency'; sourceRefs: { reportId: string; evidenceId: string }[] }
+      }[]
+    }
   } | null
 }

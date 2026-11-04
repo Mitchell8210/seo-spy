@@ -62,6 +62,11 @@ export class WordPressActionsStore implements OnApplicationShutdown {
       throw new ServiceUnavailableException("The WordPress operation record could not be read safely.");
     }
   }
+  savedVerifications(businessId: string, proposalId: string): unknown[] {
+    return this.database.listArtifacts("wordpress-verification", businessId, 10000)
+      .filter(row => row.payload && typeof row.payload === "object" && "proposalId" in row.payload && row.payload.proposalId === proposalId)
+      .map(row => row.payload);
+  }
   async create(id: string, kind: string, data: object): Promise<boolean> {
     try {
       this.path(id, kind);

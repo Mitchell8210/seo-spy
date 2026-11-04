@@ -1,4 +1,7 @@
-import { Body, ConflictException, Controller, Get, HttpException, Param, ParseUUIDPipe, Post, Req, ServiceUnavailableException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Get, HttpException, Param, ParseUUIDPipe, Post, Req, ServiceUnavailableException, UseGuards } from "@nestjs/common";
+import { z } from "zod";
+import { wordPressAltFundingRequestSchema } from "../../integrations/ai/muse-wordpress-alt-ledger.js";
+import { allowanceInputSchema } from "../../integrations/ai/muse-wordpress-allowance.js";
 import { ConfigService } from "@nestjs/config";
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
@@ -42,6 +45,49 @@ export class AiAdminController {
   @ApiOperation({ summary: "Review the immutable target, necessity reason and maximum reserved cost before administrator approval" })
   @ApiOkResponse({ schema: { type: "object", description: "Intent ID, actor/scope, exact request hash, model/mode, input/output bounds, frozen price version, reserveMicros, reason, expiry, approval/consumption timestamps. No prompt or credential." } })
   intent(@Param("intentId", new ParseUUIDPipe({ version: "4" })) intentId: string) { return this.safe(() => this.usage.readIntent(intentId)); }
+  @Post("wordpress-alt-funding/preview")
+  @ApiOperation({ summary: "Read-only exact one-attempt WordPress-alt funding proposal; creates no grant, intent, approval or reservation" })
+  fundingPreview(@Req() request: Request, @Body() body: unknown) {
+    const parsed = wordPressAltFundingRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Invalid exact WordPress-alt funding request.");
+    return this.safe(() => this.usage.prepareWordPressAltFunding(this.actor(request), parsed.data));
+  }
+  @Post("wordpress-fix-allowance/preview")
+  @ApiOperation({ summary: "Preview one-time capped website-fix setup without activating funding or making external calls" })
+  allowancePreview(@Req() request: Request, @Body() body: unknown) {
+    const parsed = allowanceInputSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Invalid scoped website-fix setup.");
+    return this.safe(() => this.usage.prepareWordPressAllowance(this.actor(request), parsed.data));
+  }
+  @Post("wordpress-fix-allowance/activate")
+  @ApiOperation({ summary: "Explicit one-time approval of the exact capped website-fix setup; no generation or WordPress write" })
+  allowanceActivate(@Req() request: Request, @Body() body: unknown) {
+    const parsed = z.object({ request: allowanceInputSchema, confirmed: z.literal(true), policyHash: z.string().regex(/^[a-f0-9]{64}$/), fundingHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Approve the exact one-time website-fix setup.");
+    const { request: target, ...confirmation } = parsed.data;
+    return this.safe(() => this.usage.activateWordPressAllowance(this.actor(request), target, confirmation));
+  }
+  @Post("frontend-allowance/preview")
+  @ApiOperation({ summary: "Preview extending the existing funded allowance to authenticated frontend Muse actions; no new funds or calls" })
+  frontendAllowancePreview(@Req() request: Request, @Body() body: unknown) {
+    if (!z.object({}).strict().safeParse(body).success) throw new BadRequestException("Invalid frontend allowance scope preview.");
+    return this.safe(() => this.usage.prepareFrontendAllowance(this.actor(request)));
+  }
+  @Post("frontend-allowance/activate")
+  @ApiOperation({ summary: "Approve the exact additive frontend task scope without renewing funding, attempts, expiry or WordPress writes" })
+  frontendAllowanceActivate(@Req() request: Request, @Body() body: unknown) {
+    const parsed = z.object({ confirmed: z.literal(true), policyHash: z.string().regex(/^[a-f0-9]{64}$/), approvalHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Approve the exact frontend task scope amendment.");
+    return this.safe(() => this.usage.activateFrontendAllowance(this.actor(request), parsed.data));
+  }
+  @Post("wordpress-alt-funding/activate")
+  @ApiOperation({ summary: "Separate explicit administrator funding approval only; earmarks one exact task and reduces assessment headroom, never dispatches or approves a model request" })
+  activateFunding(@Req() request: Request, @Body() body: unknown) {
+    const parsed = z.object({ request: wordPressAltFundingRequestSchema, confirmed: z.literal(true), policyHash: z.string().regex(/^[a-f0-9]{64}$/), fundingHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Explicit exact funding confirmation is required.");
+    const { request: target, ...confirmation } = parsed.data;
+    return this.safe(() => this.usage.activateWordPressAltFunding(this.actor(request), target, confirmation));
+  }
   @Post("intents/:intentId/approve")
   @ApiOperation({ summary: "Approve one exact estimated real request; this does not dispatch it", description: "Requires the separate AI_ADMIN_KEY, explicit confirmation and exact hash/reservation from the reviewed intent. Single-use approval expires with its intent. A normal analysis confirmed:true flag cannot substitute for this approval." })
   @ApiCreatedResponse({ schema: { type: "object", description: "The persisted approved intent; no provider call or budget reset." } })

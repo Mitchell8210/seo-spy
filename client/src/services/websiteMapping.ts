@@ -3,6 +3,8 @@ import type { LiveWebsiteAudit, WebsiteCategory } from '../types/website'
 import type { WebsiteReport } from '../types/websiteApi'
 import type { SavedAssessment } from '../types/assessment'
 import { savedChannelScore } from './savedScore.ts'
+import type { InvestigationInterpretation } from '../types/investigationInterpretation'
+import { validatedReportRecommendations } from './reportInterpretation.ts'
 
 const categories = [
   { id: 'performance', label: 'Performance' },
@@ -23,6 +25,16 @@ export function measurementLabel(report: LighthouseReport) {
   return `Google Lighthouse ${report.lighthouseVersion} · ${report.strategy} lab · ${report.fetchedAt}`
 }
 
+/** Fill the existing scope/source slots from the saved page evidence itself. */
+export function pageReportContext(record: WebsiteReport | null) {
+  if (record?.audit.scope !== 'wordpress-page') return null
+  const evidence = record.results?.evidence.find(item => item.checkId === 'image-alt')
+  return {
+    coverage: record.audit.warnings.join(' ') || 'Not available',
+    sourceLabel: evidence ? `${evidence.sourceUrl} · ${evidence.collectedAt}` : 'Not available',
+  }
+}
+
 function category(checkId: string, report?: LighthouseReport): string {
   if (!checkId.startsWith('lighthouse:')) return htmlCategories[checkId] ?? checkId
   const id = checkId.slice('lighthouse:'.length)
@@ -30,7 +42,7 @@ function category(checkId: string, report?: LighthouseReport): string {
   return [...new Set(matches.map(item => lighthouseCategories[item.id] ?? item.title))].join(' · ') || checkId
 }
 
-export function mapWebsiteReport(record: WebsiteReport, assessment?: SavedAssessment | null): LiveWebsiteAudit {
+export function mapWebsiteReport(record: WebsiteReport, assessment?: SavedAssessment | null, interpretation?: InvestigationInterpretation | null): LiveWebsiteAudit {
   const { audit, results } = record
   if (!results) throw new Error('This report has no website results.')
   const report = results.lighthouse
@@ -55,6 +67,7 @@ export function mapWebsiteReport(record: WebsiteReport, assessment?: SavedAssess
       evidenceLabel: summaries?.findings.find(summary => summary.id === item.id)?.sourceLabel ?? 'Not available',
       evidence: summaries?.findings.find(summary => summary.id === item.id)?.text ?? 'Not available' }
   })
+  const ai = validatedReportRecommendations(interpretation, record.business.id, [record])
   return {
     id: record.auditId, websiteId: record.business.id, analyzedAt: audit.completedAt ?? record.generatedAt,
     results: {
@@ -66,6 +79,6 @@ export function mapWebsiteReport(record: WebsiteReport, assessment?: SavedAssess
       issues: findings.length, checksPassed: report ? passedChecks.length : null,
     }, findings, pages: [...pages.values()], passedChecks,
     recommendations: results.recommendations.filter(item => findings.some(finding => finding.id === item.findingId))
-      .map(item => ({ id: item.id, findingId: item.findingId, action: item.recommendedChange })),
+      .map(item => { const generated = ai.find(rec => rec.findingId === item.findingId); return { id: item.id, findingId: item.findingId, action: generated ? `AI recommendation: ${generated.recommendation}` : item.recommendedChange } }),
   }
 }

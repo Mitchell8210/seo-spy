@@ -90,12 +90,18 @@ describe("Meta Muse provider with mocked transport and persistent accounting bou
     expect(result).toEqual({ output: { summary: "Review the evidence" }, model: "muse-spark-1.3", usage: { inputTokens: 30, outputTokens: 20 }, requestId: "req_safe123", attemptId: "79f73b5d-9c92-484f-99ef-70b609abc177" });
     expect(META_MUSE_ENDPOINT).toBe("https://api.meta.ai/v1/responses");
     const prepared = provider.prepare(input);
-    expect(reserve).toHaveBeenCalledWith(authorization.intentId, expect.objectContaining({ actor: authorization.actor, scope: authorization.scope, mode: "poc", requestHash: prepared.requestHash, model: prepared.model, maxInputTokens: prepared.maxInputTokens, maxOutputTokens: 1500, reserveMicros: prepared.reserveMicros, priceVersion: prepared.priceVersion, inputPriceMicrosPerMillion: 1_250_000, outputPriceMicrosPerMillion: 4_250_000 }), { budgetMicros: 2_000_000, dailyMicros: 500_000, maxCalls: 10 });
+    expect(reserve).toHaveBeenCalledWith(authorization.intentId, expect.objectContaining({ actor: authorization.actor, scope: authorization.scope, mode: "poc", requestHash: prepared.requestHash, model: prepared.model, maxInputTokens: prepared.maxInputTokens, maxOutputTokens: 1500, reserveMicros: prepared.reserveMicros, priceVersion: prepared.priceVersion, inputPriceMicrosPerMillion: 1_250_000, outputPriceMicrosPerMillion: 4_250_000 }), { budgetMicros: 25_000_000, dailyMicros: 25_000_000, maxCalls: Number.MAX_SAFE_INTEGER });
     expect(reserve.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(settle.mock.invocationCallOrder[0]);
-    expect(JSON.parse(send.mock.calls[0][0])).toMatchObject({ model: "muse-spark-1.3", store: false, stream: false, background: false, tools: [], tool_choice: "none", reasoning: { effort: "low" }, max_output_tokens: 1500, truncation: "disabled", text: { format: { type: "json_schema", name: "wordpress_analysis", strict: true, schema: input.schema } } });
+    expect(JSON.parse(send.mock.calls[0][0])).toMatchObject({ model: "muse-spark-1.3", store: false, stream: false, background: false, tools: [], tool_choice: "auto", reasoning: { effort: "low" }, max_output_tokens: 1500, truncation: "disabled", text: { format: { type: "json_schema", name: "wordpress_analysis", strict: true, schema: input.schema } } });
     expect(settle).toHaveBeenCalledWith(result.attemptId, { status: "success", inputTokens: 30, outputTokens: 20, actualMicros: 123, requestId: "req_safe123" });
     expect(JSON.stringify(result)).not.toContain("private-model-key");
+  });
+  it.each(["none", "required", { type: "function", name: "unsafe" }])("never forwards unsupported tool choice %j from evidence or configuration", async choice => {
+    settings.AI_TOOL_CHOICE = choice;
+    const prepared = provider.prepare({ ...input, input: { tool_choice: choice } });
+    expect(JSON.parse(prepared.payload)).toMatchObject({ tool_choice: "auto", tools: [] });
+    expect(send).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
   });
   it("blocks native transport access without a private one-use grant, even with a key", async () => {
     const transport = new MetaMuseTransport();

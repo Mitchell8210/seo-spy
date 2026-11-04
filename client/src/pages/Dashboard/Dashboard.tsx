@@ -9,6 +9,7 @@ import { DashboardAssessment } from '../../components/dashboard/DashboardAssessm
 import { opportunityTitle } from '../../services/dashboardOpportunityCopy'
 import { useDashboardAssessment } from '../../hooks/useDashboardAssessment'
 import { useOverallInvestigation as useInvestigation } from '../../hooks/useOverallInvestigation'
+import { SavedWordPressFixes } from '../../components/dashboard/SavedWordPressFixes'
 
 function statusLabel(status: string) {
   return status.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())
@@ -108,7 +109,7 @@ export function Dashboard() {
       <section aria-labelledby="next-steps-title" className="overflow-hidden rounded-2xl border border-blue-500/40 bg-surface shadow-sm">
         <header className="border-b border-line px-5 py-5 sm:px-6">
           <h2 id="next-steps-title" className="text-xl font-semibold tracking-tight text-ink">Your Next Steps</h2>
-          <p className="mt-2 text-sm leading-6 text-secondary">Additional opportunities and recommended actions to keep improving your online presence.</p>
+          <p className="mt-2 text-sm leading-6 text-secondary">{assessment.interpretation ? `${assessment.interpretation.label}: ${assessment.interpretation.summary}` : 'Additional opportunities and recommended actions to keep improving your online presence.'}</p>
         </header>
         <div className="grid divide-y divide-line lg:grid-cols-[1.1fr_0.9fr] lg:divide-x lg:divide-y-0">
           <section aria-labelledby="findings-title" className="min-w-0 px-5 py-5 sm:px-6">
@@ -126,12 +127,12 @@ export function Dashboard() {
           </section>
           <section aria-labelledby="recommendations-title" className="min-w-0 px-5 py-5 sm:px-6">
             <h3 id="recommendations-title" className="flex items-center gap-2 text-base font-semibold text-ink"><Target size={18} className="text-blue-300" aria-hidden="true" />Recommended Path</h3>
-            <p className="mt-2 text-xs leading-5 text-secondary">A simple order for continuing your optimization.</p>
+            <p className="mt-2 text-xs leading-5 text-secondary">{assessment.interpretation?.scoringExplanation ?? 'A simple order for continuing your optimization.'}</p>
             <ol className="mt-3 divide-y divide-line">
               {assessment.path.slice(0, 3).map((issue, index) => {
                 const recommendation = issue.recommendation!
                 return (
-                <li key={`${issue.category}:${issue.id}`}><Link to={issue.destination} state={{ findingId: issue.id }} onClick={() => openConsistency(issue.category)} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); event.currentTarget.click() } }} className="group flex cursor-pointer min-h-11 items-start gap-3 rounded-lg py-4 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
+                <li key={`${issue.category}:${issue.id}`}><Link to={issue.destination} state={issue.origin === 'assessment' ? issue.findingId ? { findingId: issue.findingId } : undefined : { findingId: issue.id }} onClick={() => openConsistency(issue.category)} onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); event.currentTarget.click() } }} className="group flex cursor-pointer min-h-11 items-start gap-3 rounded-lg py-4 hover:bg-elevated focus-visible:outline-2 focus-visible:outline-blue-400">
                   <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full bg-elevated text-xs font-semibold text-blue-300">{index + 1}</span>
                   <div className="min-w-0">
                     <h4 className="text-sm font-semibold leading-6 text-ink">{recommendation.title}</h4>
@@ -145,6 +146,7 @@ export function Dashboard() {
           </section>
         </div>
       </section>
+      <SavedWordPressFixes key={`fixes:${businessId}`} businessId={businessId} />
     </div>
   )
 }

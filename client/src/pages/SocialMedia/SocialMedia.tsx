@@ -11,6 +11,7 @@ import { useFacebookReportRun } from '../../hooks/useFacebookReportRun'
 import { mapSocialMediaReport } from '../../services/socialMediaMapping'
 import { useSavedAssessment } from '../../hooks/useSavedAssessment'
 import { savedChannelScore, scoreCaption } from '../../services/savedScore'
+import { useReportInterpretation } from '../../hooks/useReportInterpretation'
 
 export function SocialMedia() {
   const [search] = useSearchParams()
@@ -19,7 +20,8 @@ export function SocialMedia() {
   const report = state.data?.report
   const assessment = useSavedAssessment(businessId, report?.auditId)
   const score = report && !state.error ? savedChannelScore(assessment, businessId, report.auditId, 'social') : null
-  const view = state.data ? mapSocialMediaReport(state.data) : null
+  const interpretation = useReportInterpretation(businessId, report ? [report.auditId] : [], state.loading ? 'loading' : 'ready')
+  const view = state.data ? mapSocialMediaReport(state.data, interpretation) : null
   const run = useFacebookReportRun(businessId, view?.facebook.pageId ?? '', state.refresh)
 
   return (
@@ -32,7 +34,7 @@ export function SocialMedia() {
             {run.running ? <LoaderCircle size={16} className="motion-safe:animate-spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{run.running ? 'Report running…' : 'Run Report'}
           </button>
         </div>
-        {view && <div className="mt-5 flex items-start gap-3"><FacebookMark /><div className="min-w-0"><p className="text-xs font-medium text-blue-300">Facebook</p><h2 className="mt-1 break-words text-lg font-semibold text-ink">{view.facebook.pageName}</h2><div className="mt-2"><StatusBadge label={report?.audit.status === 'partial' ? 'Partial coverage' : 'Saved report'} tone={report?.audit.status === 'partial' ? 'medium' : 'neutral'} /></div></div></div>}
+        {view && <div className="mt-5 flex items-start gap-3"><FacebookMark /><div className="min-w-0"><p className="text-xs font-medium text-blue-300">Facebook</p><h2 className="mt-1 break-words text-lg font-semibold text-ink">{view.facebook.pageName}</h2><div className="mt-2"><StatusBadge label="Saved report" tone={report?.audit.status === 'partial' ? 'medium' : 'neutral'} /></div></div></div>}
         <p className="mt-4 border-t border-line pt-4 text-xs leading-6 text-muted">{view ? 'Saved Facebook report. Information reflects what was available when the report was collected.' : 'Connect a Facebook Page and generate a report to see its live data here.'}</p>
         {report && view && <p className="mt-1 text-xs leading-6 text-muted">Analyzed time: <time dateTime={report.generatedAt}>{new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Los_Angeles' }).format(new Date(report.generatedAt))} Pacific</time></p>}
       </section>
@@ -45,7 +47,7 @@ export function SocialMedia() {
           <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3"><h2 id="social-health-title" className="text-xl font-semibold tracking-tight text-ink">Social Media Health Summary</h2><span className="rounded-md border border-line bg-elevated px-3 py-1.5 text-xs font-medium text-secondary">{view.periodLabel} · Saved live data</span></div>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{view.healthMetrics.map(metric => <SocialHealthCard key={metric.id} metric={metric} />)}</div>
         </section>
-        <SocialMediaReport key={report.auditId} findings={view.findings} checks={[]} mode="live" evidenceLabel={view.evidenceLabel} />
+        <SocialMediaReport key={report.auditId} findings={view.findings} checks={[]} mode="live" evidenceLabel={view.evidenceLabel} businessId={businessId} reportId={report.auditId} />
       </div>}
     </div>
   )

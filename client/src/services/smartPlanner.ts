@@ -65,12 +65,5 @@ export function autoSchedule(tasks: PlannerTask[], monday: Date, weekends: boole
   }
   return planned
 }
-// A read refresh is not a new provider scan. Only source-reported active issues reopen.
-export function reconcileRescan(state: PlannerLocalState, source: PlannerTask[], socialReadSucceeded: boolean): PlannerLocalState {
-  const edits = { ...state.edits }
-  for (const task of source) {
-    if (task.mode === 'saved' && !socialReadSucceeded) continue
-    if (edits[task.id]?.status === 'Done') edits[task.id] = { ...edits[task.id], status: 'Needs Action' }
-  }
-  return { ...state, edits }
-}
+// Legacy browser-state helper: saved evidence is never proof that completed work failed.
+export function reconcileRescan(state: PlannerLocalState): PlannerLocalState { return state }

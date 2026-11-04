@@ -260,7 +260,7 @@ describe("WordPress operator API with controlled remote fixtures", () => {
     await get(`${prefix}/reports/${different.body.id}/muse-analyses/${created.body.id}`).expect(404);
   });
 
-  it("requires separate administrator approval, reserves usage once and serves the paid-mode cache without another wire request", async () => {
+  it("automatically reserves authorized spending and serves the paid-mode cache without another wire request", async () => {
     const report = await post(`${prefix}/reports`, {}).expect(201);
     const prepared = await get(`${prefix}/reports/${report.body.id}/muse-evidence`).expect(200);
     const ref = prepared.body.observations[0].evidenceId;
@@ -274,14 +274,7 @@ describe("WordPress operator API with controlled remote fixtures", () => {
     settings.MOCK_AI = false;
     settings.AI_MODE = "poc";
     settings.MODEL_API_KEY = "fixture-private-key-not-a-live-credential";
-    await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(503);
-    await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true, intentId: estimate.body.id }).expect(503);
-    expect(wire).not.toHaveBeenCalled();
-    const approvalPath = `/api/ai/admin/intents/${estimate.body.id}/approve`;
-    const approval = { confirmed: true, requestHash: estimate.body.requestHash, reserveMicros: estimate.body.reserveMicros };
-    await post(approvalPath, approval).expect(401);
-    await post(approvalPath, approval, String(settings.AI_ADMIN_KEY)).expect(201);
-    const created = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true, intentId: estimate.body.id }).expect(201);
+    const created = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
     expect(created.body).toMatchObject({ isMock: false, provider: "meta", generationMode: "poc" });
     expect(wire).toHaveBeenCalledTimes(1);
     const cached = await post(`${prefix}/reports/${report.body.id}/muse-analyses`, { confirmed: true }).expect(201);
@@ -304,7 +297,7 @@ describe("WordPress operator API with controlled remote fixtures", () => {
     expect(receipt.body).toMatchObject({ status: "verified", storedFieldMatches: true, matchedImages: 1 });
     expect(receipt.body.actor).toBeUndefined();
     const collector = app.get(WebsiteCollector);
-    expect(collector.collect).toHaveBeenCalledWith("https://example.com/example/", undefined, "https://example.com");
+    expect(collector.collect).toHaveBeenCalledWith("https://example.com/example/", expect.any(AbortSignal), "https://example.com");
     const count = transport.mock.calls.length;
     await get(`${path}/${receipt.body.id}`).expect(200, receipt.body);
     expect(transport.mock.calls).toHaveLength(count);

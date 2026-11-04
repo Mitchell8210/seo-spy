@@ -1,0 +1,199 @@
+[
+  {
+    "id": "synthetic-triage-tradeoffs",
+    "provenance": "SYNTHETIC OFFLINE DESIGN FIXTURE; NOT GUZMAN DATA, NOT AN APPLICATION REPORT",
+    "candidates": [
+      {
+        "id": "c01",
+        "group": "loading",
+        "category": "website",
+        "severity": "medium",
+        "statement": "Synthetic mobile lab LCP is 5.2 seconds.",
+        "action": "Investigate the measured loading timeline before choosing a fix.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c01"
+          }
+        ]
+      },
+      {
+        "id": "c02",
+        "group": "loading",
+        "category": "website",
+        "severity": "medium",
+        "statement": "Synthetic first content appears slowly in the same recorded lab run.",
+        "action": "Inspect the same loading timeline; group with c01 rather than create a second loading priority.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c02"
+          }
+        ]
+      },
+      {
+        "id": "c03",
+        "group": "contact-route",
+        "category": "consistency",
+        "severity": "critical",
+        "statement": "Synthetic owner-confirmed phone value differs from the published business contact number.",
+        "action": "Confirm the recorded owner approval remains current, then prepare an exact correction proposal.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c03"
+          }
+        ]
+      },
+      {
+        "id": "c04",
+        "group": "posting",
+        "category": "social",
+        "severity": "medium",
+        "statement": "Synthetic verified history has one post in 90 days and 84 days since the latest post.",
+        "action": "Plan a sustainable posting routine; do not predict commercial benefit.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c04"
+          }
+        ]
+      },
+      {
+        "id": "c05",
+        "group": "image-accessibility",
+        "category": "website",
+        "severity": "low",
+        "statement": "Synthetic human review confirms informative images with missing alternatives.",
+        "action": "Prepare accurate alternatives after mapping exact saved image targets; do not use homepage findings as media IDs.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c05"
+          }
+        ]
+      },
+      {
+        "id": "c06",
+        "group": "customer-responses",
+        "category": "social",
+        "severity": "critical",
+        "statement": "Synthetic complete paired evidence records ten eligible inquiries with no business responses during the measured period.",
+        "action": "Review unanswered inquiries and establish a response routine without guessing an expected response-time improvement.",
+        "kind": "confirmed",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c06"
+          }
+        ]
+      },
+      {
+        "id": "c07",
+        "group": "identity-review",
+        "category": "consistency",
+        "severity": "medium",
+        "statement": "Synthetic saved sources disagree on business name; neither has established authority.",
+        "action": "Ask the owner to confirm the intended name before any edit.",
+        "kind": "conditional-review",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c07"
+          }
+        ]
+      },
+      {
+        "id": "c08",
+        "group": "indexing-intent",
+        "category": "website",
+        "severity": "critical",
+        "statement": "Synthetic saved homepage HTML includes noindex; intended indexing status is unknown.",
+        "action": "Confirm the intended indexing status before proposing any removal; make no ranking prediction.",
+        "kind": "conditional-review",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:tradeoffs",
+            "evidenceId": "synthetic-offline:proof:c08"
+          }
+        ]
+      }
+    ],
+    "deterministicBaseline": [
+      "c03",
+      "c06",
+      "c08"
+    ],
+    "expectedDecisionSpace": "Select up to three distinct issue groups out of seven. Contact correctness and unanswered inquiries generally outrank cosmetic improvements. Loading versus indexing-intent review is a genuine conditional tradeoff; accept multiple defensible orders.",
+    "acceptableConstraints": [
+      "At most one loading priority for c01/c02.",
+      "Never recommend automatic noindex removal without confirming intent.",
+      "Do not assume which source has the correct business name.",
+      "Use only supplied facts, citations and safe review actions.",
+      "A model tie with the strong deterministic baseline is a valid outcome."
+    ],
+    "modelResult": null
+  },
+  {
+    "id": "synthetic-sparse-measurements",
+    "provenance": "SYNTHETIC OFFLINE DESIGN FIXTURE; NOT GUZMAN DATA, NOT AN APPLICATION REPORT",
+    "candidates": [
+      {
+        "id": "s01",
+        "group": "hours-review",
+        "category": "consistency",
+        "severity": "medium",
+        "statement": "Synthetic current sources disagree on hours; intended hours are unknown.",
+        "action": "Verify intended hours with the owner before any correction.",
+        "kind": "conditional-review",
+        "eligible": true,
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:sparse",
+            "evidenceId": "synthetic-offline:proof:hours"
+          }
+        ]
+      }
+    ],
+    "mandatoryContext": [
+      {
+        "statement": "Synthetic audience is ten followers with two measured LIKE actions in the reporting period. This is not growth or unique engagement.",
+        "evidenceRefs": [
+          {
+            "reportId": "synthetic-offline:sparse",
+            "evidenceId": "synthetic-offline:proof:audience"
+          }
+        ]
+      }
+    ],
+    "measurementGaps": [
+      "Posting history inaccessible: inactivity is unproven.",
+      "Follower growth unavailable: weak growth is unproven.",
+      "Response-time pairs absent: slow customer responses are unproven.",
+      "Website performance measurement stale: current slow performance is unproven."
+    ],
+    "deterministicBaseline": [
+      "s01"
+    ],
+    "acceptableSelections": [
+      [
+        "s01"
+      ]
+    ],
+    "expected": "Return one verification opportunity, not three padded recommendations. Missing measurements are caveats, never failures or scored zeros. Keep small-audience context even if not selected as a strength.",
+    "modelResult": null
+  }
+]

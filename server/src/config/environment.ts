@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { leadPagePaths } from "../integrations/google/google-lead-policy.js";
 
 const environmentSchema = z.object({
   NODE_ENV: z
@@ -22,6 +23,8 @@ const environmentSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).max(4096).default("reports/seo-spy.sqlite"),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().trim().max(4096).default(""),
   GA4_PROPERTY_ID: z.string().regex(/^(?:[1-9]\d{0,19})?$/).default(""),
+  GA4_LEAD_EVENT_NAME: z.string().regex(/^(?:[a-zA-Z][a-zA-Z0-9_]{0,39})?$/).default(""),
+  GA4_LEAD_PAGE_PATHS: z.string().max(5200).refine(value => leadPagePaths(value) !== null).default(""),
   GSC_SITE_URL: z.string().max(2048).refine(value => {
     if (!value) return true;
     if (/^sc-domain:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(value)) return true;
@@ -63,15 +66,16 @@ const environmentSchema = z.object({
   AI_MAX_INPUT_BYTES: z.coerce.number().int().min(4096).max(32768).default(32768),
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(16).max(1500).default(1500),
   AI_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(1).default(1),
-  AI_DEV_BUDGET_MICROS: z.coerce.number().int().min(0).max(2000000).default(2000000),
-  AI_DEV_DAILY_MICROS: z.coerce.number().int().min(0).max(500000).default(500000),
-  AI_DEV_MAX_CALLS: z.coerce.number().int().min(0).max(10).default(10),
+  AI_DEV_BUDGET_MICROS: z.coerce.number().int().min(0).max(25000000).default(25000000),
+  AI_DEV_DAILY_MICROS: z.coerce.number().int().min(0).max(25000000).default(25000000),
+  AI_DEV_MAX_CALLS: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(Number.MAX_SAFE_INTEGER),
   AI_INPUT_PRICE_MICROS_PER_MILLION: z.coerce.number().int().min(1250000).max(100000000).default(1250000),
   AI_OUTPUT_PRICE_MICROS_PER_MILLION: z.coerce.number().int().min(4250000).max(100000000).default(4250000),
   WORDPRESS_FRONTEND_ORIGIN: z.string().refine(value => {
     try { const url = new URL(value); return url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname) && url.origin === value; } catch { return false; }
   }).default("http://localhost:5173"),
   FACEBOOK_APP_ID: z.string().trim().regex(/^\d*$/).default(""),
+  FACEBOOK_POSTS_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
   FACEBOOK_APP_SECRET: z.string().trim().default(""),
   FACEBOOK_ACCESS_TOKEN: z.string().trim().default(""),
   FACEBOOK_CONFIG_ID: z.string().trim().regex(/^\d*$/).default(""),

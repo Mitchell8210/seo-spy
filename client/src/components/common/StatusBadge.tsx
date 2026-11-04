@@ -9,6 +9,7 @@ const tones: Record<BadgeTone, { light: string; dark: string }> = {
   low: { light: 'border-emerald-200 bg-emerald-50 text-emerald-800', dark: 'border-emerald-800 bg-emerald-950 text-emerald-300' },
 }
 
-export function StatusBadge({ label, tone = 'neutral', theme = 'dark' }: { label: string; tone?: BadgeTone; theme?: 'light' | 'dark' }) {
-  return <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${tones[tone][theme]}`}>{label}</span>
+export function StatusBadge({ label, tone = 'neutral', theme = 'dark', size = 'default' }: { label: string; tone?: BadgeTone; theme?: 'light' | 'dark'; size?: 'default' | 'small' }) {
+  const sizing = size === 'small' ? 'px-1.5 py-0 text-[10px] leading-4' : 'px-2 py-0.5 text-xs'
+  return <span className={`inline-flex items-center rounded-md border font-medium ${sizing} ${tones[tone][theme]}`}>{label}</span>
 }

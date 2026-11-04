@@ -15,6 +15,7 @@ const clientDir = fileURLToPath(new URL('..', import.meta.url));
 const children = [], errors = [], requests = [];
 const browserApiRequests = [];
 const savedTarget = process.argv.includes('--saved') ? process.env.WEBSITE_API_TARGET ?? 'http://127.0.0.1:3001' : null;
+const aiMode = process.argv.includes('--ai');
 const dashboardMode = process.argv.includes('--dashboard');
 let mode = 'loaded', cdp, server, artifacts;
 let savedAssessment = null;
@@ -98,6 +99,8 @@ try {
   const cache = path.join(clientDir, 'node_modules/.cache/website-smoke'); await mkdir(cache, { recursive: true }); artifacts = await mkdtemp(path.join(cache, 'run-'));
   server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: req.url });
+    if (req.url === '/api/wordpress/browser-session') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ connected: true, businessId: 'demo-guzman', csrf: 'x'.repeat(43), expiresAt: new Date(Date.now()+3600000).toISOString() })); return; }
+    if (req.url.startsWith('/api/wordpress/local/businesses/demo-guzman/investigation-interpretation?')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: 'demo-guzman', interpretation: aiMode ? { schemaVersion: 'investigation-interpretation-v1', id: 'fixture-interpretation', businessId: business.id, status: 'completed', attemptId: 'fixture-accounted-attempt', sources: [{ reportId: report.auditId, provider: 'website', hash: 'a'.repeat(64) }], recommendations: [{ id: 'ai-action', reportId: report.auditId, category: 'website', findingId: 'fixture-finding', title: 'Prioritize the recorded image review', recommendation: 'Confirm which recorded images need descriptive alternative text.', rationale: 'The saved report identifies images requiring review.', verification: 'Review the next website report.', evidenceRefs: [{ reportId: report.auditId, evidenceId: 'evidence' }] }] } : null })); return; }
     let data;
     if (req.url.startsWith('/api/facebook/investigations/status?')) {
       if (rerun?.status === 'queued') {
@@ -112,9 +115,9 @@ try {
     if (req.url.startsWith('/api/facebook/reports/status?')) {
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ businessId: business.id, active: facebookJob, latest: facebookLatest })); return;
     }
-    if (req.method === 'POST' && req.url === '/api/facebook/reports') {
+    if (req.method === 'POST' && req.url === '/api/wordpress/businesses/demo-guzman/investigations/social') {
       let body = ''; for await (const chunk of req) body += chunk;
-      assert.deepEqual(JSON.parse(body), { businessId: business.id, pageId: '123' });
+      assert.deepEqual(JSON.parse(body), { confirmed: true, pageId: '123' });
       facebookJob = { pageId: '123', status: 'running' };
       setTimeout(() => {
         facebookReport.results.facebook.profile.followers_count.value = 17;
@@ -132,12 +135,12 @@ try {
         latestAttempt: mode === 'failed-latest' ? { auditId: 'failed-facebook', status: 'failed' } : null };
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); return;
     }
-    if (req.method === 'POST' && ['/api/businesses/demo-guzman/audits', '/api/facebook/investigations'].includes(req.url)) {
+    if (req.method === 'POST' && ['/api/wordpress/businesses/demo-guzman/investigations/website', '/api/wordpress/businesses/demo-guzman/investigations/overall'].includes(req.url)) {
       let body = ''; for await (const chunk of req) body += chunk;
       requests.at(-1).body = JSON.parse(body);
       if (rejectRun) { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'START_FAILED', message: 'The report could not be started.' } })); return; }
       rerun = { ...report.audit, id: rerunId, status: 'queued', stage: 'queued', completedAt: null, createdAt: now, strategy: 'mobile' };
-      const result = req.url === '/api/facebook/investigations'
+      const result = req.url.endsWith('/investigations/overall')
         ? { id: rerunId, businessId: business.id, audit: { ...rerun, scoringVersion: 'overall-investigation-v1' }, websiteReportId: null, facebookReportId: null, assessmentId: null }
         : { ...rerun, statusUrl: '/api/audits/' + rerunId };
       setTimeout(() => { res.writeHead(202, { 'content-type': 'application/json' }); res.end(JSON.stringify(result)); }, 300);
@@ -175,8 +178,31 @@ try {
   const profile = path.join(artifacts, 'chrome-profile'); run(chrome, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-sync', '--disable-extensions', 'about:blank']);
   let port; await waitFor(async () => { port = Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]); return Boolean(port); }, 'Chrome startup');
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); cdp = await connect(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
+  if (process.argv.includes('--diagnose-browser')) {
+    console.log(JSON.stringify({ stage: 'before-application-navigation', target: targets.find(target => target.type === 'page').url, browser: await cdp.send('Browser.getVersion') }));
+    console.log(JSON.stringify({ stage: 'blank-renderer', result: await cdp.send('Runtime.evaluate', { expression: '1 + 1', returnByValue: true }) }));
+  }
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('Network.enable'); await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  if (savedTarget && process.argv.includes('--channel-scores')) {
+  if (aiMode) {
+    await navigateReport(base + '/dashboard');
+    await waitFor(async () => (await text()).includes('Prioritize the recorded image review'), 'saved AI priority in Dashboard');
+    assert.match(await text(), /Confirm which recorded images need descriptive alternative text/);
+    assert.equal(requests.filter(item => item.method === 'POST').length, 0, 'Viewing AI recommendations starts no work.');
+    const sections = await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby]")).map(el=>el.getAttribute("aria-labelledby"))');
+    await waitFor(async () => await evaluate('!document.querySelector("[data-testid=dashboard-run-audit]").disabled'), 'Dashboard ready');
+    await evaluate('document.querySelector("[data-testid=dashboard-run-audit]").click()');
+    await waitFor(async () => requests.some(item => item.method === 'POST'), 'explicit authenticated investigation');
+    const started = requests.find(item => item.method === 'POST');
+    assert.equal(started.path, '/api/wordpress/businesses/demo-guzman/investigations/overall');
+    assert.deepEqual(started.body, { confirmed: true });
+    await waitFor(async () => rerun?.status === 'completed', 'completed investigation');
+    await waitFor(async () => (await text()).includes('Prioritize the recorded image review') && await evaluate('!document.querySelector("[data-testid=dashboard-run-audit]").disabled'), 'AI priority after fresh report');
+    assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby]")).map(el=>el.getAttribute("aria-labelledby"))'), sections, 'No visible sections were added or removed.');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 1);
+    assert.deepEqual(errors, []);
+    await screenshot('dashboard-ai.png');
+    console.log(JSON.stringify({ passed: ['saved AI priority', 'existing recommendation list', 'authenticated start', 'fresh report interpretation', 'read-only saved recommendations', 'preserved sections'], artifactDirectory: artifacts }, null, 2));
+  } else if (savedTarget && process.argv.includes('--channel-scores')) {
     const dashboard = await (await fetch(savedTarget + '/api/businesses/demo-guzman/dashboard')).json();
     for (const [route, category, title] of [['website', 'website', 'website-summary-title'], ['social-media', 'social', 'social-score-title']]) {
       const expected = dashboard.assessment.scores[category];
@@ -222,6 +248,16 @@ try {
       if (expected?.availability === 'available') await waitFor(async () => await evaluate('Boolean(document.querySelector(' + JSON.stringify(`section[aria-label="${title}"] [aria-label*="${expected.value} out of 100"]`) + '))'), `persisted ${category} score matches existing gauge`);
     }
     assert.equal(await evaluate('document.querySelectorAll("#consistency-details li").length'), 4);
+    const savedInterpretation = savedDashboard.assessment?.analysis;
+    if (savedInterpretation?.output.schemaVersion === 'assessment-muse-output-v3') {
+      const output = savedInterpretation.output;
+      await waitFor(async () => (await evaluate('document.querySelector("section[aria-labelledby=next-steps-title] > header p").textContent')).includes(output.summary), 'actual saved executive assessment visible');
+      assert.ok((await evaluate('document.querySelector("section[aria-labelledby=next-steps-title] > header p").textContent')).startsWith(savedInterpretation.isMock ? 'Mock AI assessment:' : 'Saved AI assessment:'));
+      assert.equal(await evaluate('document.querySelector("section[aria-labelledby=recommendations-title] > p").textContent'), output.scoringExplanation.text);
+      const titles = await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby=recommendations-title] h4")).map(item => item.textContent)');
+      assert.deepEqual(titles, output.recommendations.map(item => item.title), 'All saved assessment priorities appear in their saved order, including scoring observations.');
+      for (const item of output.recommendations) assert.ok((await evaluate('document.querySelector("section[aria-labelledby=recommendations-title]").innerText')).includes(item.recommendation));
+    }
     assert.doesNotMatch(await text(), /Demo overall score|Demo score and findings|Demo comparison|Business hours differ|Phone formatting differs/);
     await screenshot('saved-dashboard-desktop.png');
     for (const width of [320, 390, 768, 1280]) {
@@ -275,6 +311,46 @@ try {
     await evaluate('document.querySelector("section[aria-label=\\"Website Health\\"] button[aria-label^=\\"Fix with AI\\"]").click()');
     await waitFor(async () => (await categoryText('Website Health')).includes('Mock AI recommendation:'), 'explicit mocked recommendation provenance');
     assert.equal(requests.filter(item => item.method === 'POST').length, 0);
+    const ref = (reportId, evidenceId) => ({ reportId, evidenceId });
+    const websiteRef = ref(report.auditId, 'evidence'), facebookRef = ref(facebookAuditId, 'facebook-evidence');
+    savedAssessment.comparisons = [{ id: 'business-name', outcome: 'fail', applicable: true, website: 'Fixture website name', facebook: 'Fixture Page name' }, { id: 'hours', outcome: 'fail', applicable: true, website: 'Weekdays only', facebook: 'Always open' }];
+    savedAssessment.socialAssessment = { categories: [{ criteria: [{ id: 'posts-per-week', status: 'available', earned: 0, maximum: 6, evidence: [facebookRef] }] }] };
+    const recommendation = (id, findingId, category, kind, evidenceRefs) => ({ id, findingId, reportId: evidenceRefs[0].reportId, title: id, recommendation: `${id}. Review the saved evidence before changing anything.`, evidenceRefs, origin: { kind, category, sourceRefs: evidenceRefs } });
+    savedAssessment.analysis = { id: 'v3-analysis', assessmentId: savedAssessment.id, businessId: business.id, isMock: true, generationMode: 'mock',
+      sourceManifest: savedAssessment.sources.map(source => ({ reportId: source.reportId, contentHash: source.reportHash, provider: source.provider })),
+      output: { schemaVersion: 'assessment-muse-output-v3', summary: 'The saved mobile loading measurement was 11.6 seconds. Review the long posting gap and business name/hours disagreements.',
+        scoringExplanation: { text: 'Social 71 has 71% evidence coverage. Ratios based on 17 followers can be volatile; missing measurements are not failures.' },
+        recommendations: [recommendation('Review mobile loading', 'fixture-finding', 'website', 'finding', [websiteRef]), recommendation('Resume useful posting', 'score:social:posting', 'social', 'scoring-observation', [facebookRef]), recommendation('Confirm business details', 'score:consistency:disagreements', 'consistency', 'scoring-observation', [websiteRef, facebookRef])] } };
+    await go();
+    await waitFor(async () => (await text()).includes('Mock AI assessment: The saved mobile loading measurement was 11.6 seconds.'), 'v3 executive assessment uses existing description slot');
+    assert.equal(await evaluate('document.querySelector("section[aria-labelledby=recommendations-title] > p").textContent'), savedAssessment.analysis.output.scoringExplanation.text);
+    assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby=recommendations-title] h4")).map(el => el.textContent)'), ['Review mobile loading', 'Resume useful posting', 'Confirm business details']);
+    assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby]")).map(el=>el.getAttribute("aria-labelledby"))'), sections, 'No additional section or Social score breakdown is introduced.');
+    assert.equal(await evaluate('document.querySelectorAll("#consistency-details li").length'), 4);
+    await screenshot('dashboard-muse-v3-desktop.png');
+    for (const width of [320, 390, 768, 1280]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 });
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, 'V3 consultation fits at ' + width);
+    }
+    await screenshot('dashboard-muse-v3-mobile.png');
+    savedAssessment.analysis.isMock = false;
+    savedAssessment.analysis.generationMode = 'poc';
+    savedAssessment.analysis.provider = 'meta';
+    savedAssessment.analysis.usageAttemptId = 'fixture-live-attempt';
+    savedAssessment.analysis.output.schemaVersion = 'assessment-muse-output-v4';
+    savedAssessment.analysis.output.recommendations = savedAssessment.analysis.output.recommendations.slice(0, 2);
+    await go();
+    await waitFor(async () => (await categoryText('Social Media Performance')).includes('Resume useful posting'), 'live v4 posting recommendation in the main card');
+    assert.match(await categoryText('Website Health'), /Review mobile loading/);
+    assert.match(await categoryText('Social Media Performance'), /Meta Muse-assisted assessment:/);
+    assert.equal(await evaluate('document.querySelector("section[aria-label=\"Business Consistency\"]").querySelectorAll("h5").length'), 0, 'Omitted consistency recommendation is not padded into the AI selection.');
+    await evaluate('document.querySelector("section[aria-label=\"Social Media Performance\"] button").click()');
+    assert.match(await categoryText('Social Media Performance'), /Saved recommendation: Resume useful posting\. Resume useful posting\. Review the saved evidence before changing anything\./);
+    assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby]")).map(el=>el.getAttribute("aria-labelledby"))'), sections);
+    await evaluate('Array.from(document.querySelectorAll("section[aria-labelledby=recommendations-title] a")).find(item => item.textContent.includes("Resume useful posting")).click()');
+    await waitFor(async () => await evaluate('window.location.pathname === "/social-media"'), 'Scoring recommendation opens its saved channel report');
+    assert.equal(await evaluate('Boolean(history.state?.usr?.findingId)'), false, 'A scoring observation is never passed as an original report finding ID.');
+    assert.equal(requests.filter(item => item.method === 'POST').length, 0, 'Saved assessment content starts no generation, collection or write.');
     savedAssessment = null;
     mode = 'failed-latest'; await go();
     await waitFor(async () => (await text()).includes('A newer report attempt failed.') && (await text()).includes('Review fixture image alternatives'), 'failed newer attempts');
@@ -425,7 +501,7 @@ try {
   assert.match(await text(), /Homepage HTML.*Oct 29, 2026/);
   await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "View Fix Steps").click()');
   assert.match(await text(), /No changes have been applied/);
-  assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Fix with AI").disabled'), true);
+  assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Review Recommendation").disabled'), false);
   await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "View Details").click()');
   assert.match(await text(), /Passed in this Lighthouse run/);
   await assertDetailsFit('desktop columns');
@@ -457,7 +533,7 @@ try {
   mode = 'loaded'; await evaluate('window.dispatchEvent(new Event("focus"))');
   await waitFor(async () => !(await text()).includes('temporarily unavailable'), 'refresh recovers');
   const lighthouse = report.results.lighthouse; delete report.results.lighthouse; report.audit.scope = 'homepage'; report.audit.status = 'partial';
-  await go(); await waitFor(async () => (await text()).includes('Partial coverage'), 'HTML-only partial report');
+  await go(); await waitFor(async () => (await text()).includes('Saved homepage HTML audit only.'), 'HTML-only partial report');
   assert.match(await text(), /passed-check totals are not available/);
   assert.equal(await evaluate('document.querySelector("#findings-great-title").closest("section").querySelectorAll(":scope > ul > li").length'), 0);
   report.results.lighthouse = lighthouse; report.audit.scope = 'lighthouse'; report.audit.status = 'completed';
@@ -476,7 +552,7 @@ try {
   await evaluate('document.querySelector("[data-testid=website-run-report]").click(); document.querySelector("[data-testid=website-run-report]").click()');
   await waitFor(async () => (await text()).includes('Report running'), 'report queued');
   assert.equal(requests.filter(item => item.method === 'POST').length, 1, 'Rapid clicks create one report.');
-  assert.deepEqual(requests.find(item => item.method === 'POST').body, { scope: 'lighthouse', strategy: 'mobile' });
+  assert.deepEqual(requests.find(item => item.method === 'POST').body, { confirmed: true });
   assert.match(await text(), /Review fixture image alternatives/, 'Previous results stay visible during collection.');
   await waitFor(async () => (await text()).includes('Fresh report image alternatives'), 'fresh report replaces saved results');
   await waitFor(async () => await evaluate('!document.querySelector("[data-testid=website-run-report]").disabled'), 'button re-enabled after completion');

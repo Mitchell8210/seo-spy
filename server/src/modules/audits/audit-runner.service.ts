@@ -20,6 +20,8 @@ import { FileReportStore } from "../../reports/file-report.store.js";
 import { ReportStorageError } from "../../reports/report.types.js";
 import { createDemoResults } from "../../fixtures/demo.js";
 import { AssessmentService } from "../assessments/assessment.service.js";
+import { InvestigationAiService } from "../investigation-ai/investigation-ai.service.js";
+import type { InterpretationContext } from "../../reporting/investigation-interpretation.js";
 import {
   AUDIT_REPOSITORY,
   BUSINESS_REPOSITORY,
@@ -43,6 +45,7 @@ export class AuditRunner implements OnModuleDestroy {
     @Inject(BUSINESS_REPOSITORY)
     private readonly businesses: BusinessRepository,
     private readonly assessments: AssessmentService,
+    private readonly interpretation: InvestigationAiService,
   ) {}
 
   assertAcceptingWork() {
@@ -53,9 +56,9 @@ export class AuditRunner implements OnModuleDestroy {
       });
   }
 
-  enqueue(id: string) {
+  enqueue(id: string, context?: InterpretationContext) {
     this.assertAcceptingWork();
-    const job = this.run(id).catch((error: unknown) => {
+    const job = this.run(id, context).catch((error: unknown) => {
       this.logger.error(
         error instanceof Error ? error.stack : "Audit runner failed",
       );
@@ -64,7 +67,7 @@ export class AuditRunner implements OnModuleDestroy {
     void job.then(() => this.jobs.delete(job));
   }
 
-  private async run(id: string) {
+  private async run(id: string, context?: InterpretationContext) {
     try {
       const initial = await this.audits.findById(id);
       if (initial && initial.scope !== "demo") {
@@ -122,7 +125,7 @@ export class AuditRunner implements OnModuleDestroy {
         initial.status = initial.failure ? "partial" : "completed";
         initial.stage = "complete";
         initial.completedAt = new Date().toISOString();
-        await this.saveTerminal(initial);
+        await this.saveTerminal(initial, context);
         return;
       }
       const stages: AuditStage[] = [
@@ -197,7 +200,7 @@ export class AuditRunner implements OnModuleDestroy {
     }
   }
 
-  private async saveTerminal(audit: Audit) {
+  private async saveTerminal(audit: Audit, context?: InterpretationContext) {
     const business = await this.businesses.findById(audit.businessId);
     if (!business)
       throw new ReportStorageError(
@@ -212,6 +215,16 @@ export class AuditRunner implements OnModuleDestroy {
     }
     // Overall orchestration may assess this report once terminal status is visible.
     // Finish this publication first so an older per-channel snapshot cannot supersede it.
+    if (context && audit.mode === "live" && ["completed", "partial"].includes(audit.status)) {
+      try {
+        const ai = await this.interpretation.interpret(context, [audit.id]);
+        if (ai.status !== "completed") throw new Error();
+      } catch {
+        audit.status = "partial";
+        audit.warnings.push("The report and scores were saved, but AI interpretation did not complete. No automatic model retry was started.");
+        audit.failure ??= { code: "AI_INTERPRETATION_FAILED", message: audit.warnings[audit.warnings.length - 1] };
+      }
+    }
     await this.audits.save(audit);
   }
 

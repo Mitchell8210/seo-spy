@@ -428,6 +428,36 @@ describe("Facebook local HTTP boundary", () => {
     expect(status).not.toHaveBeenCalled(); expect(graph.request).not.toHaveBeenCalled();
   });
 
+  it("requires an exact matching isolated-port configuration and never trusts forwarded production hosts", async () => {
+    const settings = app.get(ConfigService);
+    const priorFrontend = process.env.FACEBOOK_FRONTEND_ORIGIN;
+    const priorRedirect = process.env.FACEBOOK_REDIRECT_URI;
+    const priorFrontendSetting = settings.get<string>("FACEBOOK_FRONTEND_ORIGIN") ?? "http://localhost:5173";
+    const priorRedirectSetting = settings.get<string>("FACEBOOK_REDIRECT_URI") ?? `${ORIGIN}/api/facebook/callback`;
+    try {
+    settings.set("FACEBOOK_FRONTEND_ORIGIN", "http://127.0.0.1:5186");
+    settings.set("FACEBOOK_REDIRECT_URI", "http://127.0.0.1:3016/api/facebook/callback");
+    const status = jest.spyOn(app.get(OverallInvestigationService), "status").mockResolvedValue({ businessId: "demo-guzman", active: null, latest: null });
+    const route = "/api/facebook/investigations/status?businessId=demo-guzman";
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5186").expect(200);
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5186").set("Origin", "http://127.0.0.1:5186").expect(200);
+    expect(status).toHaveBeenCalledTimes(2);
+    status.mockClear();
+    await request(app.getHttpServer()).get(route).set("Host", "localhost:5186").expect(400);
+    await request(app.getHttpServer()).get(route).set("Host", "127.0.0.1:5187").expect(400);
+    await request(app.getHttpServer()).get(route).set("Host", "demo.example.com").set("X-Forwarded-Host", "127.0.0.1:5186").set("X-Forwarded-Proto", "https").expect(400);
+    expect(status).not.toHaveBeenCalled();
+    expect(graph.request).not.toHaveBeenCalled();
+    } finally {
+      settings.set("FACEBOOK_FRONTEND_ORIGIN", priorFrontendSetting);
+      settings.set("FACEBOOK_REDIRECT_URI", priorRedirectSetting);
+      if (priorFrontend === undefined) delete process.env.FACEBOOK_FRONTEND_ORIGIN;
+      else process.env.FACEBOOK_FRONTEND_ORIGIN = priorFrontend;
+      if (priorRedirect === undefined) delete process.env.FACEBOOK_REDIRECT_URI;
+      else process.env.FACEBOOK_REDIRECT_URI = priorRedirect;
+    }
+  });
+
   beforeEach(async () => {
     store = credentialMock();
     graph.request.mockReset();
@@ -657,6 +687,10 @@ describe("Facebook local HTTP boundary", () => {
     expect(response.body).toEqual({ businessId: "demo-guzman", active: null, latest: null });
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.text).not.toContain("private-browser-token");
+    const handedOff = (response.headers["set-cookie"] as unknown as string[]).find(value => value.includes("Path=/api/wordpress"));
+    expect(handedOff).toContain(`seo_spy_facebook_test=${id};`);
+    expect(handedOff).toContain("HttpOnly"); expect(handedOff).toContain("SameSite=Lax");
+    expect(Number(handedOff?.match(/Max-Age=(\d+)/)?.[1])).toBeLessThanOrEqual(60);
     await request(app.getHttpServer()).get("/api/facebook/reports/status")
       .query({ businessId: "demo-guzman" }).set("Host", "localhost:5173").expect(400);
     await request(app.getHttpServer()).get("/api/facebook/reports/status")
@@ -668,6 +702,29 @@ describe("Facebook local HTTP boundary", () => {
     await request(app.getHttpServer()).get("/api/facebook/reports/status")
       .query({ businessId: "../invalid" }).set("Host", "localhost:5173")
       .set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    expect(graph.request).not.toHaveBeenCalled();
+  });
+
+  it.each(["reports", "investigations"])("never hands an expired login to %s AI requests", async kind => {
+    const id = "e".repeat(64);
+    await store.save(id, { token: "expired-private-token", expiresAt: Date.now() - 1000, createdAt: new Date().toISOString() });
+    const response = await request(app.getHttpServer()).get(`/api/facebook/${kind}/status`).query({ businessId: "demo-guzman" })
+      .set("Host", "localhost:5173").set("Cookie", `seo_spy_facebook_test=${id}`).expect(400);
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(response.body.error.code).toBe("FACEBOOK_RECONNECT_REQUIRED");
+    expect(graph.request).not.toHaveBeenCalled();
+  });
+
+  it("clears both scoped cookies when Facebook is disconnected", async () => {
+    const id = "f".repeat(64);
+    await store.save(id, { token: "private-disconnect-token", expiresAt: Date.now() + 60000, createdAt: new Date().toISOString() });
+    const response = await request(app.getHttpServer()).post("/api/facebook/disconnect").set("Host", "localhost:3001").set("Origin", ORIGIN)
+      .set("Cookie", `seo_spy_facebook_test=${id}`).expect(303);
+    const cookies = response.headers["set-cookie"] as unknown as string[];
+    expect(cookies).toHaveLength(2);
+    expect(cookies.some(value => value.includes("Path=/api/facebook"))).toBe(true);
+    expect(cookies.some(value => value.includes("Path=/api/wordpress"))).toBe(true);
+    await expect(app.get(FacebookService).credential(id)).rejects.toThrow();
     expect(graph.request).not.toHaveBeenCalled();
   });
 

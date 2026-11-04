@@ -10,9 +10,10 @@ import type { AuditsService } from "../src/modules/audits/audits.service.js";
 import type { FacebookService } from "../src/modules/facebook/facebook.service.js";
 import type { FacebookReportsService } from "../src/modules/facebook/facebook-reports.service.js";
 import { OverallInvestigationService } from "../src/modules/facebook/overall-investigation.service.js";
+import type { InvestigationAiService } from "../src/modules/investigation-ai/investigation-ai.service.js";
 
 const owner = "a".repeat(64), other = "b".repeat(64), businessId = "business-1";
-function fixture() {
+function fixture(interpretation?: InvestigationAiService) {
   const credential = jest.fn<FacebookService["credential"]>().mockResolvedValue({ token: "server-only", expiresAt: null, createdAt: new Date().toISOString() });
   const facebook = { credential } as unknown as FacebookService;
   const facebookCreate = jest.fn<FacebookReportsService["create"]>().mockResolvedValue({ auditId: "new-facebook", reportId: "new-facebook", generatedAt: new Date().toISOString(), fileName: "new-facebook.json", downloadUrl: "/report", status: "completed", failure: null });
@@ -30,7 +31,7 @@ function fixture() {
   const assessments = { create: assessmentCreate } as unknown as AssessmentService;
   const findById = jest.fn<BusinessRepository["findById"]>().mockResolvedValue({ id: businessId, name: "Business", website: "https://example.com/", createdAt: new Date().toISOString() });
   const businesses = { findById } as unknown as BusinessRepository;
-  const service = new OverallInvestigationService(facebook, facebookReports, audits, reports, assessments, businesses);
+  const service = new OverallInvestigationService(facebook, facebookReports, audits, reports, assessments, businesses, interpretation);
   return { service, credential, facebookCreate, websiteCreate, websiteGet, assessmentCreate, list, read, previous, saved, assessment, findById };
 }
 async function completed(f: ReturnType<typeof fixture>) {
@@ -43,6 +44,39 @@ async function completed(f: ReturnType<typeof fixture>) {
 }
 
 describe("explicit overall investigation", () => {
+  it("keeps polling active while the AI interpretation is pending", async () => {
+    let release!: (value: Awaited<ReturnType<InvestigationAiService["interpret"]>>) => void;
+    const interpret = jest.fn<InvestigationAiService["interpret"]>().mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const f = fixture({ interpret } as unknown as InvestigationAiService);
+    await f.service.start(owner, businessId, { actor: owner, businessId, siteUrl: "https://example.com/" });
+    for (let count = 0; count < 20 && !release; count++) await turn();
+    expect(interpret).toHaveBeenCalledTimes(1);
+    const pending = await f.service.status(owner, businessId);
+    expect(pending.active?.audit).toMatchObject({ status: "running", stage: "preparing_recommendations" });
+    expect(pending.latest).toBeNull();
+    release({ status: "completed" } as Awaited<ReturnType<InvestigationAiService["interpret"]>>);
+    expect((await completed(f)).audit.status).toBe("completed");
+  });
+  it("interprets the final saved report pair once after scoring, without running AI for the nested channel collections", async () => {
+    const interpret = jest.fn<InvestigationAiService["interpret"]>().mockResolvedValue({ status: "completed" } as Awaited<ReturnType<InvestigationAiService["interpret"]>>);
+    const f = fixture({ interpret } as unknown as InvestigationAiService);
+    const context = { actor: "a".repeat(64), businessId, siteUrl: "https://example.com/" };
+    await f.service.start(owner, businessId, context); const result = await completed(f);
+    expect(result.audit.status).toBe("completed");
+    expect(interpret).toHaveBeenCalledTimes(1); expect(interpret).toHaveBeenCalledWith(context, ["new-website", "new-facebook"]);
+    expect(f.facebookCreate).toHaveBeenCalledWith(owner, businessId, "123");
+    expect(f.websiteCreate).toHaveBeenCalledWith(businessId, "lighthouse", "mobile");
+    expect(f.assessmentCreate.mock.invocationCallOrder[0]).toBeLessThan(interpret.mock.invocationCallOrder[0]);
+    await f.service.status(owner, businessId); expect(interpret).toHaveBeenCalledTimes(1);
+  });
+  it("retains fresh reports/scores and exposes partial status when the AI step fails", async () => {
+    const interpret = jest.fn<InvestigationAiService["interpret"]>().mockRejectedValue(new Error("private provider details"));
+    const f = fixture({ interpret } as unknown as InvestigationAiService);
+    await f.service.start(owner, businessId, { actor: "a".repeat(64), businessId, siteUrl: "https://example.com/" });
+    const result = await completed(f);
+    expect(result).toMatchObject({ websiteReportId: "new-website", facebookReportId: "new-facebook", assessmentId: "new-assessment", audit: { status: "partial", failure: { code: "AI_INTERPRETATION_FAILED" } } });
+    expect(JSON.stringify(result)).not.toContain("private provider details"); expect(interpret).toHaveBeenCalledTimes(1);
+  });
   it("refreshes the saved selected Page and website once, then pins both new reports", async () => {
     const f = fixture();
     const started = await f.service.start(owner, businessId);

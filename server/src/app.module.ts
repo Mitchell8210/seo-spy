@@ -10,6 +10,8 @@ import { FacebookModule } from "./modules/facebook/facebook.module.js";
 import { WordPressModule } from "./modules/wordpress/wordpress.module.js";
 import { GoogleReportingModule } from "./modules/google/google.module.js";
 import { AssessmentsModule } from "./modules/assessments/assessments.module.js";
+import { SmartPlannerModule } from "./modules/smart-planner/smart-planner.module.js";
+import { InvestigationStartModule } from "./modules/investigation-ai/investigation-start.module.js";
 
 @Controller("health")
 @ApiTags("Health")
@@ -56,6 +58,8 @@ class HealthController {
     WordPressModule,
     GoogleReportingModule,
     AssessmentsModule,
+    SmartPlannerModule,
+    InvestigationStartModule,
   ],
   controllers: [HealthController],
 })

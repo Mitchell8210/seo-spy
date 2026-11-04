@@ -19,7 +19,7 @@ const columns = [
   { id: 'great', label: 'Great Condition', description: 'Healthy checks with supporting evidence.', severity: 'Passed', icon: CircleCheck, accepts: ['Passed', 'Verified'] },
 ] satisfies { id: string; label: string; description: string; severity: Severity; icon: typeof CircleAlert; accepts: Severity[] }[]
 
-function BoardCard({ item, live, evidenceLabel }: { item: BoardItem; live: boolean; evidenceLabel: string }) {
+function BoardCard({ item, live, evidenceLabel, businessId, reportId }: { item: BoardItem; live: boolean; evidenceLabel: string; businessId?: string; reportId?: string }) {
   const fixRef = useRef<HTMLHeadingElement>(null)
   const isIssue = item.kind === 'issue'
   const title = isIssue ? item.finding.title : item.check.title
@@ -48,7 +48,10 @@ function BoardCard({ item, live, evidenceLabel }: { item: BoardItem; live: boole
             {item.recommendations.length > 0 ? <ul className="mt-1 space-y-3">{item.recommendations.map((recommendation) => <li key={recommendation.id} data-recommendation-id={recommendation.id}>{recommendation.action}</li>)}</ul> : <p className="mt-1 text-muted">No recommended fix is linked to this finding yet.</p>}
             <p className="mt-2 text-muted">Priority: {item.finding.severity} · Suggested change · Not applied</p>
           </div>
-          <FindingActions live={live} fixRef={fixRef} hasRecommendation={item.recommendations.length > 0} />
+          <FindingActions live={live} fixRef={fixRef} hasRecommendation={item.recommendations.length > 0}
+            review={{ id: item.finding.id, title, category: 'website', source: live ? item.finding.evidenceLabel ?? evidenceLabel : 'Mock website report',
+              isMock: !live, explanation: item.finding.explanation, evidence: [item.finding.evidence], target: urls.join(', '),
+              businessId, reportId, findingId: item.finding.id, recommendation: item.recommendations.map(recommendation => recommendation.action).join('\n\n') }} />
         </> : <div><h5 className="font-semibold text-ink">Verification result</h5><p className="mt-1">{live ? 'Passed in this Lighthouse run. Remediation has not been verified.' : `${item.check.status} in this mock analysis. No live verification was performed.`}</p></div>}
         <dl className="space-y-1 border-t border-line pt-3 text-muted">
           <div><dt className="inline font-medium text-secondary">Source: </dt><dd className="inline">{isIssue ? item.finding.source : 'Website'}</dd></div>
@@ -60,6 +63,8 @@ function BoardCard({ item, live, evidenceLabel }: { item: BoardItem; live: boole
 }
 
 type WebsiteFindingsProps = {
+  businessId?: string
+  reportId?: string
   findings: WebsiteFinding[]
   pages: AffectedPage[]
   passedChecks: PassedCheck[]
@@ -69,7 +74,7 @@ type WebsiteFindingsProps = {
   recommendations: WebsiteRecommendation[]
 }
 
-export function WebsiteFindings({ findings, pages, passedChecks, recommendations, live = false, evidenceLabel = '' }: WebsiteFindingsProps) {
+export function WebsiteFindings({ findings, pages, passedChecks, recommendations, live = false, evidenceLabel = '', businessId, reportId }: WebsiteFindingsProps) {
   const items: BoardItem[] = [
     ...findings.map((finding): BoardItem => ({
       kind: 'issue',
@@ -92,7 +97,7 @@ export function WebsiteFindings({ findings, pages, passedChecks, recommendations
           const grouped = items.filter((item) => column.accepts.some((severity) => severity === (item.kind === 'issue' ? item.finding.severity : item.check.status)))
           return (
             <PriorityColumn key={column.id} headingId={`findings-${column.id}-title`} label={column.label} description={column.description} severity={column.severity} count={grouped.length}>
-              {grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} live={live} evidenceLabel={evidenceLabel} />)}
+              {grouped.map((item) => <BoardCard key={item.kind === 'issue' ? item.finding.id : item.check.id} item={item} live={live} evidenceLabel={evidenceLabel} businessId={businessId} reportId={reportId} />)}
             </PriorityColumn>
           )
         })}

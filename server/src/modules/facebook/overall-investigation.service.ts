@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, Inject, Injectable, NotFoundException, OnModuleDestroy, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, Inject, Injectable, NotFoundException, OnModuleDestroy, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AuditStatus, AuditStage } from "../../contracts/domain.js";
@@ -8,6 +8,8 @@ import { AssessmentService } from "../assessments/assessment.service.js";
 import { AuditsService } from "../audits/audits.service.js";
 import { FacebookReportsService } from "./facebook-reports.service.js";
 import { FacebookService } from "./facebook.service.js";
+import { InvestigationAiService } from "../investigation-ai/investigation-ai.service.js";
+import type { InterpretationContext } from "../../reporting/investigation-interpretation.js";
 
 export interface OverallInvestigation {
   id: string; businessId: string;
@@ -20,7 +22,7 @@ export interface OverallInvestigation {
   websiteReportId: string | null; facebookReportId: string | null; assessmentId: string | null;
 }
 export interface OverallInvestigationStatus { businessId: string; active: OverallInvestigation | null; latest: OverallInvestigation | null }
-type Entry = { sessionId: string; value: OverallInvestigation; at: number };
+type Entry = { sessionId: string; value: OverallInvestigation; at: number; interpretation?: InterpretationContext };
 
 /** Only an explicit browser-authorized POST starts collection. Status never calls a provider. */
 @Injectable()
@@ -32,7 +34,7 @@ export class OverallInvestigationService implements OnModuleDestroy {
   private closing = false;
   constructor(private readonly facebook: FacebookService, private readonly facebookReports: FacebookReportsService,
     private readonly audits: AuditsService, private readonly reports: FileReportStore, private readonly assessments: AssessmentService,
-    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository) {}
+    @Inject(BUSINESS_REPOSITORY) private readonly businesses: BusinessRepository, @Optional() private readonly interpretation?: InvestigationAiService) {}
 
   private async authorize(sessionId: string | undefined, businessId: string): Promise<string> {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(businessId)) throw new BadRequestException({ code: "INVALID_BUSINESS", message: "Select a registered business." });
@@ -52,7 +54,7 @@ export class OverallInvestigationService implements OnModuleDestroy {
     return structuredClone({ businessId, active: active?.sessionId === owner ? active.value : null,
       latest: this.latest.get(`${owner}:${businessId}`)?.value ?? null });
   }
-  async start(sessionId: string | undefined, businessId: string): Promise<OverallInvestigation> {
+  async start(sessionId: string | undefined, businessId: string, interpretation?: InterpretationContext): Promise<OverallInvestigation> {
     if (this.closing) throw new ServiceUnavailableException({ code: "SERVER_STOPPING", message: "The server is stopping. No investigation was started." });
     const owner = await this.authorize(sessionId, businessId);
     if (this.active.has(businessId)) throw new ConflictException({ code: "AUDIT_ALREADY_ACTIVE", message: "An overall investigation is already running for this business." });
@@ -60,7 +62,7 @@ export class OverallInvestigationService implements OnModuleDestroy {
     const value: OverallInvestigation = { id, businessId, websiteReportId: null, facebookReportId: null, assessmentId: null,
       audit: { id, businessId, scope: "lighthouse", strategy: "mobile", mode: "live", status: "queued", stage: "queued", createdAt: now,
         startedAt: null, completedAt: null, warnings: [], failure: null, scoringVersion: "overall-investigation-v1", counts: { findings: 0, recommendations: 0 } } };
-    const entry: Entry = { sessionId: owner, value, at: Date.now() };
+    const entry: Entry = { sessionId: owner, value, at: Date.now(), interpretation };
     // Reserve synchronously before saved target lookup or any provider work.
     this.active.set(businessId, entry);
     this.latest.delete(`${owner}:${businessId}`);
@@ -100,11 +102,20 @@ export class OverallInvestigationService implements OnModuleDestroy {
       value.assessmentId = assessment.id;
       const unavailable = Object.entries(assessment.snapshot.scores).filter(([, score]) => score.availability !== "available").map(([name]) => name);
       audit.counts = { findings: saved.results?.findings.length ?? 0, recommendations: saved.results?.recommendations.length ?? 0 };
-      audit.status = unavailable.length || saved.status === "partial" || facebook.status === "partial" ? "partial" : "completed";
+      let terminalStatus: AuditStatus = unavailable.length || saved.status === "partial" || facebook.status === "partial" ? "partial" : "completed";
       if (unavailable.length) {
         audit.failure = { code: "ASSESSMENT_INCOMPLETE", message: `Fresh reports were saved, but ${unavailable.join(", ")} scores require complete eligible evidence or a current business review.` };
         audit.warnings.push(audit.failure.message);
       }
+      if (entry.interpretation) {
+        try { const ai = await this.interpretation?.interpret(entry.interpretation, [website.id, facebook.auditId]); if (ai?.status !== "completed") throw new Error(); }
+        catch {
+          terminalStatus = "partial";
+          audit.failure ??= { code: "AI_INTERPRETATION_FAILED", message: "Fresh reports and scores were saved, but AI interpretation did not complete. No automatic model retry was started." };
+          audit.warnings.push("AI interpretation did not complete. No automatic model retry was started.");
+        }
+      }
+      audit.status = terminalStatus;
       audit.stage = "complete";
     } catch (error) {
       const response = error instanceof HttpException ? error.getResponse() : null;

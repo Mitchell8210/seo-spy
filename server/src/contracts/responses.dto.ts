@@ -114,7 +114,7 @@ export class AuditSummaryDto implements Omit<Audit, "results"> {
   report?: ReportFileReferenceDto;
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ example: "demo-guzman" }) businessId!: string;
-  @ApiProperty({ enum: ["demo", "homepage", "lighthouse", "facebook"] })
+  @ApiProperty({ enum: ["demo", "homepage", "lighthouse", "facebook", "wordpress-page"] })
   scope!: Audit["scope"];
   @ApiPropertyOptional({
     enum: ["mobile", "desktop"],
@@ -231,3 +231,5 @@ export class ApiErrorDetailDto {
 export class ApiErrorDto {
   @ApiProperty({ type: () => ApiErrorDetailDto }) error!: ApiErrorDetailDto;
 }
+
+export { PlannerResponseDto, PlannerTaskResponseDto, PlannerSourceResponseDto, PlannerPreferencesResponseDto } from "../modules/smart-planner/planner.dto.js";

@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { assessmentMuseBrowserView } from "../../integrations/assessment-ai/assessment-muse.types.js";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { assessmentMuseAnalysisSchema } from "../../integrations/assessment-ai/assessment-muse.types.js";
+import { ASSESSMENT_MUSE_V2, ASSESSMENT_MUSE_V3, ASSESSMENT_MUSE_V4, ASSESSMENT_MUSE_V5, assessmentMuseAnalysisSchema } from "../../integrations/assessment-ai/assessment-muse.types.js";
+import { prepareAssessmentMuseEvidence, validateAssessmentMuseAnalysisOutput } from "../../integrations/assessment-ai/assessment-muse.js";
 import { BUSINESS_REPOSITORY, type BusinessRepository } from "../../persistence/repositories.js";
 import { FileReportStore } from "../../reports/file-report.store.js";
 import type { AuditReportRecord } from "../../reports/report.types.js";
@@ -140,7 +142,14 @@ export class AssessmentService {
       if (parsed.data.businessId !== businessId || parsed.data.policyVersion !== record.snapshot.policyVersion
         || parsed.data.sourceManifest.length !== record.snapshot.sources.length
         || parsed.data.sourceManifest.some(source => !record.snapshot.sources.some(item => item.reportId === source.reportId && item.reportHash === source.contentHash))) throw storageFailure();
-      analysis = parsed.data;
+      try {
+        const bundle = prepareAssessmentMuseEvidence({ assessmentId: record.id, businessId, policyVersion: record.snapshot.policyVersion, cutoff: record.snapshot.cutoff,
+          sources: await this.pinnedReports(record), scores: Object.entries(record.snapshot.scores).map(([category, score]) => ({ category: category as "website" | "social" | "consistency" | "overall", value: score.value, reasonCodes: score.reasons })),
+          ...(parsed.data.promptVersion === ASSESSMENT_MUSE_V5.prompt ? { snapshot: record.snapshot, version: "v5" as const } : parsed.data.promptVersion === ASSESSMENT_MUSE_V4.prompt ? { snapshot: record.snapshot, version: "v4" as const } : parsed.data.promptVersion === ASSESSMENT_MUSE_V3.prompt ? { snapshot: record.snapshot, version: "v3" as const } : parsed.data.promptVersion === ASSESSMENT_MUSE_V2.prompt ? { snapshot: record.snapshot } : {}) });
+        if (parsed.data.inputHash !== assessmentHash(bundle) || JSON.stringify(parsed.data.sourceManifest) !== JSON.stringify(bundle.sources)) throw storageFailure();
+        validateAssessmentMuseAnalysisOutput(parsed.data, bundle);
+      } catch { throw storageFailure(); }
+      analysis = assessmentMuseBrowserView(parsed.data);
       break;
     }
     const now = Date.now();

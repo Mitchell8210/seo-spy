@@ -2,6 +2,7 @@ import type { AuditSummary, CreatedAudit, Dashboard, FindingsResponse, Lighthous
 import type { CreatedFacebookReport, FacebookReportJobStatus, FacebookReportResponse } from '../types/facebook'
 import type { EvidenceSummaries, WebsiteAnalysis, WebsiteReport, WebsiteReportList } from '../types/websiteApi'
 import type { SavedAssessment } from '../types/assessment'
+import { authenticatedWordPressHeaders } from './wordpressFix.ts'
 
 export class BackendApiError extends Error {
   readonly code: string
@@ -21,13 +22,13 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-async function request<T>(path: string, signal: AbortSignal, body?: object, timeoutMs = 15000): Promise<T> {
+async function request<T>(path: string, signal: AbortSignal, body?: object, timeoutMs = 15000, extraHeaders: Record<string, string> = {}): Promise<T> {
   let response: Response
   try {
     response = await fetch(`/api${path}`, {
       method: body ? 'POST' : 'GET',
       signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
-      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { accept: 'application/json', ...extraHeaders, ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
   } catch (error) {
@@ -65,15 +66,19 @@ function identifier(id: string) {
 }
 
 const auditPath = (id: string) => `/audits/${identifier(id)}`
+async function reportWithAi<T>(businessId: string, kind: 'website' | 'social' | 'overall', signal: AbortSignal, pageId?: string) {
+  const headers = await authenticatedWordPressHeaders(businessId)
+  signal.throwIfAborted()
+  return request<T>(`/wordpress/businesses/${identifier(businessId)}/investigations/${kind}`, signal, { confirmed: true, ...(pageId ? { pageId } : {}) }, 180000, headers)
+}
 
 export const backendApi = {
   overallInvestigationStatus: (businessId: string, signal: AbortSignal) => request<OverallInvestigationStatus>(`/facebook/investigations/status?businessId=${identifier(businessId)}`, signal),
-  createOverallInvestigation: (businessId: string, signal: AbortSignal) => request<OverallInvestigation>('/facebook/investigations', signal, { businessId }),
+  createOverallInvestigation: (businessId: string, signal: AbortSignal) => reportWithAi<OverallInvestigation>(businessId, 'overall', signal),
+  createWebsiteReport: (businessId: string, signal: AbortSignal) => reportWithAi<CreatedAudit>(businessId, 'website', signal),
   latestAssessment: (businessId: string, signal: AbortSignal) => request<{ businessId: string; assessment: SavedAssessment | null }>(`/businesses/${identifier(businessId)}/assessments/latest`, signal),
   facebookReportStatus: (businessId: string, signal: AbortSignal) => request<FacebookReportJobStatus>(`/facebook/reports/status?businessId=${identifier(businessId)}`, signal),
-  createFacebookReport: (businessId: string, pageId: string, signal: AbortSignal) => request<CreatedFacebookReport>(
-    '/facebook/reports', signal, { businessId, pageId }, 180000,
-  ),
+  createFacebookReport: (businessId: string, pageId: string, signal: AbortSignal) => reportWithAi<CreatedFacebookReport>(businessId, 'social', signal, pageId),
   websiteAnalysis: (id: string, signal: AbortSignal) => request<WebsiteAnalysis>(`${auditPath(id)}/website-analysis`, signal),
   evidenceSummaries: (id: string, signal: AbortSignal) => request<EvidenceSummaries>(`${auditPath(id)}/evidence-summary`, signal),
   reports: (businessId: string, signal: AbortSignal) => request<WebsiteReportList>(`/businesses/${identifier(businessId)}/reports`, signal),

@@ -18,6 +18,9 @@ import { WebsiteCollector } from "../src/integrations/website/collector.js";
 import { AppDatabase } from "../src/persistence/sqlite/app-database.js";
 import { SQLiteBusinessRepository } from "../src/persistence/sqlite/sqlite.repositories.js";
 import { FileReportStore } from "../src/reports/file-report.store.js";
+import { buildAssessmentScoringContext } from "../src/integrations/assessment-ai/assessment-muse-scoring.js";
+import { AssessmentMuseAdapter, prepareAssessmentMuseEvidence } from "../src/integrations/assessment-ai/assessment-muse.js";
+import { AssessmentStore, assessmentHash } from "../src/modules/assessments/assessment.store.js";
 
 const businessId = "demo-guzman";
 const prefix = `/api/businesses/${businessId}`;
@@ -51,6 +54,24 @@ describe("assessment HTTP API with saved evidence, protected mocks and real SQLi
   const post = (path: string, body: object, key = operator) => request(app.getHttpServer()).post(path).set("Host", "localhost:3001").set("Authorization", `Bearer ${key}`).send(body);
   const create = () => post(`${prefix}/assessments`, { confirmed: true, websiteReportId: audit.id });
   const noProviders = () => { expect(generate).not.toHaveBeenCalled(); expect(wordpress).not.toHaveBeenCalled(); expect(google).not.toHaveBeenCalled(); expect(collect).not.toHaveBeenCalled(); };
+  it("keeps persisted POC approval provenance out of Dashboard and HTTP analysis responses", async () => {
+    const assessment = (await create().expect(201)).body;
+    const generated = (await post(`${prefix}/assessments/${assessment.id}/muse-analyses`, { confirmed: true }).expect(201)).body;
+    const id = randomUUID(), date = new Date(Date.now() + 1000).toISOString();
+    const decisionLabels = (app.get(AssessmentStore).read("analysis", businessId, generated.id) as { decisionLabels: unknown }).decisionLabels;
+    const live = { ...generated, decisionLabels, id, cacheKey: assessmentHash({ offlineLive: id }), generatedAt: date, createdAt: date,
+      fixtureVersion: undefined, generationMode: "poc", provider: "meta", isMock: false, requestId: "offline-provider-receipt", usageAttemptId: randomUUID(),
+      authorization: { intentId: randomUUID(), actor: "a".repeat(64), requestHash: "b".repeat(64), scope: `assessment:${businessId}:${assessment.id}`, maximumMicros: 131460 } };
+    const store = app.get(AssessmentStore);
+    store.write("analysis", live, live.cacheKey);
+    expect((store.read("analysis", businessId, id) as typeof live).authorization).toEqual(live.authorization);
+    const response = (await get(`${prefix}/assessments/${assessment.id}/muse-analyses/${id}`).expect(200)).body;
+    expect(response.provider).toBe("meta"); expect(response.authorization).toBeUndefined(); expect(response.decisionLabels).toBeUndefined();
+    const latest = (await get(`${prefix}/assessments/latest`).expect(200)).body.assessment.analysis;
+    expect(latest.id).toBe(id); expect(latest.authorization).toBeUndefined();
+    expect((await get(`${prefix}/dashboard`).expect(200)).text).not.toContain(live.authorization.intentId);
+    noProviders();
+  });
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "seo-spy-assessment-api-"));
     const at = new Date(Date.now() - 3600000).toISOString();
@@ -123,14 +144,89 @@ describe("assessment HTTP API with saved evidence, protected mocks and real SQLi
   });
   it("generates labeled mock recommendations only after an explicit POST and caches the exact assessment", async () => {
     const created = await create().expect(201);
+    expect(buildAssessmentScoringContext(created.body.snapshot, [(await reports.read(audit.id))!]).components[0].value).toBe(79);
     const path = `${prefix}/assessments/${created.body.id}/muse-analyses`;
-    const first = await post(path, { confirmed: true }).expect(201);
+    const first = await post(path, { confirmed: true });
+    expect(first.body.error ?? first.status).toBe(201);
     expect(first.body).toMatchObject({ businessId, assessmentId: created.body.id, isMock: true, provider: "mock-fixture", generationMode: "mock", usage: { inputTokens: 0, outputTokens: 0 } });
+    expect(first.body.promptVersion).toBe("assessment-muse-prompt-v5");
+    expect(first.body.decisionLabels).toBeUndefined();
+    expect((app.get(AssessmentStore).read("analysis", businessId, first.body.id) as { decisionLabels?: unknown }).decisionLabels).toBeDefined();
+    expect(first.body.output.strengths.length).toBeGreaterThan(0);
+    expect(first.body.output.weaknesses.length).toBeGreaterThan(0);
+    expect(first.body.output.measurementGaps.length).toBeGreaterThan(0);
     expect(first.body.output.recommendations[0]).toMatchObject({ reportId: audit.id, findingId: "alt-review" });
+    expect(first.body.output.recommendations[0].rationale).toContain("conditional verification task");
     const second = await post(path, { confirmed: true }).expect(201);
     expect(second.body.id).toBe(first.body.id);
     const saved = await get(`${path}/${first.body.id}`).expect(200);
     expect(saved.body).toEqual(first.body);
+    noProviders();
+  });
+  it("preserves saved v1/v2/v3/v4 analyses alongside v5 generation and reads all after settings change", async () => {
+    const created = await create().expect(201), snapshot = created.body.snapshot;
+    const legacyBundle = prepareAssessmentMuseEvidence({ assessmentId: created.body.id, businessId, policyVersion: snapshot.policyVersion, cutoff: snapshot.cutoff,
+      scores: Object.entries(snapshot.scores).map(([category, value]) => ({ category: category as "website" | "social" | "consistency" | "overall", value: (value as { value: number | null }).value, reasonCodes: (value as { reasons: string[] }).reasons })),
+      sources: [(await reports.read(audit.id))!] });
+    const legacy = await app.get(AssessmentMuseAdapter).analyze(legacyBundle);
+    const storedLegacy = { ...legacy, createdAt: legacy.generatedAt };
+    app.get(AssessmentStore).write("analysis", storedLegacy, legacy.cacheKey);
+    const v2Bundle = prepareAssessmentMuseEvidence({ ...legacyBundle, sources: [(await reports.read(audit.id))!], snapshot });
+    const v2 = await app.get(AssessmentMuseAdapter).analyze(v2Bundle);
+    const storedV2 = { ...v2, createdAt: v2.generatedAt };
+    app.get(AssessmentStore).write("analysis", storedV2, v2.cacheKey);
+    const v3Bundle = prepareAssessmentMuseEvidence({ ...legacyBundle, sources: [(await reports.read(audit.id))!], snapshot, version: "v3" });
+    const v3 = await app.get(AssessmentMuseAdapter).analyze(v3Bundle);
+    app.get(AssessmentStore).write("analysis", { ...v3, createdAt: v3.generatedAt }, v3.cacheKey);
+    const v4Bundle = prepareAssessmentMuseEvidence({ ...legacyBundle, sources: [(await reports.read(audit.id))!], snapshot, version: "v4" });
+    const v4 = await app.get(AssessmentMuseAdapter).analyze(v4Bundle);
+    app.get(AssessmentStore).write("analysis", { ...v4, createdAt: v4.generatedAt }, v4.cacheKey);
+    const path = `${prefix}/assessments/${created.body.id}/muse-analyses`;
+    expect((await get(`${path}/${legacy.id}`).expect(200)).body).toEqual(legacy);
+    expect((await get(`${path}/${v2.id}`).expect(200)).body).toEqual(v2);
+    const current = await post(path, { confirmed: true }).expect(201);
+    expect(current.body.cacheKey).not.toBe(legacy.cacheKey);
+    expect(current.body.cacheKey).not.toBe(v2.cacheKey);
+    expect(current.body.cacheKey).not.toBe(v3.cacheKey);
+    expect(current.body.cacheKey).not.toBe(v4.cacheKey);
+    expect(current.body.promptVersion).toBe("assessment-muse-prompt-v5");
+    expect(app.get(AssessmentStore).read("analysis", businessId, legacy.id)).toEqual(storedLegacy);
+    expect((await get(`${path}/${v3.id}`).expect(200)).body).toEqual(v3);
+    expect((await get(`${path}/${v4.id}`).expect(200)).body).toEqual(v4);
+    settings.AI_MODEL = "muse-spark-1.2"; settings.AI_MAX_OUTPUT_TOKENS = 1000;
+    expect((await get(`${path}/${legacy.id}`).expect(200)).body).toEqual(legacy);
+    expect((await get(`${path}/${v2.id}`).expect(200)).body).toEqual(v2);
+    expect(app.get(AssessmentStore).read("analysis", businessId, v2.id)).toEqual(storedV2);
+    expect((await get(`${path}/${current.body.id}`).expect(200)).body).toEqual(current.body);
+    const latest = (await get(`${prefix}/assessments/latest`).expect(200)).body.assessment;
+    expect(latest.analysis.id).toBe(current.body.id);
+    expect(latest.scores.website.value).toBe(snapshot.scores.website.value);
+    expect((await get(`${prefix}/assessments/${created.body.id}`).expect(200)).body).toEqual(created.body);
+    noProviders();
+  });
+  it("rejects a schema-valid but falsely cited saved claim from direct and dashboard/latest reads", async () => {
+    const created = await create().expect(201), path = `${prefix}/assessments/${created.body.id}/muse-analyses`;
+    const generated = await post(path, { confirmed: true }).expect(201);
+    const stored = app.get(AssessmentStore).read("analysis", businessId, generated.body.id) as Record<string, unknown>;
+    const damaged = structuredClone(stored) as typeof stored & { output: { strengths: { text: string }[] } };
+    damaged.output.strengths[0].text = "Unsupported business success claim.";
+    // Deliberately retain a valid storage checksum to exercise semantic citation
+    // validation rather than merely testing SQLite corruption detection again.
+    database.connection().prepare("UPDATE assessment_records SET data_json=?,checksum=? WHERE kind='analysis' AND id=?").run(JSON.stringify(damaged), assessmentHash(damaged), generated.body.id);
+    expect((await get(`${path}/${generated.body.id}`).expect(503)).body.error.code).toBe("ASSESSMENT_STORAGE_ERROR");
+    expect((await get(`${prefix}/assessments/latest`).expect(503)).body.error.code).toBe("ASSESSMENT_STORAGE_ERROR");
+    noProviders();
+  });
+  it("rejects evidence-incompatible internal decision labels on saved and Dashboard reads", async () => {
+    const created = await create().expect(201), path = `${prefix}/assessments/${created.body.id}/muse-analyses`;
+    const generated = await post(path, { confirmed: true }).expect(201);
+    const stored = app.get(AssessmentStore).read("analysis", businessId, generated.body.id) as Record<string, unknown> & { decisionLabels: { selected: { reason: string }[] } };
+    const damaged = structuredClone(stored);
+    // The saved image review is conditional. Its ID and all output prose stay valid.
+    damaged.decisionLabels.selected[0].reason = "ADDRESS_CONFIRMED_SHORTFALL";
+    database.connection().prepare("UPDATE assessment_records SET data_json=?,checksum=? WHERE kind='analysis' AND id=?").run(JSON.stringify(damaged), assessmentHash(damaged), generated.body.id);
+    await get(`${path}/${generated.body.id}`).expect(503);
+    await get(`${prefix}/assessments/latest`).expect(503);
     noProviders();
   });
   it("rejects unconfirmed mock generation and an analysis ID under another assessment", async () => {

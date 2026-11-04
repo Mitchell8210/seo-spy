@@ -28,15 +28,28 @@ const publicReceipt = (receipt: Receipt): WordPressPublicVerification => {
 export class WordPressVerificationService {
   constructor(private readonly wordpress: WordPressService, private readonly store: WordPressActionsStore, private readonly collector: WebsiteCollector) {}
 
-  async verify(businessId: string, actor: string, proposalId: string, pageResource: "pages" | "posts", pageId: number): Promise<WordPressPublicVerification> {
+  async latest(businessId: string, actor: string, proposalId: string): Promise<WordPressPublicVerification | null> {
+    await this.wordpress.getProposal(businessId, actor, proposalId);
+    const siteUrl = await this.wordpress.reportSite(businessId);
+    const rows = this.store.savedVerifications(businessId, proposalId).map(value => {
+      const parsed = receiptSchema.safeParse(value);
+      if (!parsed.success || parsed.data.businessId !== businessId || parsed.data.actor !== actor
+        || parsed.data.siteUrl !== siteUrl || parsed.data.proposalId !== proposalId) throw unavailable();
+      return parsed.data;
+    }).sort((a, b) => b.completedAt.localeCompare(a.completedAt) || b.id.localeCompare(a.id));
+    return rows[0] ? publicReceipt(rows[0]) : null;
+  }
+
+  async verify(businessId: string, actor: string, proposalId: string, pageResource: "pages" | "posts", pageId: number,
+    expected?: { mediaId: number; sourceUrl: string; pageUrl: string }): Promise<WordPressPublicVerification> {
     // The trusted adapter binds both resources to this installation and requires
     // an applied media-alt proposal. Callers never supply a collection URL.
-    const target = await this.wordpress.verificationTarget(businessId, actor, proposalId, pageResource, pageId);
+    const target = await this.wordpress.verificationTarget(businessId, actor, proposalId, pageResource, pageId, expected);
     let finalUrl: string | null = null;
     let collectedAt: string | null = null;
     let result: ImageAltVerificationResult;
     try {
-      const page = await this.collector.collect(target.pageUrl, undefined, target.siteUrl);
+      const page = await this.collector.collect(target.pageUrl, AbortSignal.timeout(2000), target.siteUrl);
       finalUrl = page.finalUrl;
       collectedAt = page.collectedAt;
       const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(page.contentType)?.[1];

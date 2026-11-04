@@ -9,9 +9,10 @@ import { WebsiteFindings } from '../../components/website/WebsiteFindings'
 import { mockBusiness } from '../../data/mockBusiness'
 import { useWebsiteReport } from '../../hooks/useWebsiteReport'
 import { useInvestigation } from '../../hooks/useInvestigation'
-import { mapWebsiteReport, measurementLabel } from '../../services/websiteMapping'
+import { mapWebsiteReport, measurementLabel, pageReportContext } from '../../services/websiteMapping'
 import type { ConnectedWebsite } from '../../types/website'
 import { scoreCaption } from '../../services/savedScore'
+import { useReportInterpretation } from '../../hooks/useReportInterpretation'
 
 export function Website() {
   const [search, setSearch] = useSearchParams()
@@ -26,7 +27,8 @@ export function Website() {
     refresh()
   }
   const record = state.report
-  const audit = record ? mapWebsiteReport(record, state.error ? null : state.dashboard?.assessment) : null
+  const interpretation = useReportInterpretation(businessId, record ? [record.auditId] : [], investigation.audit?.status)
+  const audit = record ? mapWebsiteReport(record, state.error ? null : state.dashboard?.assessment, interpretation) : null
   const business = record?.business ?? state.dashboard?.business
   const connection = state.dashboard?.connections.find(item => item.platform === 'website' && item.mode === 'live')
   const website: ConnectedWebsite | null = business ? {
@@ -36,16 +38,17 @@ export function Website() {
   const active = investigation.audit?.status === 'queued' || investigation.audit?.status === 'running'
     ? investigation.audit : state.dashboard?.activeAudit
   const running = active?.mode === 'live' && (active.scope === 'homepage' || active.scope === 'lighthouse') ? active : null
-  const coverage = record?.results?.lighthouse
+  const pageContext = pageReportContext(record)
+  const coverage = pageContext?.coverage ?? (record?.results?.lighthouse
     ? `Saved homepage HTML audit plus ${measurementLabel(record.results.lighthouse)}. Lab results do not establish field Core Web Vitals or accessibility compliance.`
     : record ? 'Saved homepage HTML audit only. Lighthouse measurements and passed-check totals are not available.'
-      : 'No saved website analysis is available for this website.'
-  const notice = [coverage, record?.audit.status === 'partial' ? 'Partial coverage.' : '',
-    ...(record?.audit.warnings ?? []), record?.audit.failure?.message ?? '',
+      : 'No saved website analysis is available for this website.')
+  const notice = [coverage,
+    ...(pageContext ? [] : record?.audit.warnings ?? []), record?.audit.failure?.message ?? '',
     running ? `Investigation ${running.status}: ${running.stage.replaceAll('_', ' ')}. Previous results remain visible.` : '',
     state.latestAttempt?.status === 'failed' ? 'The latest website investigation failed. Previous saved results remain visible when available.' : '',
-    investigation.error?.message ?? '', state.error ?? ''].filter(Boolean).join(' ')
-  const evidenceLabel = record?.results?.lighthouse ? measurementLabel(record.results.lighthouse) : 'Saved live homepage HTML evidence · Collection source and time shown above'
+    investigation.error?.message ?? '', state.error ?? '', interpretation?.status === 'failed' ? 'AI interpretation did not complete. Saved report results remain available; no automatic model retry was started.' : ''].filter(Boolean).join(' ')
+  const evidenceLabel = pageContext?.sourceLabel ?? (record?.results?.lighthouse ? measurementLabel(record.results.lighthouse) : 'Saved live homepage HTML evidence · Collection source and time shown above')
 
   return (
     <div className="space-y-8">
@@ -69,7 +72,7 @@ export function Website() {
             <WebsiteHealth results={audit.results} live />
           </div>
         </section>
-        <WebsiteFindings live evidenceLabel={evidenceLabel} key={audit.id} findings={audit.findings} pages={audit.pages} passedChecks={audit.passedChecks} passedTotal={audit.results.checksPassed} recommendations={audit.recommendations} />
+        <WebsiteFindings live businessId={businessId} reportId={record?.reportId} evidenceLabel={evidenceLabel} key={audit.id} findings={audit.findings} pages={audit.pages} passedChecks={audit.passedChecks} passedTotal={audit.results.checksPassed} recommendations={audit.recommendations} />
       </> : <p role={state.error ? 'alert' : 'status'} className="rounded-xl border border-line bg-surface p-6 text-sm text-secondary">{state.error ?? (state.loading ? 'Loading your saved website report...' : running ? 'Your website investigation is running. Results will appear when it finishes.' : 'No saved website analysis is available for this website.')}</p>}
     </div>
   )

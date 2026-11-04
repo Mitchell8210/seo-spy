@@ -141,7 +141,7 @@ export class ReportsController {
     response.setHeader("Cache-Control", "no-store");
     try {
       const report = await this.reports.read(auditId);
-      if (!report || report.audit.mode !== "live" || !["homepage", "lighthouse"].includes(report.audit.scope)) {
+      if (!report || report.audit.mode !== "live" || !["homepage", "lighthouse", "wordpress-page"].includes(report.audit.scope)) {
         throw new NotFoundException({ code: "REPORT_NOT_FOUND", message: "No saved live Website report is available for this investigation." });
       }
       return analyzeWebsite(auditId, report.results);
@@ -163,7 +163,7 @@ export class ReportsController {
   ): Promise<EvidenceSummariesDto> {
     try {
       const report = await this.reports.read(auditId);
-      if (!report || !["homepage", "lighthouse"].includes(report.audit.scope)) {
+      if (!report || !["homepage", "lighthouse", "wordpress-page"].includes(report.audit.scope)) {
         throw new NotFoundException({ code: "REPORT_NOT_FOUND", message: "No saved Website report is available for this investigation." });
       }
       return summarizeEvidence(auditId, report.results);

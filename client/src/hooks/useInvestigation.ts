@@ -125,7 +125,7 @@ export function useInvestigation(businessId: string) {
       clearTimer()
       update({ submitting: true, error: null })
       try {
-        const audit = validate(await backendApi.create(businessId, 'lighthouse', 'mobile', signal))
+        const audit = validate(await backendApi.createWebsiteReport(businessId, signal))
         update({ audit })
       } catch (error) {
         if (!disposed) {

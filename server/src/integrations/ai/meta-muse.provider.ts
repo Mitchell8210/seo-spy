@@ -3,41 +3,64 @@ import { ConfigService } from "@nestjs/config";
 import { request as httpsRequest } from "node:https";
 import type { IncomingMessage } from "node:http";
 import { createHash } from "node:crypto";
+import { authenticateAiAdministrator } from "../../modules/ai/ai-admin.guard.js";
 import { AiUsageStore } from "./ai-usage.store.js";
+import type { WordPressAllowanceScope, FrontendAllowanceScope } from "./muse-wordpress-allowance.js";
 import { AiUsageError, type AiLiveMode, type AiModel, type AiUsageIntent, type AiUsageLimits } from "./ai-usage.types.js";
+import { prepareMuseHello, prepareMinimalMuseHello, MUSE_MINIMAL_HELLO_SCOPE } from "./muse-hello-request.js";
 import { estimateMuseCost, museUsageCostMicros, MuseCostError, MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, type MuseCostEstimate } from "./muse-cost.js";
 
 export const META_MUSE_ENDPOINT = "https://api.meta.ai/v1/responses";
 export const META_MUSE_MAX_RESPONSE_BYTES = 512 * 1024;
 const MODELS = new Set(["muse-spark-1.3", "muse-spark-1.2"]);
-const dispatchGrants = new WeakMap<object, string>();
+const dispatchGrants = new WeakMap<object, { hash: string; diagnostic?: boolean }>();
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const object = (value: unknown): Record<string, unknown> | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const safeId = (value: unknown): string | null => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) ? value : null;
+const allowancePageBelongsToSite = (page: unknown, site: string) => {
+  try { const url = new URL(String(page)), connected = new URL(site);
+    return url.protocol === "https:" && !url.username && !url.password && !url.port && !url.hash
+      && url.hostname.replace(/^www\./, "") === connected.hostname.replace(/^www\./, "");
+  } catch { return false; }
+};
 
 export class MetaMuseError extends Error {
-  constructor(public readonly code: string, message: string) { super(message); this.name = "MetaMuseError"; }
+  constructor(public readonly code: string, message: string, public readonly diagnostics?: MetaMuseDiagnostics) { super(message); this.name = "MetaMuseError"; }
 }
+export interface MetaMuseDiagnostics { httpStatus: number | null; requestId: string | null; responseStatus?: string | null; incompletionReason?: string | null; reasoningTokens?: number | null; inputTokens?: number | null; outputTokens?: number | null; estimatedActualMicros?: number | null; providerError?: MetaMuseHttpResponse["providerError"] | null }
 const failure = (code: string, message: string) => new MetaMuseError(code, message);
 
-export interface MetaMuseHttpResponse { status: number; body: string; requestId: string | null }
-export interface MetaMuseGeneration { output: unknown; model: string; usage: { inputTokens: number; outputTokens: number }; requestId: string | null; attemptId?: string }
-export interface MetaMuseInput { instructions: string; input: unknown; schema: Record<string, unknown> }
+export interface MetaMuseHttpResponse { status: number; body: string; requestId: string | null; providerError?: { code: string | null; type: string | null; message: string | null } }
+export interface MetaMuseGeneration { output: unknown; model: string; usage: { inputTokens: number; outputTokens: number }; requestId: string | null; attemptId?: string; diagnostics?: MetaMuseDiagnostics }
+export interface MetaMuseInput { instructions: string; input: unknown; schema: Record<string, unknown>; reasoningEffort?: "minimal"; plannerMaxOutputTokens?: number }
 export interface MetaMusePrepared extends MuseCostEstimate { payload: string; requestHash: string; model: AiModel }
 export interface MetaMuseAuthorization { intentId: string; actor: string; scope: string }
+export interface MuseHelloReport {
+  requestHash: string; attemptId: string; httpStatus: number | null; requestId: string | null; responseStatus: string | null;
+  requestedModel: "muse-spark-1.3"; returnedModel: string | null; accepted: boolean; authenticationAccepted: boolean | null; requestedModelResponded: boolean;
+  text: string | null; inputTokens: number | null; outputTokens: number | null; estimatedActualMicros: number | null;
+  reserveMicros: number; failureStage: string | null; errorCode: string | null; providerError: MetaMuseHttpResponse["providerError"] | null;
+  incompletionReason: string | null; assistantMessageStatuses: (string | null)[]; reasoningTokens: number | null; httpErrorCategory: string | null;
+}
 
 /** The transport never follows redirects or accepts a caller-selected destination. */
-export function readMetaMuseResponse(response: IncomingMessage): Promise<MetaMuseHttpResponse> {
+export function redactMuseDiagnostic(value: unknown, key: string, maximum = 512): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) value = String(value);
+  if (typeof value !== "string") return null;
+  return (key ? value.replaceAll(key, "[redacted]") : value).replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/\b(?:sk[-_]|meta[-_])[A-Za-z0-9_-]{8,}\b/g, "[redacted]").replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[redacted]").replace(/\p{Cc}/gu, " ").slice(0, maximum);
+}
+export function readMetaMuseResponse(response: IncomingMessage, diagnosticKey?: string): Promise<MetaMuseHttpResponse> {
   return new Promise((resolve, reject) => {
     const status = response.statusCode ?? 0;
-    const stop = (error: MetaMuseError) => { reject(error); response.destroy(); };
-    response.on("error", () => reject(failure("AI_NETWORK_ERROR", "The model response could not be received.")));
-    response.on("aborted", () => reject(failure("AI_NETWORK_ERROR", "The model response was interrupted.")));
+    const enrich = (error: MetaMuseError) => diagnosticKey === undefined ? error : new MetaMuseError(error.code, error.message, { httpStatus: status, requestId: safeId(response.headers["x-request-id"]) });
+    const stop = (error: MetaMuseError) => { reject(enrich(error)); response.destroy(); };
+    response.on("error", () => reject(enrich(failure("AI_NETWORK_ERROR", "The model response could not be received."))));
+    response.on("aborted", () => reject(enrich(failure("AI_NETWORK_ERROR", "The model response was interrupted."))));
     if (status >= 300 && status < 400) { stop(failure("AI_REDIRECT_REJECTED", "Model provider redirects are not allowed.")); return; }
     // Error bodies are neither needed for classification nor safe to expose.
-    if (status !== 200) { resolve({ status, body: "", requestId: safeId(response.headers["x-request-id"]) }); response.destroy(); return; }
+    if (status !== 200 && diagnosticKey === undefined) { resolve({ status, body: "", requestId: safeId(response.headers["x-request-id"]) }); response.destroy(); return; }
     if (response.headers["content-encoding"] && response.headers["content-encoding"] !== "identity") { stop(failure("AI_INVALID_OUTPUT", "The model returned an unsupported response encoding.")); return; }
-    if (!/^application\/json(?:\s*;|$)/i.test(String(response.headers["content-type"] ?? ""))) { stop(failure("AI_INVALID_OUTPUT", "The model did not return JSON.")); return; }
+    if (status === 200 && !/^application\/json(?:\s*;|$)/i.test(String(response.headers["content-type"] ?? ""))) { stop(failure("AI_INVALID_OUTPUT", "The model did not return JSON.")); return; }
     const size = response.headers["content-length"];
     if (size && (!/^\d+$/.test(size) || Number(size) > META_MUSE_MAX_RESPONSE_BYTES)) { stop(failure("AI_RESPONSE_TOO_LARGE", "The model response exceeded its size limit.")); return; }
     let bytes = 0;
@@ -47,21 +70,27 @@ export function readMetaMuseResponse(response: IncomingMessage): Promise<MetaMus
       if (bytes > META_MUSE_MAX_RESPONSE_BYTES) { stop(failure("AI_RESPONSE_TOO_LARGE", "The model response exceeded its size limit.")); return; }
       chunks.push(chunk);
     });
-    response.on("end", () => resolve({ status, body: Buffer.concat(chunks).toString("utf8"), requestId: safeId(response.headers["x-request-id"]) }));
+    response.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8"), requestId = safeId(response.headers["x-request-id"]);
+      if (status === 200 || diagnosticKey === undefined) { resolve({status,body,requestId}); return; }
+      let error: Record<string, unknown> | null = null;
+      try { const parsed = object(JSON.parse(body)); error = object(parsed?.error) ?? parsed; } catch { /* Sanitized text only. */ }
+      resolve({status,body:"",requestId,providerError:{code:redactMuseDiagnostic(error?.code,diagnosticKey,128),type:redactMuseDiagnostic(error?.type,diagnosticKey,128),message:redactMuseDiagnostic(error?.message ?? body,diagnosticKey)}});
+    });
   });
 }
 
 @Injectable()
 export class MetaMuseTransport {
   async post(payload: string, key: string, signal: AbortSignal, grant?: object): Promise<MetaMuseHttpResponse> {
-    const approvedHash = grant && dispatchGrants.get(grant);
+    const approved = grant && dispatchGrants.get(grant);
     if (grant) dispatchGrants.delete(grant);
-    if (!approvedHash || approvedHash !== hash(payload)) throw failure("AI_APPROVAL_REQUIRED", "A one-use persistent spending reservation is required before model dispatch.");
+    if (!approved || approved.hash !== hash(payload)) throw failure("AI_APPROVAL_REQUIRED", "A one-use persistent spending reservation is required before model dispatch.");
     return new Promise((resolve, reject) => {
       const request = httpsRequest(META_MUSE_ENDPOINT, {
         method: "POST", agent: false, signal, maxHeaderSize: 16384,
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json", accept: "application/json", "accept-encoding": "identity", "content-length": Buffer.byteLength(payload) },
-      }, response => { void readMetaMuseResponse(response).then(resolve, reject); });
+      }, response => { void readMetaMuseResponse(response, approved.diagnostic ? key : undefined).then(resolve, reject); });
       request.on("error", () => reject(failure("AI_NETWORK_ERROR", "The model provider could not be reached.")));
       request.end(payload);
     });
@@ -88,20 +117,105 @@ export class MetaMuseProvider {
   }
   private developmentLimits(): AiUsageLimits {
     return {
-      budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 2_000_000, 0, 2_000_000),
-      dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 500_000, 0, 500_000),
-      maxCalls: this.integer("AI_DEV_MAX_CALLS", 10, 0, 10),
+      budgetMicros: this.integer("AI_DEV_BUDGET_MICROS", 25_000_000, 0, 25_000_000),
+      dailyMicros: this.integer("AI_DEV_DAILY_MICROS", 25_000_000, 0, 25_000_000),
+      maxCalls: this.integer("AI_DEV_MAX_CALLS", Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
     };
+  }
+
+  /** Only the fixed, ledger-amended Hello request; no generic plain-text bypass. */
+  async generateHelloDiagnostic(authorization: MetaMuseAuthorization): Promise<MuseHelloReport> {
+    if (this.config.get("AI_ENABLED") !== true || this.config.get("MOCK_AI") !== false || this.mode() !== "poc") throw failure("AI_MOCK_MODE", "Explicit private POC mode is required for the diagnostic.");
+    const key = this.config.get<string>("MODEL_API_KEY") ?? "";
+    if (!key.trim() || key.length > 1024 || /[\r\n]/.test(key)) throw failure("AI_NOT_CONFIGURED", "A valid server-side model credential is required.");
+    if (!authorization?.actor || !authorization.intentId) throw failure("AI_APPROVAL_REQUIRED", "The diagnostic requires a new single-use administrator approval.");
+    const prepared = authorization.scope === MUSE_MINIMAL_HELLO_SCOPE ? prepareMinimalMuseHello() : prepareMuseHello();
+    const timeout = this.integer("AI_TIMEOUT_MS",60000,1000,120000);
+    const amendment = await this.ledger.readHelloAmendment();
+    if (!amendment || amendment.intentId !== authorization.intentId || amendment.actor !== authorization.actor || amendment.scope !== authorization.scope || amendment.scope !== prepared.scope || amendment.requestHash !== prepared.requestHash) throw failure("AI_APPROVAL_MISMATCH", "Only the amended Hello intent can dispatch this diagnostic.");
+    const reservation = await this.ledger.reserve(authorization.intentId, { ...authorization, mode:"poc", requestHash:prepared.requestHash, cacheKey:prepared.requestHash,
+      model:prepared.model,maxInputTokens:prepared.maxInputTokens,maxOutputTokens:prepared.maxOutputTokens,reserveMicros:prepared.reserveMicros,priceVersion:prepared.priceVersion,
+      inputPriceMicrosPerMillion:prepared.inputPriceMicrosPerMillion,outputPriceMicrosPerMillion:prepared.outputPriceMicrosPerMillion }, this.developmentLimits());
+    const result: MuseHelloReport = {requestHash:prepared.requestHash,attemptId:reservation.id,httpStatus:null,requestId:null,responseStatus:null,requestedModel:prepared.model,returnedModel:null,
+      accepted:false,authenticationAccepted:null,requestedModelResponded:false,text:null,inputTokens:null,outputTokens:null,estimatedActualMicros:null,reserveMicros:prepared.reserveMicros,failureStage:null,errorCode:null,providerError:null,
+      incompletionReason:null,assistantMessageStatuses:[],reasoningTokens:null,httpErrorCategory:null};
+    const controller = new AbortController();
+    let timedOut = false, definitive = false;
+    const timer = setTimeout(()=>{timedOut=true;controller.abort();},timeout); timer.unref();
+    const aborted = new Promise<never>((_resolve,reject)=>controller.signal.addEventListener("abort",()=>reject(failure("AI_TIMEOUT","The diagnostic deadline expired; remote completion is unknown.")),{once:true}));
+    const grant = {};
+    try {
+      dispatchGrants.set(grant,{hash:prepared.requestHash,diagnostic:true});
+      const response = await Promise.race([this.transport.post(prepared.payload,key,controller.signal,grant),aborted]);
+      result.httpStatus=response.status;result.requestId=safeId(response.requestId);result.providerError=response.providerError??null;
+      definitive=[400,401,402,403,404,405,413,422,429].includes(response.status);
+      if (response.status===401||response.status===403) result.authenticationAccepted=false;
+      if (response.status!==200) {
+        result.httpErrorCategory=[401,403].includes(response.status)?"authentication":response.status===402?"quota":response.status===429?"rate_limit":response.status===404?"model_or_endpoint":response.status>=500?"provider_server":[400,405,413,422].includes(response.status)?"invalid_request":"http_error";
+        result.failureStage="provider-http-rejection"; throw failure("AI_PROVIDER_FAILED","The diagnostic provider returned an HTTP error.");
+      }
+      const responseValue = object(JSON.parse(response.body));
+      if (!responseValue) throw failure("AI_INVALID_OUTPUT","The diagnostic response is not an object.");
+      result.authenticationAccepted=true;
+      result.responseStatus=redactMuseDiagnostic(responseValue.status,key,64);
+      result.returnedModel=redactMuseDiagnostic(responseValue.model,key,128);
+      result.requestedModelResponded=responseValue.model===prepared.model;
+      const incomplete=object(responseValue.incomplete_details),reason=redactMuseDiagnostic(incomplete?.reason,key,64);
+      result.incompletionReason=reason&&/^[a-z_]{1,64}$/.test(reason)?reason:null;
+      const items=Array.isArray(responseValue.output)?responseValue.output:[];
+      result.assistantMessageStatuses=items.filter(item=>object(item)?.type==="message"&&object(item)?.role==="assistant").slice(0,16).map(item=>{
+        const status=object(item)?.status;return typeof status==="string"&&["completed","incomplete","in_progress"].includes(status)?status:null;
+      });
+      const usage=object(responseValue.usage);
+      if (usage && Number.isSafeInteger(usage.input_tokens) && Number(usage.input_tokens)>=0 && Number.isSafeInteger(usage.output_tokens) && Number(usage.output_tokens)>=0) {
+        result.inputTokens=Number(usage.input_tokens);result.outputTokens=Number(usage.output_tokens);
+        result.estimatedActualMicros=museUsageCostMicros(result.inputTokens,result.outputTokens,prepared);
+        definitive=true;
+        const reasoning=object(usage.output_tokens_details)?.reasoning_tokens;
+        if (Number.isSafeInteger(reasoning)&&Number(reasoning)>=0&&Number(reasoning)<=result.outputTokens) result.reasoningTokens=Number(reasoning);
+        if (result.inputTokens>prepared.maxInputTokens||result.outputTokens>prepared.maxOutputTokens||result.estimatedActualMicros>prepared.reserveMicros) { definitive=false; throw failure("AI_USAGE_EXCEEDED","Diagnostic usage exceeded its reservation."); }
+      }
+      if (responseValue.error) {
+        const error=object(responseValue.error);
+        result.providerError={code:redactMuseDiagnostic(error?.code,key,128),type:redactMuseDiagnostic(error?.type,key,128),message:redactMuseDiagnostic(error?.message,key)};
+      }
+      if (responseValue.status==="incomplete") throw failure("AI_TRUNCATED","The diagnostic generation was incomplete; no completed text was accepted.");
+      if (responseValue.status!=="completed"||responseValue.error) throw failure("AI_PROVIDER_FAILED","The diagnostic did not complete successfully.");
+      const visible=items.filter(item=>object(item)?.type!=="reasoning");
+      const message=object(visible[0]);
+      if (visible.length!==1||message?.type!=="message"||message.role!=="assistant"||message.status!=="completed"||!Array.isArray(message.content)) throw failure("AI_INVALID_OUTPUT","Unexpected or incomplete diagnostic output items.");
+      const parts=message.content.map(object);
+      if (parts.some(part=>part?.type!=="output_text"||typeof part.text!=="string")) throw failure("AI_INVALID_OUTPUT","The diagnostic did not return plain assistant text.");
+      const text=redactMuseDiagnostic(parts.map(part=>part!.text).join(""),key,4096);
+      result.requestedModelResponded=responseValue.model===prepared.model;
+      if (!result.requestedModelResponded||!text||result.estimatedActualMicros===null) throw failure("AI_INVALID_OUTPUT","The diagnostic did not establish a completed response with valid usage.");
+      result.text=text;
+      result.accepted=true;
+    } catch (error) {
+      const safe=error instanceof MetaMuseError?error:failure(result.httpStatus===null?"AI_NETWORK_ERROR":"AI_INVALID_OUTPUT","The diagnostic could not be completed or validated.");
+      if (safe.diagnostics) {result.httpStatus=safe.diagnostics.httpStatus;result.requestId=safe.diagnostics.requestId;}
+      result.errorCode=timedOut?"AI_TIMEOUT":safe.code;
+      result.failureStage??=result.httpStatus===null?(timedOut?"timeout-before-http-response":"connection-before-http-response"):"response-validation";
+    } finally {clearTimeout(timer);dispatchGrants.delete(grant);}
+    // One immutable settlement; failed and uncertain requests retain their reservation.
+    await this.ledger.settle(reservation.id,{status:result.accepted?"success":definitive?"failed":"unknown",requestId:result.requestId,errorCode:result.errorCode??undefined,
+      ...(result.inputTokens!==null&&result.outputTokens!==null&&result.estimatedActualMicros!==null?{inputTokens:result.inputTokens,outputTokens:result.outputTokens,actualMicros:result.estimatedActualMicros}:{})});
+    return result;
   }
 
   /** Pure cost preview: no credentials, network or spending reservation. */
   prepare(input: MetaMuseInput): MetaMusePrepared {
     const model = this.config.get<string>("AI_MODEL") ?? "muse-spark-1.3";
     const processingMode = this.config.get<string>("AI_PROCESSING_MODE") ?? "standard";
-    const effort = this.config.get<string>("AI_REASONING_EFFORT") ?? "low";
+    const effort = input.reasoningEffort ?? this.config.get<string>("AI_REASONING_EFFORT") ?? "low";
     if (!MODELS.has(model) || processingMode !== "standard" || !["minimal", "low"].includes(effort)) throw failure("AI_NOT_CONFIGURED", "Only the configured Standard model and conservative reasoning settings are supported.");
     const maximumBytes = this.integer("AI_MAX_INPUT_BYTES", 32768, 4096, 32768);
-    const maximumTokens = this.integer("AI_MAX_OUTPUT_TOKENS", 1500, 16, 1500);
+    const plannerTokens = input.plannerMaxOutputTokens;
+    const plannerSnapshot = object(object(input.input)?.snapshot);
+    if (plannerTokens !== undefined && (!Number.isSafeInteger(plannerTokens) || plannerTokens < 512 || plannerTokens > 16384
+      || plannerSnapshot?.version !== "planner-snapshot-v1" || input.reasoningEffort !== "minimal"))
+      throw failure("AI_INVALID_INPUT", "Only a bounded planner snapshot may use a planner output allowance.");
+    const maximumTokens = plannerTokens ?? this.integer("AI_MAX_OUTPUT_TOKENS", 1500, 16, 1500);
     this.integer("AI_MAX_CONCURRENCY", 1, 1, 1);
     let payload: string;
     try {
@@ -112,7 +226,7 @@ export class MetaMuseProvider {
         model, store: false, stream: false, background: false, instructions: input.instructions,
         input: [{ role: "user", content: [{ type: "input_text", text: evidence }] }],
         text: { format: { type: "json_schema", name: "wordpress_analysis", strict: true, schema: input.schema } },
-        reasoning: { effort }, max_output_tokens: maximumTokens, tools: [], tool_choice: "none", truncation: "disabled",
+        reasoning: { effort }, max_output_tokens: maximumTokens, tools: [], tool_choice: "auto", truncation: "disabled",
       });
     } catch { throw failure("AI_INVALID_INPUT", "The model input could not be serialized safely."); }
     if (Buffer.byteLength(payload) > maximumBytes) throw failure("AI_INPUT_TOO_LARGE", "The model input exceeded its configured size limit.");
@@ -121,7 +235,7 @@ export class MetaMuseProvider {
         inputPriceMicrosPerMillion: this.integer("AI_INPUT_PRICE_MICROS_PER_MILLION", MUSE_INPUT_PRICE_MICROS_PER_MILLION, MUSE_INPUT_PRICE_MICROS_PER_MILLION, 1_000_000_000),
         outputPriceMicrosPerMillion: this.integer("AI_OUTPUT_PRICE_MICROS_PER_MILLION", MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, MUSE_OUTPUT_PRICE_MICROS_PER_MILLION, 1_000_000_000),
       };
-      return { payload, requestHash: hash(payload), model: model as AiModel, ...estimateMuseCost(payload, maximumTokens, prices) };
+      return { payload, requestHash: hash(payload), model: model as AiModel, ...estimateMuseCost(payload, maximumTokens, prices, Date.now(), plannerTokens === undefined ? "standard" : "planner") };
     } catch (error) {
       if (error instanceof MuseCostError) throw failure(error.code, error.message);
       throw error;
@@ -138,6 +252,81 @@ export class MetaMuseProvider {
       return await this.ledger.estimate({ ...cost, cacheKey: prepared.requestHash, actor: context.actor, scope: context.scope, reason: context.reason, mode }, mode === "poc" ? this.developmentLimits() : undefined);
     } catch (error) { throw this.accountingError(error); }
   }
+  async wordPressAltApproval(input: MetaMuseInput, context: { actor: string; scope: string }) {
+    try { return await this.ledger.wordPressAltApproval(context.actor, context.scope, this.prepare(input).requestHash); }
+    catch { return { status: "pending_approval" as const }; }
+  }
+  async wordPressAllowanceStatus(actor: string, businessId: string, siteUrl: string, mediaId: number) {
+    return this.ledger.wordPressAllowanceStatus(actor, businessId, siteUrl, mediaId);
+  }
+  async authorizeAllowedWordPressAlt(input: MetaMuseInput, context: WordPressAllowanceScope) {
+    const source = object(input.input), prepared = this.prepare(input), request = object(JSON.parse(prepared.payload));
+    const target = object(source?.target);
+    if (!source || !["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source.schemaVersion)) || source.capability !== "wordpress.media.alt_text.update"
+      || target?.mediaId !== context.mediaId || !allowancePageBelongsToSite(target?.pageUrl, context.siteUrl)
+      || input.reasoningEffort !== "minimal" || request?.model !== "muse-spark-1.3" || object(request?.reasoning)?.effort !== "minimal")
+      throw failure("AI_APPROVAL_MISMATCH", "This allowance supports only the approved image-alt generation task.");
+    const { payload: _payload, ...cost } = prepared; void _payload;
+    return this.ledger.estimateAllowedWordPressAlt({ ...cost, actor: context.actor, scope: `wordpress-alt:${context.businessId}:${context.evidenceId}`,
+      mode: "poc", cacheKey: prepared.requestHash, reason: "User requested an evidence-bound WordPress image alternative-text suggestion." }, context);
+  }
+  async generateAllowedWordPressAlt(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization) {
+    if (!authorization) throw failure("AI_APPROVAL_REQUIRED", "Approve this website's AI allowance first.");
+    const authority = await this.ledger.wordPressAltReceiptAuthority(authorization.intentId);
+    const allowance = await this.ledger.wordPressAllowanceIntentScope(authorization.intentId);
+    const intent = await this.ledger.readIntent(authorization.intentId);
+    const source = object(input.input), target = object(source?.target);
+    if (!authority || !allowance || allowance.actor !== authorization.actor || allowance.requestHash !== this.prepare(input).requestHash || authority.actor !== authorization.actor || intent.scope !== authorization.scope || intent.requestHash !== this.prepare(input).requestHash || !target
+      || target.mediaId !== allowance.mediaId || !allowancePageBelongsToSite(target.pageUrl, allowance.siteUrl))
+      throw failure("AI_APPROVAL_MISMATCH", "The image request changed; review it again.");
+    // This exact grant is the one-time explicit live permission. General calls
+    // remain governed by the unchanged mock-first configuration.
+    const siteUrl = allowance.siteUrl;
+    if ((await this.ledger.wordPressAllowanceStatus(authorization.actor, authority.businessId, siteUrl, Number(target.mediaId))).status !== "active")
+      throw failure("AI_APPROVAL_REQUIRED", "Approve this website's AI allowance first.");
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc", AI_CONTROLLED_TESTING: true }), this.transport, this.ledger);
+    return scoped.generate(input, signal, authorization);
+  }
+  async generateFrontend(input: MetaMuseInput, context: FrontendAllowanceScope, signal?: AbortSignal): Promise<MetaMuseGeneration> {
+    const source = object(input.input), snapshot = object(source?.snapshot), prepared = this.prepare(input), request = object(JSON.parse(prepared.payload));
+    const validTask = context.task === "facebook-post"
+      ? source?.schemaVersion === "facebook-post-input-v1" && source.businessId === context.businessId && source.siteUrl === context.siteUrl && source.requestId === context.resourceKey
+        && /^\d{1,40}$/.test(String(source.pageId)) && typeof source.recommendation === "string" && typeof source.businessName === "string"
+      : context.task === "investigation"
+      ? source?.schemaVersion === "investigation-input-v1" && source.businessId === context.businessId && source.siteUrl === context.siteUrl && source.requestId === context.resourceKey
+        && Array.isArray(source.sources) && source.sources.length >= 1 && source.sources.length <= 2 && Array.isArray(source.evidence) && source.evidence.length > 0
+      : context.task === "planner"
+      ? snapshot?.version === "planner-snapshot-v1" && snapshot.businessId === context.businessId && Array.isArray(snapshot.tasks) && /^[a-f0-9]{64}$/.test(String(source?.snapshotHash))
+      : context.task === "wordpress-alt" && ["wordpress-alt-input-v2", "wordpress-alt-input-v3"].includes(String(source?.schemaVersion))
+        && source?.capability === "wordpress.media.alt_text.update" && allowancePageBelongsToSite(object(source.target)?.pageUrl, context.siteUrl);
+    if (!validTask || input.reasoningEffort !== "minimal" || prepared.model !== "muse-spark-1.3"
+      || (context.task !== "planner" && (prepared.maxOutputTokens !== 1500 || input.plannerMaxOutputTokens !== undefined)) || object(request?.reasoning)?.effort !== "minimal")
+      throw failure("AI_APPROVAL_MISMATCH", "Only a supported, authenticated frontend action may use this allowance.");
+    const { payload: _payload, ...cost } = prepared; void _payload;
+    const intent = await this.ledger.estimateFrontend({ ...cost, actor: context.actor, scope: `frontend:${context.task}:${context.businessId}:${context.resourceKey}`,
+      mode: "poc", cacheKey: prepared.requestHash, reason: "Authenticated user explicitly requested this supported frontend Muse task." }, context);
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc", AI_CONTROLLED_TESTING: true }), this.transport, this.ledger);
+    try { return await scoped.generate(input, signal, { intentId: intent.id, actor: context.actor, scope: intent.scope }); }
+    finally { await this.ledger.completeFrontendReceipt(context.actor, intent.id); }
+  }
+
+  /** Internal entry point for explicitly initiated, authenticated developer diagnostics.
+   * Never expose without an existing operator guard. No retries or external writes. */
+  async generateDiagnostic(input: MetaMuseInput, credential: string, scope: string, signal?: AbortSignal) {
+    const context = { actor: authenticateAiAdministrator(this.config.get<string>("AI_ADMIN_KEY") ?? "", credential), scope };
+    if (!context.scope) throw failure("AI_APPROVAL_REQUIRED", "An initiating authenticated actor and scope are required.");
+    const values: Record<string, unknown> = {};
+    for (const key of ["MODEL_API_KEY", "AI_MODEL", "AI_PROCESSING_MODE", "AI_REASONING_EFFORT", "AI_MAX_INPUT_BYTES", "AI_MAX_OUTPUT_TOKENS", "AI_TIMEOUT_MS", "AI_INPUT_PRICE_MICROS_PER_MILLION", "AI_OUTPUT_PRICE_MICROS_PER_MILLION"])
+      values[key] = this.config.get(key);
+    const scoped = new MetaMuseProvider(new ConfigService({ ...values, AI_ENABLED: true, MOCK_AI: false, AI_MODE: "poc" }), this.transport, this.ledger);
+    return scoped.generate(input, signal, { ...context, intentId: "" });
+  }
 
   async generate(input: MetaMuseInput, signal?: AbortSignal, authorization?: MetaMuseAuthorization): Promise<MetaMuseGeneration> {
     const enabled = this.config.get("AI_ENABLED");
@@ -147,9 +336,13 @@ export class MetaMuseProvider {
     if (mode === "mock" || mock !== false && mock !== "false") throw failure("AI_MOCK_MODE", "Mock mode cannot dispatch a real model request.");
     const key = this.config.get<string>("MODEL_API_KEY") ?? "";
     if (!key.trim() || key.length > 1024 || /[\r\n]/.test(key)) throw failure("AI_NOT_CONFIGURED", "An approved private model API key must be configured.");
-    if (!authorization?.intentId || !authorization.actor || !authorization.scope) throw failure("AI_APPROVAL_REQUIRED", "A fresh exact administrator-approved request is required for every real model call.");
+    if (!authorization?.actor || !authorization.scope) throw failure("AI_APPROVAL_REQUIRED", "An authenticated initiating actor and scope are required.");
     if (signal?.aborted) throw failure("AI_CANCELLED", "Model analysis was cancelled before dispatch.");
     const prepared = this.prepare(input);
+    if (!authorization.intentId) {
+      const intent = await this.estimate(input, { actor: authorization.actor, scope: authorization.scope, reason: "Explicit authenticated operation within the shared development allowance." });
+      authorization = { ...authorization, intentId: intent.id };
+    }
     const timeout = this.integer("AI_TIMEOUT_MS", 60000, 1000, 120000);
     let reservation;
     try {
@@ -178,13 +371,16 @@ export class MetaMuseProvider {
     let definitiveFailure = false;
     let knownUsage: { inputTokens: number; outputTokens: number; actualMicros: number } | undefined;
     let requestId: string | null = null;
+    const controlledTesting = this.config.get("AI_CONTROLLED_TESTING") === true;
+    const diagnostics: MetaMuseDiagnostics = { httpStatus:null, requestId:null };
     try {
       if (signal?.aborted) throw failure("AI_CANCELLED", "Model analysis was cancelled before dispatch.");
       // Only this module can mint a payload-bound grant after persistent reservation.
-      dispatchGrants.set(grant, prepared.requestHash);
+      dispatchGrants.set(grant, { hash: prepared.requestHash, ...(controlledTesting ? { diagnostic:true } : {}) });
       dispatched = true;
       const response = await Promise.race([this.transport.post(prepared.payload, key, controller.signal, grant), cancelled]);
       requestId = safeId(response.requestId);
+      if(controlledTesting)Object.assign(diagnostics,{httpStatus:response.status,requestId,providerError:response.providerError??null});
       if ([400, 401, 402, 403, 404, 405, 413, 422, 429].includes(response.status)) definitiveFailure = true;
       if (Buffer.byteLength(response.body) > META_MUSE_MAX_RESPONSE_BYTES) throw failure("AI_RESPONSE_TOO_LARGE", "The model response exceeded its size limit.");
       if (response.status >= 300 && response.status < 400) throw failure("AI_REDIRECT_REJECTED", "Model provider redirects are not allowed.");
@@ -196,10 +392,17 @@ export class MetaMuseProvider {
       try { value = JSON.parse(response.body); } catch { throw failure("AI_INVALID_OUTPUT", "The model returned malformed JSON."); }
       const result = object(value);
       if (!result) throw failure("AI_INVALID_OUTPUT", "The model response did not match the supported contract.");
+      if(controlledTesting){
+        const reason=redactMuseDiagnostic(object(result.incomplete_details)?.reason,key,64);
+        diagnostics.responseStatus=typeof result.status==="string"&&["completed","incomplete","failed","in_progress","queued","cancelled"].includes(result.status)?result.status:null;
+        diagnostics.incompletionReason=reason&&/^[a-z_]{1,64}$/.test(reason)?reason:null;
+        const providerError=object(result.error);if(providerError)diagnostics.providerError={code:redactMuseDiagnostic(providerError.code,key,128),type:redactMuseDiagnostic(providerError.type,key,128),message:redactMuseDiagnostic(providerError.message,key)};
+      }
       const usage = object(result.usage);
       if (usage && Number.isSafeInteger(usage.input_tokens) && Number(usage.input_tokens) >= 0 && Number.isSafeInteger(usage.output_tokens) && Number(usage.output_tokens) >= 0) {
         const inputTokens = Number(usage.input_tokens), outputTokens = Number(usage.output_tokens);
         knownUsage = { inputTokens, outputTokens, actualMicros: museUsageCostMicros(inputTokens, outputTokens, prepared) };
+        if(controlledTesting){const reasoning=object(usage.output_tokens_details)?.reasoning_tokens;Object.assign(diagnostics,{inputTokens,outputTokens,estimatedActualMicros:knownUsage.actualMicros,reasoningTokens:Number.isSafeInteger(reasoning)&&Number(reasoning)>=0&&Number(reasoning)<=outputTokens?Number(reasoning):null});}
         definitiveFailure = true;
         if (inputTokens > prepared.maxInputTokens || outputTokens > prepared.maxOutputTokens || knownUsage.actualMicros > prepared.reserveMicros) {
           definitiveFailure = false;
@@ -221,14 +424,14 @@ export class MetaMuseProvider {
       settled = true;
       try { await this.ledger.settle(reservation.id, { status: "success", ...knownUsage, requestId }); }
       catch (error) { throw this.accountingError(error); }
-      return { output, model: prepared.model, usage: { inputTokens: knownUsage.inputTokens, outputTokens: knownUsage.outputTokens }, requestId, attemptId: reservation.id };
+      return { output, model: prepared.model, usage: { inputTokens: knownUsage.inputTokens, outputTokens: knownUsage.outputTokens }, requestId, attemptId: reservation.id, ...(controlledTesting?{diagnostics}: {}) };
     } catch (error) {
       const safe = error instanceof MetaMuseError ? error : error instanceof MuseCostError ? failure(error.code, error.message) : failure("AI_NETWORK_ERROR", "The model request could not be completed; remote completion is unknown.");
       if (!settled) {
         try { await this.ledger.settle(reservation.id, { status: !dispatched || definitiveFailure ? "failed" : "unknown", ...knownUsage, requestId, errorCode: safe.code }); }
         catch (accounting) { throw this.accountingError(accounting); }
       }
-      throw safe;
+      throw controlledTesting?new MetaMuseError(safe.code,safe.message,{...diagnostics,...safe.diagnostics}):safe;
     } finally {
       dispatchGrants.delete(grant);
       clearTimeout(timer);
